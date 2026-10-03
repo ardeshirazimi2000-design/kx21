@@ -42,7 +42,8 @@ export function register(router, { db, platform, limiter, domain }) {
   router.get('/v1/ai/sessions/:id/messages', async (ctx) => {
     requireUser(ctx, 'patient');
     const s = db.get('SELECT * FROM chat_sessions WHERE id = ?', requireUuid(ctx.params.id, 'id'));
-    if (!s || s.user_id !== ctx.user.sub) throw notFound('گفتگو');
+    if (!s) return { body: { mode: 'INFO_MODE', items: [] } }; // not started yet
+    if (s.user_id !== ctx.user.sub) throw notFound('گفتگو');
     const rows = db.all(
       `SELECT id, sender_role, content, ai_meta, created_at FROM messages
        WHERE thread_id = ? AND thread_kind = 'ai' AND created_at > ? ORDER BY created_at, rowid LIMIT 300`,
