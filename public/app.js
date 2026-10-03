@@ -67,6 +67,11 @@ const statusPill = (s) => { const [t, c] = LABELS.status[s] ?? [s, '']; return h
 const urgencyPill = (u) => { const [t, c] = LABELS.urgency[u] ?? [u, '']; return h('span', { class: `pill ${c}` }, t); };
 
 // ---------------- API ----------------
+// Web: same origin. Native app (Capacitor): the server address comes from the build
+// (config.js) or is entered once on the "server" screen and kept on the device.
+const IS_NATIVE = !!window.Capacitor?.isNativePlatform?.();
+let API_BASE = (store.get('api_base') ?? window.TELEHEALTH_API_BASE ?? '').replace(/\/$/, '');
+const apiUrl = (path) => API_BASE + path;
 let session = store.get('session');
 let config = { dev_mode: false };
 
@@ -75,7 +80,7 @@ class ApiErr extends Error {
 }
 
 async function api(method, path, body, headers = {}) {
-  const res = await fetch(path, {
+  const res = await fetch(apiUrl(path), {
     method,
     headers: {
       ...(body ? { 'Content-Type': 'application/json' } : {}),
@@ -97,6 +102,20 @@ const guard = (fn) => async (...args) => {
 
 function setSession(s) { session = s; store.set('session', s); }
 function logout() { setSession(null); store.del('session'); route('login'); }
+
+// PWA install (Android Chrome fires beforeinstallprompt; iOS needs "Add to Home Screen").
+let deferredInstall = null;
+window.addEventListener('beforeinstallprompt', (e) => { e.preventDefault(); deferredInstall = e; });
+function installButton() {
+  if (window.matchMedia('(display-mode: standalone)').matches) return null;
+  const isIos = /iphone|ipad|ipod/i.test(navigator.userAgent);
+  return h('button', {
+    class: 'btn small', type: 'button', onclick: async () => {
+      if (deferredInstall) { deferredInstall.prompt(); deferredInstall = null; return; }
+      toast(isIos ? 'در Safari دکمه «اشتراک‌گذاری» و سپس «Add to Home Screen» را بزنید' : 'از منوی مرورگر گزینه «نصب برنامه» یا «Add to Home screen» را انتخاب کنید');
+    },
+  }, '📲 نصب اپ روی گوشی');
+}
 
 // ---------------- router ----------------
 let current = { view: null, cleanup: [] };
@@ -121,8 +140,8 @@ function renderChrome() {
 function route(view, arg) {
   for (const c of current.cleanup) c();
   current = { view, arg, cleanup: [] };
-  if (view !== 'login' && !session) view = current.view = 'login';
-  location.hash = view === 'login' ? '' : (arg ? `${view}/${arg}` : view);
+  if (!['login', 'server'].includes(view) && !session) view = current.view = 'login';
+  location.hash = ['login', 'server'].includes(view) ? '' : (arg ? `${view}/${arg}` : view);
   renderChrome();
   $app.replaceChildren();
   const fn = VIEWS[view] ?? VIEWS.home;
@@ -167,6 +186,7 @@ VIEWS.login = () => {
       config.dev_mode ? h('div', { class: 'banner info' },
         h('b', {}, 'حساب‌های نمونه: '), 'هر شماره جدید = بیمار · پزشک عمومی ', h('bdi', {}, '09120000001'), ' · پزشک قلب ', h('bdi', {}, '09120000002'),
         ' · اپراتور ', h('bdi', {}, '09120000009'), ' · مدیر ', h('bdi', {}, '09120000010')) : null,
+      IS_NATIVE ? h('button', { class: 'btn small', onclick: () => route('server') }, `سرور: ${API_BASE.replace(/^https?:\/\//, '')} — تغییر`) : installButton(),
     );
     input.focus();
   };
@@ -326,7 +346,7 @@ VIEWS.assistant = async () => {
     const cites = [];
     let options = null;
     try {
-      const res = await fetch('/v1/ai/chat', {
+      const res = await fetch(apiUrl('/v1/ai/chat'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
         body: JSON.stringify({ session_id: sid, message: { type: 'text', content: text }, locale: 'fa-IR' }),
@@ -578,7 +598,7 @@ async function doctorPanel(cid, info, ended) {
       rx.drugs.map((d) => `${d.name} ${d.dose ?? ''}`).join('، '), ' ',
       rx.status === 'draft' ? h('button', {
         class: 'btn primary small', onclick: guard(async () => { await api('POST', `/v1/prescriptions/${rx.id}/sign`, {}); toast('نسخه امضا و صادر شد'); loadRx(); }),
-      }, 'امضا و صدور') : h('a', { href: `/v1/prescriptions/${rx.id}/verify`, target: '_blank' }, 'بررسی اعتبار'))));
+      }, 'امضا و صدور') : h('a', { href: apiUrl(`/v1/prescriptions/${rx.id}/verify`), target: '_blank' }, 'بررسی اعتبار'))));
   };
   const saveDraft = guard(async () => {
     const drugs = [...rows.children].map((r) => Object.fromEntries([...r.querySelectorAll('input')].map((i) => [i.dataset.k, i.value.trim()]))).filter((d) => d.name);
@@ -605,7 +625,7 @@ VIEWS.prescriptions = async () => {
   $app.append(h('div', { class: 'card' }, h('h2', {}, 'نسخه‌های من'),
     r.items.length ? h('ul', { class: 'list' }, r.items.map((rx) => h('li', {},
       h('div', { class: 'row' }, h('b', { class: 'grow' }, rx.doctor_name, ' ', h('span', { class: 'muted' }, `نظام پزشکی ${rx.doctor_license_no}`)),
-        h('span', { class: 'muted' }, fmt.dt(rx.issued_at)), h('a', { class: 'btn small', href: `/v1/prescriptions/${rx.id}/verify`, target: '_blank' }, 'بررسی اعتبار')),
+        h('span', { class: 'muted' }, fmt.dt(rx.issued_at)), h('a', { class: 'btn small', href: apiUrl(`/v1/prescriptions/${rx.id}/verify`), target: '_blank' }, 'بررسی اعتبار')),
       h('table', {}, h('thead', {}, h('tr', {}, h('th', {}, 'دارو'), h('th', {}, 'دوز'), h('th', {}, 'دفعات'), h('th', {}, 'مدت'))),
         h('tbody', {}, rx.drugs.map((d) => h('tr', {}, h('td', {}, d.name), h('td', {}, d.dose ?? '—'), h('td', {}, d.frequency ?? '—'), h('td', {}, d.duration ?? '—'))))),
       rx.notes ? h('p', { class: 'muted' }, rx.notes) : null)))
@@ -783,10 +803,47 @@ VIEWS.staff = async () => {
     h('div', { style: 'margin-top:12px' }, h('button', { class: 'btn primary' }, 'ایجاد'))));
 };
 
+VIEWS.server = () => {
+  const input = h('input', { type: 'url', dir: 'ltr', placeholder: 'https://clinic.example.ir', value: API_BASE });
+  const status = h('div');
+  const save = guard(async (e) => {
+    e.preventDefault();
+    let url = input.value.trim().replace(/\/$/, '');
+    if (!/^https?:\/\//.test(url)) url = `https://${url}`;
+    status.replaceChildren(h('div', { class: 'muted' }, 'در حال بررسی اتصال…'));
+    try {
+      const r = await fetch(`${url}/healthz`, { signal: AbortSignal.timeout(8000) });
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    } catch (err) {
+      status.replaceChildren(h('div', { class: 'banner danger' }, `اتصال به سرور برقرار نشد (${err.message}). آدرس را بررسی کنید.`));
+      return;
+    }
+    API_BASE = url;
+    store.set('api_base', url);
+    setSession(null);
+    await loadConfig();
+    toast('سرور ذخیره شد');
+    route('login');
+  });
+  $app.append(h('form', { class: 'card narrow stack', onsubmit: save },
+    h('h2', {}, 'آدرس سرور کلینیک'),
+    h('p', { class: 'muted' }, 'آدرسی که کلینیک در اختیار شما گذاشته است را وارد کنید.'),
+    input, status, h('button', { class: 'btn primary block' }, 'ذخیره و ادامه')));
+  input.focus();
+};
+
 // ---------------- boot ----------------
+async function loadConfig() {
+  config = await fetch(apiUrl('/v1/config')).then((r) => r.json()).catch(() => config);
+}
+
 (async () => {
-  config = await fetch('/v1/config').then((r) => r.json()).catch(() => config);
+  if (!IS_NATIVE && 'serviceWorker' in navigator && location.protocol !== 'file:') {
+    navigator.serviceWorker.register('/sw.js').catch(() => {});
+  }
+  if (IS_NATIVE && !API_BASE) return route('server');
+  await loadConfig();
   const [view, arg] = location.hash.slice(1).split('/');
   if (!session) return route('login');
-  route(view && VIEWS[view] && view !== 'login' ? view : 'home', arg);
+  route(view && VIEWS[view] && !['login', 'server'].includes(view) ? view : 'home', arg);
 })();

@@ -23,6 +23,43 @@ docker build -t telehealth . && docker run -p 3000:3000 -e MASTER_SECRET=... tel
 
 تنظیمات در `.env.example` آمده است.
 
+## اپ موبایل
+
+دو راه برای نصب روی گوشی وجود دارد. هر دو از همان رابط کاربری `public/` استفاده می‌کنند.
+
+### ۱. اپ اندروید (APK)
+
+پروژهٔ اندروید در `mobile/` با Capacitor ساخته شده است. نام اپ «کلینیک آنلاین» و شناسه‌اش `ir.kx21.clinic` است.
+
+```bash
+cd mobile
+npm install
+API_URL=https://clinic.example.ir npm run build:www   # آدرس سرور داخل اپ ثابت می‌شود (اختیاری)
+npx cap sync android
+cd android && ./gradlew assembleDebug                 # خروجی: app/build/outputs/apk/debug/app-debug.apk
+```
+
+- **ابزار لازم:** JDK 21 و Android SDK (platform 36). مسیر SDK در `ANDROID_HOME` یا `android/local.properties` قرار می‌گیرد.
+- **آدرس سرور:** اگر `API_URL` داده نشود، اپ در اولین اجرا آدرس سرور را می‌پرسد. این آدرس بعداً از صفحهٔ ورود هم قابل تغییر است.
+- **HTTP و HTTPS:** نسخهٔ debug برای آزمایش روی شبکهٔ محلی به سرور `http://` هم وصل می‌شود، مثلاً `http://192.168.1.10:3000`. نسخهٔ release فقط با HTTPS کار می‌کند.
+- **انتشار در فروشگاه:** برای بازار، مایکت یا Google Play نسخهٔ release لازم است:
+  1. یک keystore بسازید و آن را امن نگه دارید.
+  2. فایل `android/keystore.properties` را با کلیدهای `storeFile`، `storePassword`، `keyAlias` و `keyPassword` بسازید.
+  3. دستور `./gradlew assembleRelease` یا `bundleRelease` را اجرا کنید.
+
+  هیچ‌کدام از این دو فایل نباید commit شود.
+- **حفاظت از داده:** پشتیبان‌گیری ابری و انتقال دادهٔ اپ بین دستگاه‌ها غیرفعال است تا داده و توکن ورود از گوشی خارج نشود.
+- **آیکون‌ها:** با `npm run icons` از روی رنگ و طرح برند دوباره ساخته می‌شوند.
+- **سرور:** باید مبدأ اپ را مجاز کند. مقدار پیش‌فرض `CORS_ORIGINS` شامل `https://localhost` (اندروید) و `capacitor://localhost` (iOS) است.
+
+### ۲. نصب از مرورگر (PWA) — اندروید و iPhone
+
+وقتی سرور روی HTTPS منتشر شود، کاربر سایت را در مرورگر گوشی باز می‌کند و آن را نصب می‌کند:
+- **Chrome اندروید:** دکمهٔ «📲 نصب اپ روی گوشی» یا گزینهٔ «Add to Home screen».
+- **Safari آیفون:** گزینهٔ «Add to Home Screen».
+
+PWA شامل manifest و service worker است که پوستهٔ اپ را برای باز شدن سریع cache می‌کند. دادهٔ سلامت هیچ‌وقت cache نمی‌شود. ساخت اپ بومی iOS به macOS و Xcode نیاز دارد (`npx cap add ios`).
+
 ## نگاشت به سند طراحی
 
 | بخش سند | پیاده‌سازی |
@@ -59,6 +96,7 @@ src/
   modules/appointment.js  slots, idempotent booking, cancel/reschedule, notifications
   modules/consultation.js visit room, chat, end, prescriptions
   modules/ai/         assistant state machine, triage rules, guardrails, intent, KB/RAG, LLM, routes
-public/               RTL web client (patient, doctor, operator, admin)
+public/               RTL web client (patient, doctor, operator, admin) + PWA manifest/service worker
+mobile/               Capacitor Android app wrapping public/
 test/                 node:test suites
 ```

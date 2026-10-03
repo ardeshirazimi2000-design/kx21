@@ -1,0 +1,12 @@
+{
+  "appId": "ir.kx21.clinic",
+  "appName": "کلینیک آنلاین",
+  "webDir": "www",
+  "android": {
+    "allowMixedContent": true,
+    "adjustMarginsForEdgeToEdge": "auto"
+  },
+  "server": {
+    "androidScheme": "https"
+  }
+}

@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">کلینیک آنلاین</string>
+    <string name="title_activity_main">کلینیک آنلاین</string>
+    <string name="package_name">ir.kx21.clinic</string>
+    <string name="custom_url_scheme">ir.kx21.clinic</string>
+</resources>

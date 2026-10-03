@@ -1,0 +1,21 @@
+{
+  "name": "kx21-telehealth-mobile",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Android/iOS app shell (Capacitor) for the telehealth web client in ../public",
+  "type": "module",
+  "scripts": {
+    "build:www": "node scripts/build-www.mjs",
+    "icons": "node scripts/gen-icons.mjs",
+    "sync": "npm run build:www && cap sync",
+    "apk:debug": "npm run sync && cd android && ./gradlew assembleDebug",
+    "apk:release": "npm run sync && cd android && ./gradlew assembleRelease"
+  },
+  "dependencies": {
+    "@capacitor/android": "^8.5.2",
+    "@capacitor/core": "^8.5.2"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "^8.5.2"
+  }
+}

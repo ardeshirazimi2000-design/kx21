@@ -211,3 +211,23 @@ test('rate limiting returns 429 with the standard error shape', async () => {
   assert.equal(r.body.code, 'rate_limited');
   assert.ok(r.body.trace_id);
 });
+
+test('CORS allows the native app origin only', async () => {
+  const pre = await fetch(`${t.base}/v1/ai/chat`, {
+    method: 'OPTIONS',
+    headers: { Origin: 'https://localhost', 'Access-Control-Request-Method': 'POST', 'Access-Control-Request-Headers': 'authorization,content-type' },
+  });
+  assert.equal(pre.status, 204);
+  assert.equal(pre.headers.get('access-control-allow-origin'), 'https://localhost');
+  assert.match(pre.headers.get('access-control-allow-headers'), /Idempotency-Key/);
+  const evil = await fetch(`${t.base}/healthz`, { headers: { Origin: 'https://evil.example' } });
+  assert.equal(evil.headers.get('access-control-allow-origin'), null);
+});
+
+test('PWA assets are served', async () => {
+  const m = await fetch(`${t.base}/manifest.webmanifest`);
+  assert.equal(m.headers.get('content-type'), 'application/manifest+json');
+  assert.equal((await m.json()).display, 'standalone');
+  assert.equal((await fetch(`${t.base}/sw.js`)).status, 200);
+  assert.equal((await fetch(`${t.base}/icons/icon-512.png`)).headers.get('content-type'), 'image/png');
+});

@@ -21,7 +21,8 @@ import { seed } from './seed.js';
 
 const PUBLIC_DIR = fileURLToPath(new URL('../public/', import.meta.url));
 const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8',
-  '.svg': 'image/svg+xml', '.json': 'application/json', '.ico': 'image/x-icon' };
+  '.svg': 'image/svg+xml', '.json': 'application/json', '.ico': 'image/x-icon', '.png': 'image/png',
+  '.webmanifest': 'application/manifest+json' };
 
 export function loadConfig(env = process.env) {
   const devMode = env.NODE_ENV !== 'production';
@@ -43,6 +44,9 @@ export function loadConfig(env = process.env) {
     streamDelayMs: Number(env.STREAM_DELAY_MS ?? 12),
     logNotifications: env.LOG_NOTIFICATIONS !== 'false',
     smsProvider: env.SMS_PROVIDER || '',
+    // Origins of the native app WebViews (Capacitor Android / iOS) plus any extra web origins.
+    corsOrigins: (env.CORS_ORIGINS || 'https://localhost,capacitor://localhost,http://localhost')
+      .split(',').map((o) => o.trim()).filter(Boolean),
   };
 }
 
@@ -79,7 +83,10 @@ export function createApp(overrides = {}) {
     if (!full.startsWith(PUBLIC_DIR)) return false;
     try {
       const data = await readFile(full);
-      res.writeHead(200, { 'Content-Type': MIME[extname(full)] || 'application/octet-stream', 'Cache-Control': 'no-cache' });
+      res.writeHead(200, {
+        'Content-Type': MIME[extname(full)] || 'application/octet-stream', 'Cache-Control': 'no-cache',
+        ...(rel === 'sw.js' ? { 'Service-Worker-Allowed': '/' } : {}),
+      });
       res.end(data);
       return true;
     } catch {
@@ -105,6 +112,21 @@ export function createApp(overrides = {}) {
     for (const [k, v] of Object.entries(SECURITY_HEADERS)) res.setHeader(k, v);
     res.setHeader('X-Trace-Id', traceId);
     const url = new URL(req.url, 'http://localhost');
+    const origin = req.headers.origin;
+    if (origin && config.corsOrigins.includes(origin)) {
+      res.setHeader('Access-Control-Allow-Origin', origin);
+      res.setHeader('Vary', 'Origin');
+      res.setHeader('Access-Control-Expose-Headers', 'X-Trace-Id, Idempotent-Replayed');
+      if (req.method === 'OPTIONS') {
+        res.writeHead(204, {
+          'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
+          'Access-Control-Allow-Headers': 'Authorization, Content-Type, Idempotency-Key, X-Tenant-Id, X-Trace-Id',
+          'Access-Control-Max-Age': '600',
+        });
+        res.end();
+        return;
+      }
+    }
     try {
       if (!url.pathname.startsWith('/v1/') && url.pathname !== '/healthz') {
         if (req.method === 'GET' && (await serveStatic(req, res, url.pathname))) return;

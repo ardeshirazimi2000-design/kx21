@@ -48,7 +48,12 @@ a { color: var(--primary); }
   display: flex; align-items: center; justify-content: space-between; gap: 12px;
   padding: 10px 16px; background: var(--surface); border-bottom: 1px solid var(--border);
   position: sticky; top: 0; z-index: 10;
+  /* notch / status bar when installed as an app */
+  padding-top: max(10px, env(safe-area-inset-top), var(--safe-area-inset-top, 0px));
+  padding-inline: max(16px, env(safe-area-inset-left), env(safe-area-inset-right));
 }
+body { padding-bottom: env(safe-area-inset-bottom); }
+input[type=url] { width: 100%; padding: 9px 12px; border-radius: 10px; border: 1px solid var(--border); background: var(--surface); }
 .brand { display: flex; align-items: center; gap: 8px; font-weight: 700; font-size: 17px; }
 .userbox { display: flex; align-items: center; gap: 10px; font-size: 13px; color: var(--muted); }
 .tabs {
