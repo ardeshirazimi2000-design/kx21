@@ -8,7 +8,8 @@ import { formatFaDateTime, toFaDigits } from '../../lib/fa.js';
 import { maskSensitive } from '../../lib/platform.js';
 import { SPECIALTIES } from '../patient.js';
 import { classify } from './intent.js';
-import { assess, detectEmergency, RULE_VERSION } from './triage.js';
+import { assess, detectEmergency } from './triage.js';
+import { assessStructured, summarizeForm } from './triage-structured.js';
 import { checkOutput, EMERGENCY_TEMPLATE, EMERGENCY_HOLD } from './guardrails.js';
 import { kbIndex, KB_VERSION } from './kb.js';
 
@@ -21,8 +22,8 @@ const URGENCY_FA = { self_care: 'مراقبت در منزل', routine: 'غیرف
 
 export function createAssistant({ db, platform, domain, llm, config }) {
   // ---------------- triage engine (service boundary) ----------------
-  function runTriage(ctx, { userId, patientId, input }) {
-    const r = assess(input);
+  function runTriage(ctx, { userId, patientId, input, structured = null }) {
+    const r = structured ?? assess(input);
     const id = uuid();
     db.run(
       `INSERT INTO triage_results (id, tenant_id, patient_id, user_id, symptoms, urgency_level, recommended_specialty,
@@ -181,9 +182,9 @@ export function createAssistant({ db, platform, domain, llm, config }) {
   };
 
   // ---------------- handlers ----------------
-  function enterEmergency(ctx, session, turn, flags, sourceText) {
+  function enterEmergency(ctx, session, turn, flags, sourceText, existingTriageId = null) {
     setMode(session, turn, 'EMERGENCY_MODE', 'red_flag');
-    const t = runTriage(ctx, {
+    const t = existingTriageId ? { id: existingTriageId } : runTriage(ctx, {
       userId: ctx.user.sub, patientId: ctx.user.pid,
       input: { symptoms: [{ name: sourceText.slice(0, 500) }], free_text: sourceText },
     });
@@ -286,13 +287,33 @@ export function createAssistant({ db, platform, domain, llm, config }) {
       age_years: tr.age_years ?? history?.age_years ?? undefined,
       chronic_conditions: history?.chronic_conditions ?? [],
     };
+    return finishTriage(ctx, session, turn, nlu, text, input, null);
+  }
+
+  // Visual triage form submitted from the wizard (body map, discriminators, NRS, vitals).
+  async function handleTriageForm(ctx, session, turn, form) {
+    setMode(session, turn, 'TRIAGE_MODE', 'visual_triage');
+    let history = null;
+    if (ctx.user.pid && domain.patient.activeConsent(ctx.user.pid, 'ai_history_access')) {
+      history = callTool(ctx, session, turn, 'fetch_patient_history', {});
+    }
+    if (form.age_years == null && form.who === 'self' && history?.age_years != null) form.age_years = history.age_years;
+    const structured = assessStructured(form, { chronic_conditions: history?.chronic_conditions ?? [] });
+    const summary = summarizeForm(form);
+    const input = { symptoms: [{ name: summary.slice(0, 500), severity: form.severity, form }], free_text: summary };
+    turn.form = { acuity: structured.acuity, safety_net: structured.safety_net, red_flags: structured.red_flags };
+    return finishTriage(ctx, session, turn, { intent: 'triage_form', entities: {} }, summary, input, structured);
+  }
+
+  async function finishTriage(ctx, session, turn, nlu, text, input, structured) {
     turn.emit('tool_call', { name: 'triage_engine.assess', status: 'started' });
-    const result = runTriage(ctx, { userId: ctx.user.sub, patientId: ctx.user.pid, input });
-    turn.emit('tool_call', { name: 'triage_engine.assess', status: 'ok', result: { urgency_level: result.urgency_level, rule_version: RULE_VERSION } });
+    const result = runTriage(ctx, { userId: ctx.user.sub, patientId: ctx.user.pid, input, structured });
+    turn.emit('tool_call', { name: 'triage_engine.assess', status: 'ok', result: { urgency_level: result.urgency_level, rule_version: result.rule_version } });
+    if (structured) turn.emit('triage_result', { triage_result_id: result.id, urgency_level: result.urgency_level, ...turn.form, recommended_specialty: result.recommended_specialty });
     turn.tools.push({ name: 'triage_engine.assess', status: 'ok', result: { id: result.id, urgency_level: result.urgency_level } });
     turn.triage = { id: result.id, urgency_level: result.urgency_level, rule_version: result.rule_version };
 
-    if (result.urgency_level === 'emergency') return enterEmergency(ctx, session, turn, result.red_flags, input.free_text);
+    if (result.urgency_level === 'emergency') return enterEmergency(ctx, session, turn, result.red_flags, input.free_text, result.id);
 
     const spLabel = SPECIALTIES[result.recommended_specialty];
     const head = `ارزیابی اولیه (بر اساس قواعد تأییدشده، نه تشخیص): سطح فوریت «${URGENCY_FA[result.urgency_level]}» و تخصص پیشنهادی «${spLabel}».`;
@@ -303,17 +324,27 @@ export function createAssistant({ db, platform, domain, llm, config }) {
       session.state = { pendingOffer: offer };
       const tip = kbIndex.search(input.free_text, 1)[0];
       if (tip) turn.citations = [{ id: tip.id, title: tip.title, kb_version: KB_VERSION }];
-      return turn.reply(`${head}\n${tip ? tip.text + '\n' : ''}اگر علائم بدتر شد یا مایل به مشورت با پزشک هستید، بگویید «بله» تا برایتان نوبت بگیرم.`);
+      const net = structured ? `${structured.safety_net.map((x) => `• ${x}`).join('\n')}\n` : '';
+      return turn.reply(`${head}\n${tip ? tip.text + '\n' : ''}${net}اگر علائم بدتر شد یا مایل به مشورت با پزشک هستید، بگویید «بله» تا برایتان نوبت بگیرم.`);
     }
 
     setMode(session, turn, 'BOOKING_MODE', 'triage_' + result.urgency_level);
     session.state = { booking: offer };
-    turn.prefix = `${head}${result.urgency_level === 'urgent' ? '\nتوصیه می‌شود در اولین فرصت ویزیت شوید؛ اگر حالتان بدتر شد با ۱۱۵ تماس بگیرید.' : ''}`;
+    const net = structured ? `\n${structured.safety_net.map((x) => `• ${x}`).join('\n')}` : '';
+    turn.prefix = `${head}${result.urgency_level === 'urgent' ? '\nتوصیه می‌شود در اولین فرصت ویزیت شوید؛ اگر حالتان بدتر شد با ۱۱۵ تماس بگیرید.' : ''}${net}`;
     return handleBooking(ctx, session, turn, { ...nlu, intent: 'booking_request' }, text);
   }
 
   function offerSlots(ctx, session, turn, b) {
-    const { slots } = callTool(ctx, session, turn, 'check_availability', { specialty: b.doctor_id ? undefined : b.specialty, doctor_id: b.doctor_id });
+    let { slots } = callTool(ctx, session, turn, 'check_availability', { specialty: b.doctor_id ? undefined : b.specialty, doctor_id: b.doctor_id });
+    if (!slots.length && !b.doctor_id && b.specialty && b.specialty !== 'general') {
+      // No specialist free: a general practitioner can see the patient first and refer.
+      ({ slots } = callTool(ctx, session, turn, 'check_availability', { specialty: 'general' }));
+      if (slots.length) {
+        turn.prefix = `${turn.prefix ? `${turn.prefix}\n` : ''}فعلاً پزشک «${SPECIALTIES[b.specialty]}» زمان آزاد ندارد؛ پزشک عمومی می‌تواند ابتدا شما را ویزیت و در صورت نیاز ارجاع دهد.`;
+        b.specialty = 'general';
+      }
+    }
     if (!slots.length) {
       const prevMode = session.mode;
       setMode(session, turn, 'INFO_MODE', 'no_availability');
@@ -416,7 +447,7 @@ export function createAssistant({ db, platform, domain, llm, config }) {
   // ---------------- main entry ----------------
   const busy = new Set();
 
-  async function processMessage(ctx, sessionId, text, emit) {
+  async function processMessage(ctx, sessionId, text, emit, form = null) {
     if (busy.has(sessionId)) throw new ApiError(409, 'session_busy', 'پیام قبلی هنوز در حال پردازش است');
     busy.add(sessionId);
     try {
@@ -428,10 +459,12 @@ export function createAssistant({ db, platform, domain, llm, config }) {
       };
       saveMessage(ctx, session, 'patient', text);
 
-      const nlu = classify(text);
+      const nlu = form ? { intent: 'triage_form', confidence: 1, entities: {} } : classify(text);
       const flags = detectEmergency(text); // fixed rule, before any model
       if (session.mode === 'EMERGENCY_MODE') {
         turn.reply(EMERGENCY_HOLD, { fixed_template: 'emergency_hold_v1' });
+      } else if (form) {
+        await handleTriageForm(ctx, session, turn, form);
       } else if (flags.length) {
         enterEmergency(ctx, session, turn, flags, text);
       } else if (nlu.intent === 'human_request') {

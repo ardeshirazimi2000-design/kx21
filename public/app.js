@@ -1,6 +1,8 @@
 // Web client (Next.js in the design doc; dependency-free SPA here). RTL Persian UI for
 // patients, doctors and operators/admins against the /v1 REST + SSE API.
 
+import { openTriageWizard, triageResultCard } from './triage-wizard.js';
+
 // ---------------- utilities ----------------
 const $app = document.getElementById('app');
 const $tabs = document.getElementById('tabs');
@@ -297,9 +299,9 @@ VIEWS.assistant = async () => {
     quick.replaceChildren();
     const qs = options?.length
       ? options.map((o) => [`${fa(o.option)}. ${o.doctor_name} — ${fmt.short(o.starts_at)}`, String(o.option)])
-      : m === 'INFO_MODE' ? [['علائمم را بررسی کن', 'چند روزه حالم خوب نیست و علائم دارم'], ['می‌خواهم نوبت بگیرم', 'می‌خواهم نوبت بگیرم'], ['نسخه چطور صادر می‌شود؟', 'نسخه الکترونیک چطور صادر میشه؟'], ['صحبت با اپراتور', 'می‌خواهم با اپراتور صحبت کنم']]
+      : m === 'INFO_MODE' ? [['🩺 بررسی علائم با نقشه بدن', null], ['می‌خواهم نوبت بگیرم', 'می‌خواهم نوبت بگیرم'], ['نسخه چطور صادر می‌شود؟', 'نسخه الکترونیک چطور صادر میشه؟'], ['صحبت با اپراتور', 'می‌خواهم با اپراتور صحبت کنم']]
       : m === 'FOLLOWUP_MODE' ? [['نوبت پیگیری', 'نوبت پیگیری می‌خواهم']] : [];
-    for (const [label, text] of qs) quick.append(h('button', { class: 'btn small', onclick: () => send(text) }, label));
+    for (const [label, text] of qs) quick.append(h('button', { class: `btn small${text === null ? ' primary' : ''}`, onclick: () => (text === null ? startWizard() : send(text)) }, label));
   };
 
   const bubble = (role, text, extra = {}) => {
@@ -332,10 +334,12 @@ VIEWS.assistant = async () => {
     }
   };
 
-  async function send(text) {
+  const startWizard = guard(() => openTriageWizard({ h, api, toast, fa, onSubmit: (form) => send('📋 فرم بررسی علائم ارسال شد', form) }));
+
+  async function send(text, form = null) {
     text = (text ?? input.value).trim();
     if (!text || busy) return;
-    busy = true; sendBtn.disabled = true; input.value = '';
+    busy = true; sendBtn.disabled = true; if (!form) input.value = '';
     bubble('patient', text);
     const botEl = bubble('assistant', '');
     const body = botEl.querySelector('.body');
@@ -349,7 +353,7 @@ VIEWS.assistant = async () => {
       const res = await fetch(apiUrl('/v1/ai/chat'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
-        body: JSON.stringify({ session_id: sid, message: { type: 'text', content: text }, locale: 'fa-IR' }),
+        body: JSON.stringify({ session_id: sid, message: form ? { type: 'triage_form', form } : { type: 'text', content: text }, locale: 'fa-IR' }),
       });
       if (!res.ok) { const j = await res.json().catch(() => ({})); throw new ApiErr(res.status, j); }
       const reader = res.body.getReader();
@@ -367,6 +371,7 @@ VIEWS.assistant = async () => {
           if (ev === 'token') { body.textContent += data.text; log.scrollTop = log.scrollHeight; }
           else if (ev === 'tool_call' && data.status !== 'started') chips.append(h('span', { class: 'chip' }, `${data.status === 'ok' ? '✓' : '✗'} ${LABELS.tool[data.name] ?? data.name}`));
           else if (ev === 'mode_change') setMode(data.to);
+          else if (ev === 'triage_result') log.insertBefore(triageResultCard(h, data), chips);
           else if (ev === 'citation') cites.push(data.title);
           else if (ev === 'options') options = data.items;
           else if (ev === 'escalation') chips.append(h('span', { class: 'chip' }, data.kind === 'emergency' ? '🚨 اپراتور مطلع شد' : '👤 به اپراتور ارجاع شد'));
@@ -397,7 +402,7 @@ VIEWS.assistant = async () => {
   const newChat = () => { store.set(sidKey, crypto.randomUUID()); route('assistant'); };
 
   $app.append(banner, h('div', { class: 'card chat' },
-    h('div', { class: 'chat-head' }, h('b', {}, 'دستیار هوشمند'), modeBadge, h('span', { class: 'spacer' }), h('button', { class: 'btn small', onclick: newChat }, 'گفتگوی جدید')),
+    h('div', { class: 'chat-head' }, h('b', {}, 'دستیار هوشمند'), modeBadge, h('span', { class: 'spacer' }), h('button', { class: 'btn small', onclick: () => startWizard() }, '🩺 بررسی علائم'), h('button', { class: 'btn small', onclick: newChat }, 'گفتگوی جدید')),
     log, quick, h('div', { class: 'chat-input' }, input, sendBtn)),
     h('p', { class: 'muted' }, 'دستیار تشخیص نمی‌دهد و دارو تجویز نمی‌کند. در موارد اورژانسی با ۱۱۵ تماس بگیرید.'));
   await loadHistory();

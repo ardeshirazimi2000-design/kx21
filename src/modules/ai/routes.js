@@ -2,6 +2,7 @@
 import { ApiError, badRequest, notFound, forbidden, openSse, requireFields, requireUuid } from '../../lib/http.js';
 import { uuid, nowIso, parseJson } from '../../lib/db.js';
 import { checkInput } from './guardrails.js';
+import { catalog, validateForm, summarizeForm, FormError } from './triage-structured.js';
 import { requireUser } from '../auth.js';
 
 export function register(router, { db, platform, limiter, domain }) {
@@ -13,11 +14,19 @@ export function register(router, { db, platform, limiter, domain }) {
     limiter.hit(`ai-tenant:${ctx.tenantId}`, 3000, 60_000);
     requireFields(ctx.body, ['session_id', 'message']);
     const sessionId = requireUuid(ctx.body.session_id, 'session_id');
-    const { type, content } = ctx.body.message ?? {};
-    if (type === 'voice') throw new ApiError(422, 'voice_not_supported', 'پیام صوتی در فاز بعد (STT) فعال می‌شود');
-    if (type === 'image') throw new ApiError(422, 'image_not_supported', 'ارسال تصویر فقط در اتاق ویزیت با پزشک ممکن است');
-    if (type !== 'text') throw badRequest('نوع پیام نامعتبر است');
-    const g = checkInput(content);
+    const { type, content, form } = ctx.body.message ?? {};
+    let parsedForm = null;
+    let text = content;
+    if (type === 'triage_form') {
+      try { parsedForm = validateForm(form); } catch (e) {
+        if (e instanceof FormError) throw badRequest(e.message, 'invalid_triage_form');
+        throw e;
+      }
+      text = summarizeForm(parsedForm).slice(0, 2000);
+    } else if (type === 'voice') throw new ApiError(422, 'voice_not_supported', 'پیام صوتی در فاز بعد (STT) فعال می‌شود');
+    else if (type === 'image') throw new ApiError(422, 'image_not_supported', 'ارسال تصویر فقط در اتاق ویزیت با پزشک ممکن است');
+    else if (type !== 'text') throw badRequest('نوع پیام نامعتبر است');
+    const g = checkInput(text);
     if (!g.ok) throw badRequest(g.message, `input_${g.code}`);
     if (g.injection) platform.audit(ctx, 'ai.guardrail.injection_attempt', `ai_session:${sessionId}`);
 
@@ -28,7 +37,7 @@ export function register(router, { db, platform, limiter, domain }) {
     let closed = false;
     ctx.res.on('close', () => { closed = true; });
     const emit = (event, data) => { if (!closed) sse.send(event, data); };
-    await assistant.processMessage(ctx, sessionId, String(content).trim(), emit);
+    await assistant.processMessage(ctx, sessionId, String(text).trim(), emit, parsedForm);
     sse.end();
     return null; // response already written
   });
@@ -62,6 +71,12 @@ export function register(router, { db, platform, limiter, domain }) {
   });
 
   // ---- Triage Engine ----
+  // Catalogue for the visual triage wizard (regions, discriminator questions, acuity scale).
+  router.get('/v1/ai/triage/catalog', async (ctx) => {
+    requireUser(ctx);
+    return { body: catalog() };
+  });
+
   router.post('/v1/ai/triage', async (ctx) => {
     requireUser(ctx, 'patient');
     const { symptoms } = ctx.body;
