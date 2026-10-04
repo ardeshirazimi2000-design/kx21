@@ -70,23 +70,37 @@ fi
 echo "   commit $(git -C "$APP_DIR" rev-parse --short HEAD)"
 
 # ---------------------------------------------------------------- config
+systemctl stop kx21 2>/dev/null || true
+[ -f "$ENV_FILE" ] && PORT=$(grep -E '^PORT=' "$ENV_FILE" | cut -d= -f2 || echo "$PORT")
+port_busy() {
+  (exec 3<>"/dev/tcp/127.0.0.1/$1") 2>/dev/null && return 0
+  command -v ss >/dev/null && ss -ltnH 2>/dev/null | awk '{print $4}' | grep -qE "[:.]$1\$"
+}
+if port_busy "$PORT"; then
+  OLD=$PORT
+  for P in 8090 8091 8092 8093 8094 8095 8096 8097 8098 8099 9090 9191; do port_busy "$P" || { PORT=$P; break; }; done
+  [ "$PORT" != "$OLD" ] || die "no free port found; set PORT=... and re-run"
+  echo "   port $OLD is used by another program -> using port $PORT"
+fi
 if [ ! -f "$ENV_FILE" ]; then
   say "Creating $ENV_FILE (secrets generated once, keep this file)"
-  BIND=0.0.0.0; [ -n "$DOMAIN" ] && BIND=127.0.0.1
   cat > "$ENV_FILE" <<EOF
 # Telehealth server settings. Edit, then: systemctl restart kx21
 # NODE_ENV=development shows OTP codes on screen because no SMS provider is connected yet.
 # This is a TEST deployment: do not enter real patient data until SMS + production mode are set.
 NODE_ENV=development
 MASTER_SECRET=$(head -c 48 /dev/urandom | base64 | tr -d '\n/+=')
-HOST=$BIND
+HOST=0.0.0.0
 PORT=$PORT
 DB_PATH=$DATA_DIR/telehealth.db
 LOG_NOTIFICATIONS=false
 EOF
   chmod 600 "$ENV_FILE"
 fi
-if [ -n "$DOMAIN" ]; then sed -i 's/^HOST=.*/HOST=127.0.0.1/' "$ENV_FILE"; fi
+sed -i "s/^PORT=.*/PORT=$PORT/" "$ENV_FILE"
+# Behind Caddy only localhost may reach the app; without a domain it listens publicly.
+if [ -n "$DOMAIN" ]; then BIND=127.0.0.1; else BIND=0.0.0.0; fi
+sed -i "s/^HOST=.*/HOST=$BIND/" "$ENV_FILE"
 
 # ---------------------------------------------------------------- service
 say "Installing systemd service kx21"
