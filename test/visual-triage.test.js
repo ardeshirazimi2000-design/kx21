@@ -97,3 +97,13 @@ test('API: invalid form is rejected with 422', async () => {
   assert.equal(r.status, 422);
   assert.equal(r.body.code, 'invalid_triage_form');
 });
+
+test('vitals read from a Bluetooth device are labelled in the summary; unknown fields dropped', async () => {
+  const { summarizeForm } = await import('../src/modules/ai/triage-structured.js');
+  const f = base({ symptoms: ['palpitations'], vitals: { sys: 150, dia: 95, hr: 88 },
+    vitals_source: { device: 'BM57', fields: ['sys', 'dia', 'hr', 'spo2'], flags: { irregular_pulse: true } } });
+  assert.deepEqual(f.vitals_source.fields, ['sys', 'dia', 'hr']);
+  const s = summarizeForm(f);
+  assert.match(s, /BM57/);
+  assert.match(s, /ضربان نامنظم/);
+});

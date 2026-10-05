@@ -256,3 +256,6 @@ td.ltr { direction: ltr; text-align: left; font-family: ui-monospace, monospace;
 /* Jalali date picker: day / month / year (order follows RTL reading) */
 .jdate { display: grid; grid-template-columns: 1fr 1.6fr 1.2fr; gap: 6px; }
 .jdate select { min-height: 42px; }
+.ble-box { border: 1px dashed var(--border); border-radius: 12px; padding: 12px; margin: 10px 0 14px; }
+.ble-box p { margin: 6px 0 0; }
+.ok-banner { background: var(--ok-soft); color: var(--ok); margin: 8px 0 0; }

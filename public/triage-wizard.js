@@ -3,6 +3,8 @@
 // question interrupts the flow immediately with the 115 screen (no waiting for the last step).
 // Body-map sides are the PATIENT's sides and are never mirrored by the RTL layout.
 
+import { bleAvailable, readFromDevice } from './ble-health.js';
+
 const STEPS = ['بیمار', 'محل مشکل', 'سؤالات ایمنی', 'شدت و زمان', 'علائم حیاتی', 'مرور و ارسال'];
 const DURATION_LABELS = { lt_6h: 'کمتر از ۶ ساعت', lt_24h: 'کمتر از یک روز', d1_3: '۱ تا ۳ روز', d4_7: '۴ تا ۷ روز', w1_4: '۱ تا ۴ هفته', gt_month: 'بیش از یک ماه' };
 const NRS_ANCHORS = { 0: 'بدون درد', 2: 'خفیف', 5: 'متوسط', 7: 'شدید', 10: 'بدترین درد ممکن' };
@@ -52,7 +54,7 @@ export async function openTriageWizard({ h, api, toast, fa, onSubmit }) {
 
   const form = {
     who: 'self', age_years: ageFromDob(profile?.dob), sex: profile?.gender ?? null, may_be_pregnant: false,
-    regions: [], symptoms: [], answers: {}, severity: null, onset: null, duration: null, vitals: {}, note: '',
+    regions: [], symptoms: [], answers: {}, severity: null, onset: null, duration: null, vitals: {}, vitals_source: null, note: '',
   };
   let step = 0;
   let view = 'front';
@@ -179,10 +181,40 @@ export async function openTriageWizard({ h, api, toast, fa, onSubmit }) {
       const inp = (key, label, unit, ph) => h('div', {}, h('label', { for: `tw-${key}` }, `${label} (${unit})`),
         h('input', { id: `tw-${key}`, type: 'number', inputmode: 'decimal', step: 'any', placeholder: ph, value: form.vitals[key] ?? '',
           min: cat.vital_ranges[key][0], max: cat.vital_ranges[key][1],
-          oninput: (e) => { if (e.target.value === '') delete form.vitals[key]; else form.vitals[key] = Number(e.target.value); refreshFoot(); } }));
+          oninput: (e) => {
+            if (e.target.value === '') delete form.vitals[key]; else form.vitals[key] = Number(e.target.value);
+            // a manual edit means this field no longer comes from the device
+            if (form.vitals_source) form.vitals_source.fields = form.vitals_source.fields.filter((f) => f !== key);
+            refreshFoot();
+          } }));
+      const status = h('p', { class: 'muted small', role: 'status' });
+      const readBle = async (e) => {
+        const btn = e.currentTarget;
+        btn.disabled = true;
+        try {
+          const r = await readFromDevice({ onStatus: (m) => { status.textContent = m; } });
+          const ageH = r.measured_at ? (Date.now() - Date.parse(r.measured_at)) / 36e5 : 0;
+          if (ageH > 6) { status.textContent = `آخرین اندازه‌گیری دستگاه مربوط به ${Math.round(ageH)} ساعت پیش است؛ لطفاً دوباره اندازه بگیرید.`; return; }
+          if (!Object.keys(r.vitals).length) { status.textContent = 'دستگاه مقدار معتبری ارسال نکرد؛ اندازه‌گیری را تکرار کنید.'; return; }
+          Object.assign(form.vitals, r.vitals);
+          form.vitals_source = { device: r.device, fields: Object.keys(r.vitals), measured_at: r.measured_at, flags: r.flags };
+          render();
+        } catch (err) {
+          status.textContent = err?.name === 'NotFoundError' || /cancel/i.test(err?.message ?? '') ? 'انتخاب دستگاه لغو شد.' : (err?.message || 'اتصال به دستگاه ناموفق بود');
+        } finally { btn.disabled = false; }
+      };
+      const src = form.vitals_source?.fields.length ? form.vitals_source : null;
       return [
         h('h3', {}, 'علائم حیاتی (اختیاری)'),
-        h('div', { class: 'banner info' }, 'فقط اعدادی را وارد کنید که همین حالا با دستگاه (دماسنج، فشارسنج یا پالس‌اکسیمتر) اندازه گرفته‌اید. گوشی نمی‌تواند این مقادیر را اندازه بگیرد. اگر دستگاه ندارید، این مرحله را رد کنید.'),
+        h('div', { class: 'banner info' }, 'فقط اعدادی را وارد کنید که با دستگاه (دماسنج، فشارسنج یا پالس‌اکسیمتر) اندازه گرفته شده‌اند. خود گوشی این مقادیر را اندازه نمی‌گیرد. اگر دستگاه ندارید، این مرحله را رد کنید.'),
+        bleAvailable() ? h('div', { class: 'ble-box' },
+          h('button', { type: 'button', class: 'btn primary', onclick: readBle }, '📶 خواندن خودکار از دستگاه بلوتوثی'),
+          h('p', { class: 'muted small' }, 'فشارسنج Beurer (سری BM/BC) یا دستگاه دیگر با بلوتوث: بلوتوث گوشی را روشن کنید، دکمه بالا را بزنید، دستگاه را انتخاب و سپس اندازه‌گیری کنید.'),
+          status,
+          src ? h('div', { class: 'banner ok-banner' }, `✓ از دستگاه «${src.device}» دریافت شد`,
+            src.measured_at ? ` — ${new Intl.DateTimeFormat('fa-IR-u-ca-persian', { timeZone: 'Asia/Tehran', hour: '2-digit', minute: '2-digit', day: 'numeric', month: 'long' }).format(new Date(src.measured_at))}` : '',
+            src.flags?.irregular_pulse ? h('div', {}, '⚠️ دستگاه ضربان نامنظم گزارش کرده است.') : null,
+            src.flags?.body_movement || src.flags?.cuff_fit_problem ? h('div', {}, 'دستگاه حرکت بدن یا بستن نادرست کاف را گزارش کرده؛ بهتر است دوباره اندازه بگیرید.') : null) : null) : null,
         h('div', { class: 'grid2' }, inp('temp_c', 'دمای بدن', '°C', 'مثلاً 37.5'), inp('spo2', 'اکسیژن خون', '%', 'مثلاً 97'),
           inp('sys', 'فشار خون بالا (سیستولیک)', 'mmHg', 'مثلاً 120'), inp('dia', 'فشار خون پایین (دیاستولیک)', 'mmHg', 'مثلاً 80'), inp('hr', 'ضربان قلب', 'در دقیقه', 'مثلاً 75')),
       ];

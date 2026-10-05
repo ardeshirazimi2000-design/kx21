@@ -150,6 +150,19 @@ export function validateForm(f) {
     if (!Number.isFinite(n) || n < lo || n > hi) throw new FormError(`مقدار ${k} خارج از محدوده قابل قبول است`);
     out.vitals[k] = n;
   }
+  // Where the vitals came from: a Bluetooth medical device (read by the app) or manual entry.
+  const vs = f.vitals_source;
+  if (vs && typeof vs === 'object' && typeof vs.device === 'string') {
+    const fields = (Array.isArray(vs.fields) ? vs.fields : []).filter((k) => k in out.vitals);
+    if (fields.length) {
+      out.vitals_source = {
+        device: vs.device.slice(0, 60),
+        fields,
+        measured_at: typeof vs.measured_at === 'string' && !isNaN(Date.parse(vs.measured_at)) ? new Date(vs.measured_at).toISOString() : null,
+        irregular_pulse: !!vs.flags?.irregular_pulse,
+      };
+    }
+  }
   out.note = String(f.note ?? '').trim().slice(0, 500);
   return out;
 }
@@ -258,7 +271,11 @@ export function summarizeForm(f) {
   if (f.vitals.spo2 != null) vit.push(`اکسیژن ${f.vitals.spo2}٪`);
   if (f.vitals.sys != null) vit.push(`فشار ${f.vitals.sys}/${f.vitals.dia ?? '?'}`);
   if (f.vitals.hr != null) vit.push(`ضربان ${f.vitals.hr}`);
-  if (vit.length) parts.push(`علائم حیاتی (اندازه‌گیری با دستگاه): ${vit.join('، ')}`);
+  if (vit.length) {
+    const src = f.vitals_source ? `خودکار از دستگاه بلوتوثی «${f.vitals_source.device}»` : 'واردشده توسط بیمار';
+    parts.push(`علائم حیاتی (${src}): ${vit.join('، ')}`);
+    if (f.vitals_source?.irregular_pulse) parts.push('دستگاه فشارسنج ضربان نامنظم گزارش کرده است.');
+  }
   if (f.note) parts.push(`توضیح: ${f.note}`);
   return parts.join('\n');
 }

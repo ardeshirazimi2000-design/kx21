@@ -12,6 +12,7 @@
     "apk:release": "npm run sync && cd android && ./gradlew assembleRelease"
   },
   "dependencies": {
+    "@capacitor-community/bluetooth-le": "^8.3.0",
     "@capacitor/android": "^8.5.2",
     "@capacitor/core": "^8.5.2"
   },
