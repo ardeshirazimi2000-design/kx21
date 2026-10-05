@@ -2,6 +2,7 @@
 // patients, doctors and operators/admins against the /v1 REST + SSE API.
 
 import { openTriageWizard, triageResultCard } from './triage-wizard.js';
+import { jalaliPicker, formatJalaliDate, todayJalali, isoToJalali, MONTHS } from './jalali.js';
 
 // ---------------- utilities ----------------
 const $app = document.getElementById('app');
@@ -43,8 +44,8 @@ const fa = (n) => String(n).replace(/\d/g, (d) => '۰۱۲۳۴۵۶۷۸۹'[d]);
 const fmt = {
   dt: (iso) => new Intl.DateTimeFormat('fa-IR-u-ca-persian', { timeZone: 'Asia/Tehran', weekday: 'short', day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' }).format(new Date(iso)),
   day: (iso) => new Intl.DateTimeFormat('fa-IR-u-ca-persian', { timeZone: 'Asia/Tehran', weekday: 'long', day: 'numeric', month: 'long' }).format(new Date(iso)),
-  time: (iso) => new Intl.DateTimeFormat('fa-IR', { timeZone: 'Asia/Tehran', hour: '2-digit', minute: '2-digit' }).format(new Date(iso)),
-  short: (iso) => new Intl.DateTimeFormat('fa-IR', { timeZone: 'Asia/Tehran', month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }).format(new Date(iso)),
+  time: (iso) => new Intl.DateTimeFormat('fa-IR-u-ca-persian', { timeZone: 'Asia/Tehran', hour: '2-digit', minute: '2-digit' }).format(new Date(iso)),
+  short: (iso) => new Intl.DateTimeFormat('fa-IR-u-ca-persian', { timeZone: 'Asia/Tehran', month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }).format(new Date(iso)),
 };
 const tehranDayKey = (iso) => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Tehran' }).format(new Date(iso));
 
@@ -235,7 +236,7 @@ VIEWS.onboarding = () => {
   const f = {
     full_name: h('input', { type: 'text', autocomplete: 'name' }),
     national_id: h('input', { type: 'text', dir: 'ltr', inputmode: 'numeric', maxlength: 10 }),
-    dob: h('input', { type: 'date', max: new Date().toISOString().slice(0, 10) }),
+    dob: { value: null }, // Gregorian ISO from the Jalali picker
     gender: h('select', {}, h('option', { value: '' }, '—'), h('option', { value: 'female' }, 'زن'), h('option', { value: 'male' }, 'مرد'), h('option', { value: 'other' }, 'سایر')),
     allergies: h('input', { type: 'text', placeholder: 'مثلاً پنی‌سیلین، بادام زمینی' }),
     chronic: h('input', { type: 'text', placeholder: 'مثلاً دیابت، فشار خون' }),
@@ -245,6 +246,7 @@ VIEWS.onboarding = () => {
   const submit = guard(async (e) => {
     e.preventDefault();
     if (!consents.telehealth.checked) return toast('برای استفاده از ویزیت آنلاین، پذیرش رضایت‌نامه ویزیت از راه دور لازم است', true);
+    if (!f.dob.value) return toast('تاریخ تولد را کامل انتخاب کنید (روز، ماه و سال)', true);
     await api('PUT', '/v1/patients/me', {
       full_name: f.full_name.value, national_id: f.national_id.value, dob: f.dob.value,
       gender: f.gender.value || null, allergies: split(f.allergies.value), chronic_conditions: split(f.chronic.value),
@@ -260,7 +262,7 @@ VIEWS.onboarding = () => {
     h('div', { class: 'grid2' },
       h('div', {}, h('label', {}, 'نام و نام خانوادگی *'), f.full_name),
       h('div', {}, h('label', {}, 'کد ملی *'), f.national_id),
-      h('div', {}, h('label', {}, 'تاریخ تولد *'), f.dob),
+      h('div', {}, h('label', { for: 'dob-d' }, 'تاریخ تولد (شمسی) *'), jalaliPicker(h, { id: 'dob', label: 'تاریخ تولد', minYear: todayJalali().jy - 120, onchange: (iso) => { f.dob.value = iso; } })),
       h('div', {}, h('label', {}, 'جنسیت'), f.gender),
       h('div', {}, h('label', {}, 'حساسیت‌ها (با ویرگول جدا کنید)'), f.allergies),
       h('div', {}, h('label', {}, 'بیماری‌های زمینه‌ای'), f.chronic)),
@@ -571,7 +573,7 @@ async function doctorPanel(cid, info, ended) {
     $app.append(h('div', { class: 'card' }, h('h2', {}, 'پرونده بیمار'),
       h('div', { class: 'grid2' },
         h('div', {}, h('label', {}, 'نام'), patient.full_name),
-        h('div', {}, h('label', {}, 'تاریخ تولد'), patient.dob),
+        h('div', {}, h('label', {}, 'تاریخ تولد'), formatJalaliDate(patient.dob)),
         h('div', {}, h('label', {}, 'حساسیت‌ها'), patient.allergies.join('، ') || '—'),
         h('div', {}, h('label', {}, 'بیماری‌های زمینه‌ای'), patient.chronic_conditions.join('، ') || '—')),
       patient.triage_results.length ? h('div', {}, h('h3', { style: 'margin-top:12px' }, 'نتایج triage'),
@@ -658,6 +660,14 @@ VIEWS.inbox = async () => {
       : h('div', { class: 'empty' }, 'پیامی نیست.')));
 };
 
+// "2026-10-v1" → "نسخه ۱ — مهر ۱۴۰۵"
+function consentVersionLabel(v) {
+  const m = /^(\d{4})-(\d{2})-v(\d+)$/.exec(v ?? '');
+  if (!m) return v;
+  const j = isoToJalali(`${m[1]}-${m[2]}-15`);
+  return `نسخه ${fa(m[3])} — ${MONTHS[j.jm - 1]} ${fa(j.jy)}`;
+}
+
 // ---------- profile & privacy ----------
 VIEWS.profile = async () => {
   const p = await api('GET', '/v1/patients/me');
@@ -686,19 +696,28 @@ VIEWS.profile = async () => {
     h('div', { class: 'card' }, h('h2', {}, 'پروفایل'),
       h('div', { class: 'grid2' },
         h('div', {}, h('label', {}, 'نام'), p.full_name), h('div', {}, h('label', {}, 'موبایل'), h('bdi', {}, p.phone)),
-        h('div', {}, h('label', {}, 'کد ملی'), h('bdi', {}, p.national_id)), h('div', {}, h('label', {}, 'تاریخ تولد'), p.dob),
+        h('div', {}, h('label', {}, 'کد ملی'), h('bdi', {}, p.national_id)), h('div', {}, h('label', {}, 'تاریخ تولد'), formatJalaliDate(p.dob)),
         h('div', {}, h('label', {}, 'حساسیت‌ها'), p.allergies.join('، ') || '—'), h('div', {}, h('label', {}, 'بیماری‌های زمینه‌ای'), p.chronic_conditions.join('، ') || '—'))),
-    h('div', { class: 'card' }, h('h2', {}, 'رضایت‌نامه‌ها'), h('p', { class: 'muted' }, `نسخه فعلی: ${c.current_version}`), c.items.map(toggle)),
+    h('div', { class: 'card' }, h('h2', {}, 'رضایت‌نامه‌ها'), h('p', { class: 'muted' }, `نسخه فعلی: ${consentVersionLabel(c.current_version)}`), c.items.map(toggle)),
     h('div', { class: 'card row' }, h('div', { class: 'grow' }, h('h3', {}, 'داده‌های من'), h('span', { class: 'muted' }, 'دریافت نسخه کامل داده‌ها یا حذف حساب.')),
       h('button', { class: 'btn', onclick: exportData }, 'دریافت داده‌ها'), h('button', { class: 'btn danger', onclick: erase }, 'حذف حساب')));
 };
 
 // ---------- doctor calendar ----------
 VIEWS.calendar = async () => {
-  const today = new Date().toISOString().slice(0, 10);
-  const date = h('input', { type: 'date', min: today, value: today });
-  const from = h('input', { type: 'time', value: '16:00' });
-  const to = h('input', { type: 'time', value: '19:00' });
+  // Next 60 days in Tehran, labelled with the Jalali date (value stays Gregorian ISO).
+  const date = h('select', {}, Array.from({ length: 60 }, (_, i) => {
+    const d = new Date(Date.now() + i * 864e5);
+    return h('option', { value: tehranDayKey(d) }, `${i === 0 ? 'امروز — ' : i === 1 ? 'فردا — ' : ''}${fmt.day(d)}`);
+  }));
+  // 24-hour Persian time selects (native time inputs show English AM/PM on many phones).
+  const timeSelect = (def) => h('select', {}, Array.from({ length: (24 - 6) * 4 }, (_, i) => {
+    const mins = 6 * 60 + i * 15;
+    const v = `${String(Math.floor(mins / 60) % 24).padStart(2, '0')}:${String(mins % 60).padStart(2, '0')}`;
+    return h('option', { value: v, selected: v === def }, fa(v));
+  }));
+  const from = timeSelect('16:00');
+  const to = timeSelect('19:00');
   const dur = h('select', {}, [15, 20, 30, 45, 60].map((m) => h('option', { value: m, selected: m === 30 }, `${fa(m)} دقیقه`)));
   const list = h('div');
   // Wall-clock time in Tehran (UTC+03:30) → ISO.

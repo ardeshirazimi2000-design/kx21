@@ -252,3 +252,7 @@ td.ltr { direction: ltr; text-align: left; font-family: ui-monospace, monospace;
 .triage-card .flags { color: var(--danger); font-size: 13px; }
 .triage-card ul { margin: 6px 0; padding-inline-start: 18px; font-size: 13px; }
 @media (max-width: 640px) { .chat-head > b { display: none; } .chat-head { flex-wrap: wrap; } .triage-card { max-width: 94%; } .nrs { gap: 2px; } .nrs-btn { font-size: 13px; } }
+
+/* Jalali date picker: day / month / year (order follows RTL reading) */
+.jdate { display: grid; grid-template-columns: 1fr 1.6fr 1.2fr; gap: 6px; }
+.jdate select { min-height: 42px; }

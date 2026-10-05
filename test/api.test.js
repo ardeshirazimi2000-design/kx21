@@ -231,3 +231,17 @@ test('PWA assets are served', async () => {
   assert.equal((await fetch(`${t.base}/sw.js`)).status, 200);
   assert.equal((await fetch(`${t.base}/icons/icon-512.png`)).headers.get('content-type'), 'image/png');
 });
+
+test('doctor calendar: literal /me routes are not shadowed by /:id routes', async () => {
+  const doc = await t.login(DEMO_ACCOUNTS.doctors[0].phone);
+  const mine = await t.call('GET', '/v1/doctors/me/slots', { token: doc });
+  assert.equal(mine.status, 200);
+  assert.ok(mine.body.items.length > 0);
+  const start = new Date(Date.now() + 9 * 864e5);
+  start.setUTCHours(5, 30, 0, 0);
+  const pub = await t.call('POST', '/v1/doctors/me/slots', {
+    token: doc, body: { starts_at: start.toISOString(), ends_at: new Date(start.getTime() + 3600e3).toISOString(), duration_min: 30 },
+  });
+  assert.equal(pub.status, 201);
+  assert.equal(pub.body.created, 2);
+});

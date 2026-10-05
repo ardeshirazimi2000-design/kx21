@@ -34,7 +34,9 @@ export class Router {
 
   match(method, pathname) {
     let pathMatched = false;
-    for (const r of this.routes) {
+    // Literal routes win over parameterised ones (/v1/doctors/me/slots before /v1/doctors/:id/slots).
+    const ordered = [...this.routes.filter((r) => !r.keys.length), ...this.routes.filter((r) => r.keys.length)];
+    for (const r of ordered) {
       const m = r.pattern.exec(pathname);
       if (!m) continue;
       pathMatched = true;
