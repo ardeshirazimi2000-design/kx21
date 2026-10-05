@@ -3,6 +3,7 @@
 // (v1 in the roadmap) is included: drafts are invalid until the doctor signs them (Ed25519).
 import { badRequest, forbidden, notFound, conflict, requireFields, requireUuid } from '../lib/http.js';
 import { uuid, nowIso, parseJson, isUniqueViolation } from '../lib/db.js';
+import crypto from 'node:crypto';
 import { signJwt, signPayload, verifyPayload, canonical, sha256 } from '../lib/crypto.js';
 import { requireUser } from './auth.js';
 
@@ -52,10 +53,67 @@ export function register(router, { db, keys, platform, config, domain }) {
       body: {
         consultation_id: c.id, room_id: c.room_id, channel: c.channel, token,
         media_url: config.livekitUrl || null,
+        ice_servers: iceServers(ctx.user.sub),
         // Fallback order when bandwidth is poor (design doc §10/§12).
         fallback: ['video', 'audio', 'chat'].slice(['video', 'audio', 'chat'].indexOf(c.channel)),
       },
     };
+  });
+
+  // ---------------- 1:1 video/audio call (WebRTC peer-to-peer) ----------------
+  // The server only relays signalling (SDP offer/answer, ICE candidates); media flows directly
+  // between the two phones, DTLS-SRTP encrypted, or through the clinic's own TURN relay.
+  function iceServers(userId) {
+    const list = [];
+    if (config.turnUrls.length && config.turnSecret) {
+      // TURN REST API credentials (coturn use-auth-secret): valid for 12 hours.
+      const username = `${Math.floor(Date.now() / 1000) + 12 * 3600}:${userId}`;
+      const credential = crypto.createHmac('sha1', config.turnSecret).update(username).digest('base64');
+      list.push({ urls: config.turnUrls, username, credential });
+      const stun = config.turnUrls.map((u) => u.replace(/^turns?:/, 'stun:').replace(/\?.*$/, ''));
+      list.push({ urls: [...new Set(stun)] });
+    }
+    if (config.stunUrls.length) list.push({ urls: config.stunUrls });
+    return list;
+  }
+
+  const SIGNAL_TYPES = ['ready', 'here', 'offer', 'answer', 'ice', 'bye'];
+  const signals = new Map(); // consultation id -> { seq, items: [{ seq, from, type, data, at }] }
+  const box = (id) => {
+    let b = signals.get(id);
+    if (!b) signals.set(id, (b = { seq: 0, items: [] }));
+    return b;
+  };
+  setInterval(() => { // drop idle rooms
+    const cutoff = Date.now() - 30 * 60000;
+    for (const [id, b] of signals) if (!b.items.length || b.items[b.items.length - 1].at < cutoff) signals.delete(id);
+  }, 10 * 60000).unref();
+
+  router.post('/v1/consultations/:id/signal', async (ctx) => {
+    requireUser(ctx, 'patient', 'doctor');
+    const c = loadConsultation(ctx, ctx.params.id);
+    if (c.ended_at) throw conflict('این ویزیت پایان یافته است', 'consultation_ended');
+    const { type, data = null } = ctx.body;
+    if (!SIGNAL_TYPES.includes(type)) throw badRequest('نوع سیگنال نامعتبر است');
+    if (JSON.stringify(data ?? null).length > 64 * 1024) throw badRequest('داده سیگنال بیش از حد بزرگ است');
+    const b = box(c.id);
+    const item = { seq: ++b.seq, from: ctx.user.role, type, data, at: Date.now() };
+    b.items.push(item);
+    if (b.items.length > 300) b.items.splice(0, b.items.length - 300);
+    if (type === 'ready' || type === 'bye') platform.audit(ctx, `consultation.call_${type === 'ready' ? 'join' : 'leave'}`, `consultation:${c.id}`);
+    return { status: 201, body: { seq: item.seq } };
+  });
+
+  // after=-1 → only the current position (start listening from now).
+  router.get('/v1/consultations/:id/signal', async (ctx) => {
+    requireUser(ctx, 'patient', 'doctor');
+    const c = loadConsultation(ctx, ctx.params.id);
+    const b = box(c.id);
+    const after = Number(ctx.query.after ?? -1);
+    if (after < 0) return { body: { seq: b.seq, items: [] } };
+    const items = b.items.filter((i) => i.seq > after && i.from !== ctx.user.role)
+      .map(({ seq, type, data }) => ({ seq, type, data }));
+    return { body: { seq: b.seq, items, ended: !!c.ended_at } };
   });
 
   router.get('/v1/consultations/:id', async (ctx) => {

@@ -18,6 +18,7 @@ NODE_DIR=/opt/node22
 PORT="${PORT:-3000}"
 DOMAIN="${DOMAIN:-}"
 EMAIL="${EMAIL:-}"
+ENABLE_TURN="${ENABLE_TURN:-1}"   # coturn relay for video visits (needed behind mobile-carrier NAT)
 
 say() { printf '\n\033[1;32m==> %s\033[0m\n' "$*"; }
 die() { printf '\n\033[1;31mERROR: %s\033[0m\n' "$*" >&2; exit 1; }
@@ -102,6 +103,53 @@ sed -i "s/^PORT=.*/PORT=$PORT/" "$ENV_FILE"
 if [ -n "$DOMAIN" ]; then BIND=127.0.0.1; else BIND=0.0.0.0; fi
 sed -i "s/^HOST=.*/HOST=$BIND/" "$ENV_FILE"
 
+# ---------------------------------------------------------------- TURN relay (video visits)
+PUBLIC_IP=$(curl -fsS --max-time 5 https://api.ipify.org 2>/dev/null || hostname -I | awk '{print $1}')
+if [ "$ENABLE_TURN" = "1" ]; then
+  say "Setting up TURN relay (coturn) for video visits"
+  if ! command -v turnserver >/dev/null; then
+    if command -v dnf >/dev/null || command -v yum >/dev/null; then
+      $PM epel-release >/dev/null 2>&1 || true
+    fi
+    $PM coturn >/dev/null 2>&1 || echo "   WARNING: could not install coturn; video calls may fail behind mobile NAT"
+  fi
+  if command -v turnserver >/dev/null; then
+    grep -q '^TURN_SECRET=' "$ENV_FILE" || echo "TURN_SECRET=$(head -c 32 /dev/urandom | base64 | tr -d '\n/+=')" >> "$ENV_FILE"
+    TURN_SECRET=$(grep '^TURN_SECRET=' "$ENV_FILE" | cut -d= -f2)
+    sed -i '/^TURN_URLS=/d' "$ENV_FILE"
+    echo "TURN_URLS=turn:$PUBLIC_IP:3478?transport=udp,turn:$PUBLIC_IP:3478?transport=tcp" >> "$ENV_FILE"
+    CONF=/etc/turnserver.conf; [ -d /etc/coturn ] && CONF=/etc/coturn/turnserver.conf
+    if [ ! -f "$CONF" ] || grep -q 'managed by kx21' "$CONF"; then
+      cat > "$CONF" <<EOF
+# managed by kx21 installer — re-running the installer rewrites this file
+listening-port=3478
+fingerprint
+use-auth-secret
+static-auth-secret=$TURN_SECRET
+realm=kx21
+external-ip=$PUBLIC_IP
+min-port=49160
+max-port=49200
+no-cli
+no-tls
+no-dtls
+no-multicast-peers
+denied-peer-ip=10.0.0.0-10.255.255.255
+denied-peer-ip=172.16.0.0-172.31.255.255
+denied-peer-ip=192.168.0.0-192.168.255.255
+denied-peer-ip=127.0.0.0-127.255.255.255
+EOF
+      chmod 640 "$CONF"; for g in coturn turnserver; do getent group $g >/dev/null && chgrp $g "$CONF" && break; done
+      [ -f /etc/default/coturn ] && sed -i 's/^#*TURNSERVER_ENABLED=.*/TURNSERVER_ENABLED=1/' /etc/default/coturn
+    else
+      echo "   $CONF exists and is not managed by this installer; set static-auth-secret=$TURN_SECRET yourself"
+    fi
+    systemctl enable -q coturn 2>/dev/null || true
+    systemctl restart coturn 2>/dev/null || echo "   WARNING: coturn did not start (journalctl -u coturn)"
+    TURN_OK=1
+  fi
+fi
+
 # ---------------------------------------------------------------- service
 say "Installing systemd service kx21"
 cat > /etc/systemd/system/kx21.service <<EOF
@@ -180,6 +228,13 @@ open_port() {
   elif command -v ufw >/dev/null && ufw status | grep -q "Status: active"; then ufw allow "$1/tcp" >/dev/null; fi
 }
 if [ -n "$DOMAIN" ]; then open_port 80; open_port 443; else open_port "$PORT"; fi
+if [ "${TURN_OK:-0}" = "1" ]; then
+  if systemctl is-active -q firewalld 2>/dev/null; then
+    firewall-cmd -q --permanent --add-port=3478/udp --add-port=3478/tcp --add-port=49160-49200/udp; firewall-cmd -q --reload
+  elif command -v ufw >/dev/null && ufw status | grep -q "Status: active"; then
+    ufw allow 3478 >/dev/null; ufw allow 49160:49200/udp >/dev/null
+  fi
+fi
 
 # ---------------------------------------------------------------- check
 sleep 2
@@ -189,6 +244,7 @@ if curl -fsS "http://127.0.0.1:$PORT/healthz" >/dev/null; then
   if [ -n "$DOMAIN" ]; then echo "   Open: https://$DOMAIN   (DNS A record of $DOMAIN must point to $IP)"
   else echo "   Open: http://$IP:$PORT"; fi
   echo "   Logs: journalctl -u kx21 -f     Update: re-run this command"
+  [ "${TURN_OK:-0}" = "1" ] && echo "   Video relay (TURN): $PUBLIC_IP:3478 — also open 3478/udp+tcp and 49160-49200/udp in your hosting panel firewall"
 else
   journalctl -u kx21 -n 30 --no-pager
   die "service did not start (see log above)"

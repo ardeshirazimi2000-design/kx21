@@ -2,6 +2,7 @@
 // patients, doctors and operators/admins against the /v1 REST + SSE API.
 
 import { openTriageWizard, triageResultCard } from './triage-wizard.js';
+import { mediaSupported, startCall } from './video-call.js';
 import { jalaliPicker, formatJalaliDate, todayJalali, isoToJalali, MONTHS } from './jalali.js';
 
 // ---------------- utilities ----------------
@@ -551,9 +552,7 @@ VIEWS.room = async (cid) => {
   sendBtn.onclick = send;
   input.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.isComposing) send(); });
 
-  const media = join?.media_url
-    ? h('div', { class: 'banner info' }, `اتاق ${join.room_id} آماده است (LiveKit: ${join.media_url}). ترتیب fallback: ${join.fallback.map((c) => LABELS.channel[c]).join(' ← ')}`)
-    : h('div', { class: 'banner warn' }, `سرور رسانه (LiveKit) در این محیط پیکربندی نشده است؛ ویزیت از طریق چت متنی انجام می‌شود. نوع نوبت: ${LABELS.channel[info.channel]}`);
+  const media = info.channel === 'chat' ? null : callPanel(cid, info, join, isDoctor);
 
   $app.append(
     h('div', { class: 'row', style: 'margin-bottom:10px' }, h('button', { class: 'btn small', onclick: () => route(isDoctor ? 'doctor-appointments' : 'appointments') }, '→ بازگشت'),
@@ -566,6 +565,46 @@ VIEWS.room = async (cid) => {
 
   if (isDoctor) await doctorPanel(cid, info, ended);
 };
+
+// Video/audio call card (WebRTC). Chat below stays available as the fallback channel.
+function callPanel(cid, info, join, isDoctor) {
+  const other = isDoctor ? 'بیمار' : 'پزشک';
+  if (!join) return null;
+  if (!mediaSupported()) {
+    return h('div', { class: 'banner warn' }, `تماس ${LABELS.channel[info.channel]} در این مرورگر در دسترس نیست (به اپ موبایل یا نسخهٔ HTTPS نیاز دارد). ویزیت را با پیام متنی ادامه دهید.`);
+  }
+  const wantVideo = info.channel === 'video';
+  const remote = h('video', { class: 'v-remote', autoplay: true, playsinline: true });
+  const local = h('video', { class: 'v-local', autoplay: true, playsinline: true, muted: true });
+  local.muted = true;
+  const status = h('div', { class: 'call-status', role: 'status' }, `برای شروع، دکمه «شروع تماس» را بزنید. ${other} هم باید وارد اتاق شود.`);
+  const controls = h('div', { class: 'call-controls' });
+  let call = null;
+  const btn = (label, onclick, cls = '') => h('button', { class: `btn ${cls}`, onclick }, label);
+  const showIdle = () => controls.replaceChildren(btn(wantVideo ? '📹 شروع تماس تصویری' : '📞 شروع تماس صوتی', start, 'primary'));
+  async function start() {
+    call = startCall({
+      api, cid, role: isDoctor ? 'doctor' : 'patient', iceServers: join.ice_servers ?? [], videoWanted: wantVideo,
+      els: { remote, local },
+      onState: (text, state) => {
+        if (text) status.textContent = text;
+        wrap.dataset.state = state ?? '';
+        if (state === 'ended') showIdle();
+        if (state === 'failed') status.textContent = 'اتصال تصویری برقرار نشد. اینترنت را بررسی کنید یا ویزیت را با پیام متنی ادامه دهید.';
+      },
+    });
+    if (!(await call.begin())) { call = null; return; }
+    const mic = btn('🎙️ قطع صدا', () => { const on = call.toggleMic(); mic.textContent = on ? '🎙️ قطع صدا' : '🔇 وصل صدا'; });
+    const cam = wantVideo ? btn('📷 خاموش کردن دوربین', () => { const on = call.toggleCam(); cam.textContent = on ? '📷 خاموش کردن دوربین' : '📷 روشن کردن دوربین'; }) : null;
+    controls.replaceChildren(mic, cam ?? '', btn('⛔ پایان تماس', () => { call.hangup(); call = null; }, 'danger'));
+  }
+  onCleanup(() => call?.hangup());
+  showIdle();
+  const wrap = h('div', { class: `card call${wantVideo ? '' : ' audio-only'}` },
+    h('div', { class: 'stage' }, remote, wantVideo ? local : null, h('div', { class: 'stage-label' }, other)),
+    status, controls);
+  return wrap;
+}
 
 async function doctorPanel(cid, info, ended) {
   const patient = await api('GET', `/v1/patients/${info.patient_id}`).catch(() => null);

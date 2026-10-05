@@ -64,3 +64,11 @@ export async function startApp(overrides = {}) {
 
 // Valid Iranian national IDs for tests.
 export const NATIONAL_IDS = ['0499370899', '0790419904', '0084575948', '0013542419', '0067749828', '0076229645'];
+
+// Random valid Iranian national ID (checksum digit computed), for tests that need a fresh patient.
+export function randomNationalId() {
+  const d = Array.from({ length: 9 }, () => Math.floor(Math.random() * 10));
+  if (d.every((x) => x === d[0])) d[0] = (d[0] + 1) % 10;
+  const r = d.reduce((a, x, i) => a + x * (10 - i), 0) % 11;
+  return d.join('') + (r < 2 ? r : 11 - r);
+}

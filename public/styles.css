@@ -259,3 +259,16 @@ td.ltr { direction: ltr; text-align: left; font-family: ui-monospace, monospace;
 .ble-box { border: 1px dashed var(--border); border-radius: 12px; padding: 12px; margin: 10px 0 14px; }
 .ble-box p { margin: 6px 0 0; }
 .ok-banner { background: var(--ok-soft); color: var(--ok); margin: 8px 0 0; }
+
+/* video visit */
+.call { padding: 12px; }
+.stage { position: relative; background: #0b1215; border-radius: 12px; overflow: hidden; aspect-ratio: 3 / 4; max-height: 62vh; margin: 0 auto; }
+@media (min-width: 700px) { .stage { aspect-ratio: 16 / 9; } }
+.call.audio-only .stage { aspect-ratio: auto; height: 120px; }
+.v-remote { width: 100%; height: 100%; object-fit: cover; display: block; }
+.v-local { position: absolute; width: 28%; max-width: 160px; aspect-ratio: 3 / 4; object-fit: cover; bottom: 10px; inset-inline-end: 10px; border-radius: 10px; border: 2px solid #fff; background: #222; transform: scaleX(-1); }
+.stage-label { position: absolute; top: 8px; inset-inline-start: 10px; color: #fff; font-size: 12px; background: rgb(0 0 0 / 45%); padding: 2px 8px; border-radius: 999px; }
+.call-status { margin: 10px 0 8px; font-size: 14px; color: var(--muted); text-align: center; }
+.call[data-state="connected"] .call-status { color: var(--ok); }
+.call-controls { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; }
+.call-controls .btn { min-height: 44px; }

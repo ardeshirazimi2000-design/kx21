@@ -40,6 +40,10 @@ export function loadConfig(env = process.env) {
     llmApiKey: env.LLM_API_KEY || '',
     llmTimeoutMs: Number(env.LLM_TIMEOUT_MS || 8000),
     livekitUrl: env.LIVEKIT_URL || '',
+    // WebRTC: the clinic's TURN relay (coturn, use-auth-secret) and optional extra STUN servers.
+    turnUrls: (env.TURN_URLS || '').split(',').map((u) => u.trim()).filter(Boolean),
+    turnSecret: env.TURN_SECRET || '',
+    stunUrls: (env.STUN_URLS ?? 'stun:stun.l.google.com:19302').split(',').map((u) => u.trim()).filter(Boolean),
     enforceJoinWindow: env.ENFORCE_JOIN_WINDOW === 'true',
     streamDelayMs: Number(env.STREAM_DELAY_MS ?? 12),
     logNotifications: env.LOG_NOTIFICATIONS !== 'false',

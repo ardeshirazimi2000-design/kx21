@@ -1,6 +1,6 @@
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { startApp, NATIONAL_IDS } from './helpers.js';
+import { startApp, NATIONAL_IDS, randomNationalId } from './helpers.js';
 import { DEMO_ACCOUNTS } from '../src/seed.js';
 
 let t;
@@ -244,4 +244,43 @@ test('doctor calendar: literal /me routes are not shadowed by /:id routes', asyn
   });
   assert.equal(pub.status, 201);
   assert.equal(pub.body.created, 2);
+});
+
+test('video call signalling: relayed only between the two participants, TURN creds issued', async () => {
+  const p = await t.newPatient({ nationalId: randomNationalId() });
+  const [slot] = (await t.call('GET', '/v1/slots?specialty=general&limit=5', { token: p.token })).body.items;
+  const appt = await t.call('POST', '/v1/appointments', { token: p.token, body: { doctor_id: slot.doctor_id, slot_id: slot.id, channel: 'video' }, headers: { 'Idempotency-Key': 'vid-1' } });
+  const cid = appt.body.consultation.id;
+  const doc = await t.login(DEMO_ACCOUNTS.doctors[0].phone);
+  const other = await t.login(DEMO_ACCOUNTS.doctors[1].phone);
+
+  const join = await t.call('POST', `/v1/consultations/${cid}/join`, { token: p.token, body: {} });
+  assert.ok(Array.isArray(join.body.ice_servers));
+
+  const start = (await t.call('GET', `/v1/consultations/${cid}/signal?after=-1`, { token: doc })).body.seq;
+  await t.call('POST', `/v1/consultations/${cid}/signal`, { token: p.token, body: { type: 'ready' } });
+  await t.call('POST', `/v1/consultations/${cid}/signal`, { token: doc, body: { type: 'offer', data: { gen: 1, sdp: 'v=0' } } });
+  const forDoc = (await t.call('GET', `/v1/consultations/${cid}/signal?after=${start}`, { token: doc })).body.items;
+  assert.deepEqual(forDoc.map((i) => i.type), ['ready']); // own messages are not echoed
+  const forPatient = (await t.call('GET', `/v1/consultations/${cid}/signal?after=${start}`, { token: p.token })).body.items;
+  assert.equal(forPatient[0].type, 'offer');
+  assert.equal(forPatient[0].data.sdp, 'v=0');
+
+  assert.equal((await t.call('GET', `/v1/consultations/${cid}/signal?after=0`, { token: other })).status, 404);
+  assert.equal((await t.call('POST', `/v1/consultations/${cid}/signal`, { token: p.token, body: { type: 'evil' } })).status, 422);
+});
+
+test('TURN REST credentials are HMAC-SHA1 of the expiring username', async () => {
+  const crypto = await import('node:crypto');
+  const t2 = await (await import('./helpers.js')).startApp({ turnUrls: ['turn:198.51.100.7:3478?transport=udp'], turnSecret: 's3cret' });
+  try {
+    const p = await t2.newPatient({ nationalId: '0499370899' });
+    const [slot] = (await t2.call('GET', '/v1/slots?specialty=general&limit=5', { token: p.token })).body.items;
+    const appt = await t2.call('POST', '/v1/appointments', { token: p.token, body: { doctor_id: slot.doctor_id, slot_id: slot.id, channel: 'video' }, headers: { 'Idempotency-Key': 'vid-2' } });
+    const ice = (await t2.call('POST', `/v1/consultations/${appt.body.consultation.id}/join`, { token: p.token, body: {} })).body.ice_servers;
+    const turn = ice.find((s) => s.username);
+    assert.equal(turn.credential, crypto.createHmac('sha1', 's3cret').update(turn.username).digest('base64'));
+    assert.ok(Number(turn.username.split(':')[0]) > Date.now() / 1000);
+    assert.ok(ice.some((s) => s.urls.includes('stun:198.51.100.7:3478')));
+  } finally { t2.close(); }
 });
