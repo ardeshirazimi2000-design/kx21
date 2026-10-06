@@ -1,0 +1,22 @@
+{
+  "name": "kx21",
+  "private": true,
+  "description": "سامانه مکانیزه کمیسیون‌های تخصصی اتاق بازرگانی (Web + API + Mobile)",
+  "workspaces": [
+    "packages/shared",
+    "apps/api",
+    "apps/web"
+  ],
+  "scripts": {
+    "build": "npm run build -w @kx/shared && npm run build -w @kx/api && npm run build -w @kx/web",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present",
+    "dev:api": "npm run dev -w @kx/api",
+    "dev:web": "npm run dev -w @kx/web",
+    "db:migrate": "npm run migrate -w @kx/api",
+    "db:seed": "npm run seed -w @kx/api"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}

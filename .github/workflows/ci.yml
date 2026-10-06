@@ -1,0 +1,56 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  platform:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: kx
+          POSTGRES_PASSWORD: kx
+          POSTGRES_DB: kx_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U kx" --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      TEST_DATABASE_URL: postgres://kx:kx@localhost:5432/kx_test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run build -w @kx/shared
+      - run: npm run typecheck
+      - name: Unit tests (business rules)
+        run: npm test -w @kx/shared
+      - name: Integration & E2E API tests (PostgreSQL + Socket.IO)
+        run: npm test -w @kx/api
+      - run: npm run build -w @kx/api
+      - run: npm run build -w @kx/web
+
+  mobile:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Build shared package
+        run: npm ci && npm run build -w @kx/shared
+      - name: Install mobile dependencies
+        working-directory: apps/mobile
+        run: npm ci
+      - name: Typecheck
+        working-directory: apps/mobile
+        run: npx tsc --noEmit
+      - name: Bundle (Android JS)
+        working-directory: apps/mobile
+        run: npx expo export --platform android --output-dir /tmp/mobile-export

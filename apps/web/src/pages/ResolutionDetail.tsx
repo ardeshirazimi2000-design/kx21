@@ -1,0 +1,1 @@
+export { ResolutionDetailPage } from './Resolutions';

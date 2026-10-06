@@ -1,0 +1,48 @@
+# Local/staging stack:  docker compose up --build
+# optional demo data:   docker compose exec api node dist/db/seed.js
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: kx
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-kx}
+      POSTGRES_DB: kx
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U kx"]
+      interval: 5s
+      retries: 10
+
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    environment:
+      DATABASE_URL: postgres://kx:${POSTGRES_PASSWORD:-kx}@db:5432/kx
+      JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET (at least 32 characters)}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:8080}
+      SMS_PROVIDER: ${SMS_PROVIDER:-log}
+      KAVENEGAR_API_KEY: ${KAVENEGAR_API_KEY:-}
+      KAVENEGAR_SENDER: ${KAVENEGAR_SENDER:-}
+      PUSH_PROVIDER: ${PUSH_PROVIDER:-expo}
+    volumes:
+      - uploads:/data/uploads
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "4000:4000"
+
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+    depends_on:
+      - api
+    ports:
+      - "8080:80"
+
+volumes:
+  db-data:
+  uploads:

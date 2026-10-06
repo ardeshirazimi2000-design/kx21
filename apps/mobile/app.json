@@ -1,0 +1,53 @@
+{
+  "expo": {
+    "name": "کمیسیون‌های اتاق",
+    "slug": "kx-commissions",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "automatic",
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "ir.chamber.commissions"
+    },
+    "android": {
+      "adaptiveIcon": {
+        "backgroundColor": "#0F4C5C",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundImage": "./assets/android-icon-background.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      },
+      "predictiveBackGestureEnabled": false,
+      "package": "ir.chamber.commissions"
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "plugins": [
+      "expo-router",
+      "expo-secure-store",
+      "expo-localization",
+      [
+        "expo-notifications",
+        {
+          "color": "#0F4C5C"
+        }
+      ],
+      [
+        "expo-calendar",
+        {
+          "calendarPermission": "برای افزودن جلسات به تقویم شما"
+        }
+      ]
+    ],
+    "scheme": "kxcommissions",
+    "extra": {
+      "apiUrl": "http://localhost:4000",
+      "supportsRTL": false,
+      "forcesRTL": false
+    },
+    "experiments": {
+      "typedRoutes": false
+    }
+  }
+}
