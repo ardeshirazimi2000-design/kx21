@@ -82,3 +82,4 @@ npm run typecheck
 7. [تست و معیارهای پذیرش](docs/07-testing-and-acceptance.md)
 8. [تصمیم‌های محصول برای تأیید](docs/08-product-decisions.md)
 9. [راهنمای کاربران و مدیران](docs/09-user-manual.md)
+10. [ساخت فایل نصبی اپ اندروید](docs/10-mobile-build.md)
