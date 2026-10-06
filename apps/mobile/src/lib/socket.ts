@@ -1,14 +1,14 @@
 import { useEffect, useRef, useState } from 'react';
 import { io, type Socket } from 'socket.io-client';
 import { getSession, onSessionChange } from './api';
-import { API_URL } from './config';
+import { getApiUrl } from './config';
 
 let socket: Socket | null = null;
 
 export function getSocket(): Socket | null {
   if (!getSession()) return null;
   if (!socket) {
-    socket = io(API_URL, {
+    socket = io(getApiUrl(), {
       path: '/socket.io',
       transports: ['websocket'],
       auth: (cb) => cb({ token: getSession()?.accessToken }),

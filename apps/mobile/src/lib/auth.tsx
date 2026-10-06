@@ -1,5 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from 'react';
 import { api, get, getSession, loadSession, onSessionChange, post, setSession } from './api';
+import { loadApiUrl } from './config';
 import { registerForPush } from './push';
 
 export interface Me {
@@ -36,7 +37,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   useEffect(() => {
-    void loadSession()
+    void loadApiUrl()
+      .then(loadSession)
       .then(loadMe)
       .finally(() => setReady(true));
     return onSessionChange((s) => {

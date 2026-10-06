@@ -2,7 +2,7 @@ import { ROLE_LABELS, type Position } from '@kx/shared';
 import { router } from 'expo-router';
 import { Badge, Button, Card, Row, Screen, T } from '../../components/ui';
 import { useAuth } from '../../lib/auth';
-import { API_URL } from '../../lib/config';
+import { getApiUrl } from '../../lib/config';
 
 export default function ProfileScreen() {
   const { me, logout } = useAuth();
@@ -23,7 +23,7 @@ export default function ProfileScreen() {
         ))}
       </Card>
       <Card title="تنظیمات">
-        <T muted size={13}>سرور: {API_URL}</T>
+        <T muted size={13}>سرور: {getApiUrl()}</T>
         <T muted size={13}>اعلان‌ها از طریق Push و داخل برنامه دریافت می‌شوند. تغییر رمز و فعال‌سازی ورود دومرحله‌ای از نسخه وب انجام می‌شود.</T>
       </Card>
       <Button

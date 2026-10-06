@@ -462,6 +462,47 @@ describe('multi-chamber isolation', () => {
   });
 });
 
+describe('identity inquiry (national registry)', () => {
+  it('validates the national code before calling the service', async () => {
+    const chamberId = (await as('admin').get('/api/auth/me')).body.adminChambers[0];
+    const bad = await as('admin').post('/api/identity/inquiry', { chamberId, nationalCode: '0010007700', birthDate: '1371/1/1' });
+    expect(bad.status).toBe(400);
+    expect(bad.body.error.message).toContain('کد ملی');
+    expect((await as('admin').post('/api/identity/inquiry', { chamberId, nationalCode: '0012345679', birthDate: '1371/13/1' })).status).toBe(400);
+  });
+
+  it('fills the person form from the registry and audits the lookup', async () => {
+    const chamberId = (await as('admin').get('/api/auth/me')).body.adminChambers[0];
+    const r = await as('admin').post('/api/identity/inquiry', { chamberId, nationalCode: '۰۰۱۲۳۴۵۶۷۹', birthDate: '۱۳۷۱/۰۱/۰۱' });
+    expect(r.status).toBe(200);
+    expect(r.body).toMatchObject({ nationalCode: '0012345679', birthDate: '1371/1/1', fullName: 'شخص آزمایشی 5679', existingPerson: null });
+    expect((await as('m1').post('/api/identity/inquiry', { chamberId, nationalCode: '0012345679', birthDate: '1371/1/1' })).status).toBe(403);
+    const log = await as('admin').get('/api/audit?action=identity.inquiry');
+    expect(log.body.items[0].entity_id).toBe('0012345679');
+  });
+
+  it('creates verified people with the official name and rejects duplicates and mismatches', async () => {
+    const chamberId = (await as('admin').get('/api/auth/me')).body.adminChambers[0];
+    const p = await as('admin').post('/api/people', { chamberId, nationalId: '2271834562', birthDate: '1360/5/20', fullName: 'نام دستی', mobile: '09125550001' });
+    expect(p.status).toBe(201);
+    expect(p.body.full_name).toBe('شخص آزمایشی 4562');
+    expect(p.body.identity_verified_at).toBeTruthy();
+    const dup = await as('admin').post('/api/people', { chamberId, nationalId: '2271834562', birthDate: '1360/5/20' });
+    expect(dup.status).toBe(409);
+    expect(dup.body.error.code).toBe('duplicate_national_id');
+    // mock registry: code ending in 99 + birth year 1300 = no match
+    const mismatch = await as('admin').post('/api/identity/inquiry', { chamberId, nationalCode: '0499370899', birthDate: '1300/1/1' });
+    expect(mismatch.status).toBe(422);
+    // unverified manual entry stays possible unless IDENTITY_REQUIRED=true
+    const manual = await as('admin').post('/api/people', { chamberId, fullName: 'مدعو بدون کد ملی' });
+    expect(manual.status).toBe(201);
+    expect(manual.body.identity_verified_at).toBeNull();
+    const v = await as('admin').post(`/api/people/${manual.body.id}/verify-identity`, { nationalCode: '4512098763', birthDate: '1365/2/2' });
+    expect(v.status).toBe(200);
+    expect(v.body.full_name).toBe('شخص آزمایشی 8763');
+  });
+});
+
 describe('documents', () => {
   it('validates file content against its declared type', async () => {
     const meetings = await as('secretary').get('/api/meetings?status=approved');

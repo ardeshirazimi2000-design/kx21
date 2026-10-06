@@ -92,7 +92,9 @@ E = [
     ("patch", "/api/memberships/{id}", "Structure", "تغییر سمت (پایان رکورد قبلی + رکورد جدید)", S(position=str_, hasVote=bool_), None),
     ("post", "/api/memberships/{id}/end", "Structure", "پایان عضویت", S(endDate=date, reason=str_), None),
     ("get", "/api/people", "Structure", "جستجوی اشخاص (?chamberId&q)", None, None),
-    ("post", "/api/people", "Structure", "ثبت شخص", S(chamberId=uuid, fullName=str_, mobile=str_, email=str_, organization=str_, password=str_), None),
+    ("post", "/api/people", "Structure", "ثبت شخص", S(chamberId=uuid, nationalId=str_, birthDate=str_, fullName=str_, mobile=str_, email=str_, organization=str_, password=str_), "With nationalId + birthDate the official name is taken from the identity service; IDENTITY_REQUIRED=true makes it mandatory."),
+    ("post", "/api/identity/inquiry", "Structure", "استعلام هویت از ثبت احوال (کد ملی + تاریخ تولد)", S(chamberId=uuid, nationalCode=str_, birthDate=str_), "Officers/admins of the chamber only; rate limited; every lookup is audited. 422 identity_not_found, 502 identity_unavailable."),
+    ("post", "/api/people/{id}/verify-identity", "Structure", "تأیید هویت شخص موجود", S(nationalCode=str_, birthDate=str_), None),
     ("get", "/api/people/{id}", "Structure", "مشخصات و سوابق عضویت", None, None),
     ("patch", "/api/people/{id}", "Structure", "ویرایش/غیرفعال‌سازی شخص", S(fullName=str_, isActive=bool_, password=str_), None),
 

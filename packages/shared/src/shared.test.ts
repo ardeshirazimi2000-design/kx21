@@ -147,3 +147,15 @@ describe('jalali', () => {
     expect(parseJalali('1404/12/30')).toBeNull();
   });
 });
+
+import { isValidNationalCode } from './index.js';
+
+describe('national code', () => {
+  it('validates the check digit', () => {
+    expect(isValidNationalCode('0010007700')).toBe(false);
+    expect(isValidNationalCode('0499370899')).toBe(true);
+    expect(isValidNationalCode('۰۴۹۹۳۷۰۸۹۹')).toBe(true);
+    expect(isValidNationalCode('1111111111')).toBe(false);
+    expect(isValidNationalCode('12345')).toBe(false);
+  });
+});

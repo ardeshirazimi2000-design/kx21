@@ -26,6 +26,15 @@ export const config = {
   kavenegarApiKey: process.env.KAVENEGAR_API_KEY,
   kavenegarSender: process.env.KAVENEGAR_SENDER,
   schedulerIntervalSeconds: Number(env('SCHEDULER_INTERVAL_SECONDS', '300')),
+  /**
+   * National identity inquiry (استعلام هویت): sapi = s.api.ir PersonInfo, mock = development/test data,
+   * none = disabled (names typed manually, people stay "unverified").
+   */
+  identityProvider: (process.env.IDENTITY_PROVIDER ?? (process.env.NODE_ENV === 'test' || process.env.VITEST ? 'mock' : 'none')) as 'sapi' | 'mock' | 'none',
+  identityApiUrl: process.env.IDENTITY_API_URL ?? 'https://s.api.ir/api/sw1/PersonInfo',
+  identityApiToken: process.env.IDENTITY_API_TOKEN,
+  /** Require a verified identity (national code + birth date) for every new person. */
+  identityRequired: process.env.IDENTITY_REQUIRED === 'true',
   /** Built web app (apps/web/dist) to serve from this process, for single-port installs. */
   webDistDir: process.env.WEB_DIST_DIR,
   /** Set to true once the site is served over HTTPS (enables HSTS and upgrade-insecure-requests). */

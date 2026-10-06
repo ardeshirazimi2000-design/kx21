@@ -1,15 +1,28 @@
 import bcrypt from 'bcryptjs';
-import { DEFAULT_COMMISSION_SETTINGS, POSITIONS, positionHasVote, type Position } from '@kx/shared';
+import { DEFAULT_COMMISSION_SETTINGS, isValidNationalCode, normalizeNationalCode, POSITIONS, positionHasVote, type Position } from '@kx/shared';
+import rateLimit from 'express-rate-limit';
 import { Router } from 'express';
 import { z } from 'zod';
 import { currentUser, type AuthUser } from '../auth/middleware.js';
+import { config } from '../config.js';
 import { one, query, tx } from '../db/pool.js';
 import { audit } from '../lib/audit.js';
 import { badRequest, conflict, forbidden, notFound } from '../lib/errors.js';
 import { body, dateStr, paged, pageParams, param, uuid } from '../lib/validate.js';
+import { identityEnabled, inquireIdentity } from '../services/identity.js';
 import { commissionAccess, isChamberAdmin, requireChamberAdmin, requireSuperAdmin, visibleChamberIds } from '../services/access.js';
 
 export const structureRouter = Router();
+
+// The identity service is a paid, privacy-sensitive registry lookup: limit per user.
+const identityLimiter = rateLimit({
+  windowMs: 10 * 60 * 1000,
+  limit: process.env.VITEST ? 1000 : 30,
+  standardHeaders: 'draft-8',
+  legacyHeaders: false,
+  keyGenerator: (req) => req.user?.id ?? 'anon',
+  message: { error: { code: 'rate_limited', message: 'تعداد استعلام‌ها بیش از حد مجاز است؛ کمی بعد تلاش کنید' } },
+});
 
 // ─────────────────────────────── Chambers ───────────────────────────────
 
@@ -337,9 +350,17 @@ structureRouter.get('/commissions/:id/members', async (req, res) => {
   res.json(canSeeContacts ? rows : rows.map(({ mobile: _m, email: _e, ...r }) => r));
 });
 
+const nationalCode = z
+  .string()
+  .transform(normalizeNationalCode)
+  .refine(isValidNationalCode, 'کد ملی معتبر نیست');
+
 const personSchema = z.object({
-  fullName: z.string().min(2),
-  nationalId: z.string().regex(/^\d{10}$/, 'کد ملی باید ۱۰ رقم باشد').nullish(),
+  /** Optional when the identity is verified: the official name from the registry is used. */
+  fullName: z.string().min(2).nullish(),
+  nationalId: nationalCode.nullish(),
+  /** Jalali birth date (e.g. 1371/01/01), used with the national code for the identity inquiry. */
+  birthDate: z.string().nullish(),
   mobile: z.string().regex(/^09\d{9}$/, 'شماره موبایل معتبر نیست').nullish(),
   email: z.string().email().nullish(),
   organization: z.string().nullish(),
@@ -348,23 +369,87 @@ const personSchema = z.object({
   password: z.string().min(8).nullish(),
 });
 
+/** Runs the identity inquiry when national code + birth date are given; enforces IDENTITY_REQUIRED. */
+async function resolveIdentity(p: z.infer<typeof personSchema>) {
+  if (p.nationalId && p.birthDate && identityEnabled()) return inquireIdentity(p.nationalId, p.birthDate);
+  if (config.identityRequired) throw badRequest('برای تعریف شخص، کد ملی و تاریخ تولد برای استعلام هویت الزامی است');
+  if (!p.fullName) throw badRequest('نام و نام خانوادگی الزامی است');
+  return null;
+}
+
 async function createPerson(c: any, req: any, chamberId: string, p: z.infer<typeof personSchema>) {
+  const identity = await resolveIdentity(p);
+  if (p.nationalId) {
+    const dup = await one('SELECT id, full_name FROM users WHERE chamber_id = $1 AND national_id = $2', [chamberId, p.nationalId], c);
+    if (dup) throw conflict(`شخصی با این کد ملی قبلاً در این اتاق ثبت شده است (${dup.full_name})`, 'duplicate_national_id');
+  }
   const hash = p.password ? await bcrypt.hash(p.password, 10) : null;
   try {
     const r = await one(
-      `INSERT INTO users (chamber_id, full_name, national_id, mobile, email, organization, job_title, bio, password_hash)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
-       RETURNING id, chamber_id, full_name, national_id, mobile, email, organization, job_title, bio, is_active, created_at`,
-      [chamberId, p.fullName, p.nationalId ?? null, p.mobile ?? null, p.email ?? null, p.organization ?? null, p.jobTitle ?? null, p.bio ?? null, hash],
+      `INSERT INTO users (chamber_id, full_name, national_id, mobile, email, organization, job_title, bio, password_hash,
+          first_name, last_name, father_name, birth_date_jalali, identity_verified_at, identity_source, identity_data)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
+       RETURNING id, chamber_id, full_name, national_id, mobile, email, organization, job_title, bio, is_active, created_at,
+                 first_name, last_name, father_name, identity_verified_at`,
+      [
+        chamberId, identity?.fullName ?? p.fullName, p.nationalId ?? null, p.mobile ?? null, p.email ?? null, p.organization ?? null,
+        p.jobTitle ?? null, p.bio ?? null, hash, identity?.firstName ?? null, identity?.lastName ?? null, identity?.fatherName ?? null,
+        identity?.birthDate ?? p.birthDate ?? null, identity ? new Date() : null, identity?.source ?? null,
+        identity ? JSON.stringify(identity.raw) : null,
+      ],
       c,
     );
-    await audit(c, req, { chamberId, action: 'person.created', entity: 'user', entityId: r.id, after: r });
+    await audit(c, req, { chamberId, action: 'person.created', entity: 'user', entityId: r.id, after: { ...r, identityVerified: !!identity } });
     return r;
   } catch (e: any) {
-    if (e.code === '23505') throw conflict('شخصی با این ایمیل یا شماره موبایل قبلاً ثبت شده است');
+    if (e.code === '23505') throw conflict('شخصی با این ایمیل، شماره موبایل یا کد ملی قبلاً ثبت شده است');
     throw e;
   }
 }
+
+/** Identity inquiry for filling the person form (officers/admins of the chamber). Every lookup is audited. */
+structureRouter.post('/identity/inquiry', identityLimiter, async (req, res) => {
+  const u = currentUser(req);
+  const b = body(req, z.object({ chamberId: uuid, nationalCode: z.string(), birthDate: z.string() }));
+  if (!(await canSearchPeople(u, b.chamberId))) throw forbidden();
+  const r = await inquireIdentity(b.nationalCode, b.birthDate);
+  const existing = await one('SELECT id, full_name FROM users WHERE chamber_id = $1 AND national_id = $2', [b.chamberId, r.nationalCode]);
+  await tx((c) => audit(c, req, { chamberId: b.chamberId, action: 'identity.inquiry', entity: 'national_code', entityId: r.nationalCode, after: { source: r.source } }));
+  res.json({
+    nationalCode: r.nationalCode,
+    birthDate: r.birthDate,
+    firstName: r.firstName,
+    lastName: r.lastName,
+    fatherName: r.fatherName,
+    fullName: r.fullName,
+    existingPerson: existing,
+  });
+});
+
+/** Verify (or re-verify) an existing person's identity. */
+structureRouter.post('/people/:id/verify-identity', identityLimiter, async (req, res) => {
+  const u = currentUser(req);
+  const id = param(req, 'id');
+  const b = body(req, z.object({ nationalCode: z.string(), birthDate: z.string() }));
+  const person = await one('SELECT id, chamber_id, full_name, national_id FROM users WHERE id = $1', [id]);
+  if (!person?.chamber_id) throw notFound();
+  requireChamberAdmin(u, person.chamber_id);
+  const r = await inquireIdentity(b.nationalCode, b.birthDate);
+  const row = await tx(async (c) => {
+    const dup = await one('SELECT id FROM users WHERE chamber_id = $1 AND national_id = $2 AND id <> $3', [person.chamber_id, r.nationalCode, id], c);
+    if (dup) throw conflict('این کد ملی برای شخص دیگری در این اتاق ثبت شده است', 'duplicate_national_id');
+    const after = await one(
+      `UPDATE users SET national_id = $2, full_name = $3, first_name = $4, last_name = $5, father_name = $6, birth_date_jalali = $7,
+         identity_verified_at = now(), identity_source = $8, identity_data = $9, updated_at = now()
+       WHERE id = $1 RETURNING id, full_name, national_id, first_name, last_name, father_name, identity_verified_at`,
+      [id, r.nationalCode, r.fullName, r.firstName, r.lastName, r.fatherName, r.birthDate, r.source, JSON.stringify(r.raw)],
+      c,
+    );
+    await audit(c, req, { chamberId: person.chamber_id, action: 'person.identity_verified', entity: 'user', entityId: id, before: person, after });
+    return after;
+  });
+  res.json(row);
+});
 
 structureRouter.post('/commissions/:id/members', async (req, res) => {
   const u = currentUser(req);
@@ -490,9 +575,9 @@ structureRouter.get('/people', async (req, res) => {
   if (!(await canSearchPeople(u, chamberId))) throw forbidden();
   const { page, pageSize, offset, q } = pageParams(req);
   const where = `chamber_id = $1 AND ($2::text IS NULL OR full_name ILIKE '%' || $2 || '%' OR organization ILIKE '%' || $2 || '%'
-     OR mobile LIKE '%' || $2 || '%' OR email ILIKE '%' || $2 || '%')`;
+     OR mobile LIKE '%' || $2 || '%' OR email ILIKE '%' || $2 || '%' OR national_id = $2)`;
   const items = await query(
-    `SELECT id, full_name, national_id, mobile, email, organization, job_title, is_active, (password_hash IS NOT NULL) AS can_login,
+    `SELECT id, full_name, national_id, mobile, email, organization, job_title, is_active, (password_hash IS NOT NULL) AS can_login, identity_verified_at,
        EXISTS (SELECT 1 FROM chamber_admins a WHERE a.user_id = users.id AND a.chamber_id = $1) AS is_chamber_admin
      FROM users WHERE ${where} ORDER BY full_name LIMIT ${pageSize} OFFSET ${offset}`,
     [chamberId, q],
@@ -515,7 +600,7 @@ structureRouter.get('/people/:id', async (req, res) => {
   const u = currentUser(req);
   const id = param(req, 'id');
   const p = await one(
-    'SELECT id, chamber_id, full_name, national_id, mobile, email, organization, job_title, bio, is_active, created_at FROM users WHERE id = $1',
+    'SELECT id, chamber_id, full_name, national_id, mobile, email, organization, job_title, bio, is_active, created_at, first_name, last_name, father_name, birth_date_jalali, identity_verified_at, identity_source FROM users WHERE id = $1',
     [id],
   );
   if (!p || (u.id !== id && !(p.chamber_id && isChamberAdmin(u, p.chamber_id)))) throw notFound();
@@ -540,7 +625,9 @@ structureRouter.patch('/people/:id', async (req, res) => {
     const after = await one(
       `UPDATE users SET full_name = COALESCE($2, full_name), national_id = COALESCE($3, national_id), mobile = COALESCE($4, mobile),
          email = COALESCE($5, email), organization = COALESCE($6, organization), job_title = COALESCE($7, job_title),
-         bio = COALESCE($8, bio), password_hash = COALESCE($9, password_hash), is_active = COALESCE($10, is_active), updated_at = now()
+         bio = COALESCE($8, bio), password_hash = COALESCE($9, password_hash), is_active = COALESCE($10, is_active),
+         identity_verified_at = CASE WHEN $3::text IS NOT NULL AND $3 IS DISTINCT FROM national_id THEN NULL ELSE identity_verified_at END,
+         updated_at = now()
        WHERE id = $1 RETURNING id, chamber_id, full_name, mobile, email, organization, job_title, is_active`,
       [id, b.fullName, b.nationalId, b.mobile, b.email, b.organization, b.jobTitle, b.bio, hash, b.isActive],
       c,

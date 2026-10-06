@@ -14,6 +14,10 @@ JWT_SECRET=$(openssl rand -hex 32)
 POSTGRES_PASSWORD=$(openssl rand -hex 16)
 CORS_ORIGINS=http://${IP:-localhost}:$PORT,http://localhost:$PORT
 SMS_PROVIDER=log
+# Identity inquiry: set IDENTITY_PROVIDER=sapi and the token, then re-run this script.
+IDENTITY_PROVIDER=none
+IDENTITY_API_TOKEN=
+IDENTITY_REQUIRED=false
 ENV
   chmod 600 .env
   FIRST_INSTALL=1

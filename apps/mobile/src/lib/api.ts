@@ -1,6 +1,6 @@
 import * as SecureStore from 'expo-secure-store';
 import { Platform } from 'react-native';
-import { API_URL } from './config';
+import { getApiUrl } from './config';
 
 export interface Session {
   accessToken: string;
@@ -64,7 +64,7 @@ let refreshing: Promise<boolean> | null = null;
 async function refresh(): Promise<boolean> {
   if (!session) return false;
   const rt = session.refreshToken;
-  refreshing ??= fetch(`${API_URL}/api/auth/refresh`, {
+  refreshing ??= fetch(`${getApiUrl()}/api/auth/refresh`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ refreshToken: rt }),
@@ -90,7 +90,7 @@ export async function api<T = any>(path: string, init: { method?: string; json?:
   if (init.json !== undefined) headers['content-type'] = 'application/json';
   let res: Response;
   try {
-    res = await fetch(`${API_URL}/api${path}`, {
+    res = await fetch(`${getApiUrl()}/api${path}`, {
       method: init.method ?? 'GET',
       headers,
       body: init.json !== undefined ? JSON.stringify(init.json) : undefined,

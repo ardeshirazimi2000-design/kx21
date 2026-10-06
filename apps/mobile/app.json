@@ -38,6 +38,14 @@
         {
           "calendarPermission": "برای افزودن جلسات به تقویم شما"
         }
+      ],
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "usesCleartextTraffic": true
+          }
+        }
       ]
     ],
     "scheme": "kxcommissions",

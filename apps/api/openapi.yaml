@@ -1251,6 +1251,7 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
+      description: With nationalId + birthDate the official name is taken from the identity service; IDENTITY_REQUIRED=true makes it mandatory.
       requestBody:
         required: true
         content:
@@ -1259,11 +1260,90 @@ paths:
               type: object
               properties:
                 chamberId: *id004
+                nationalId: *id001
+                birthDate: *id001
                 fullName: *id001
                 mobile: *id001
                 email: *id001
                 organization: *id001
                 password: *id001
+  /api/identity/inquiry:
+    post:
+      tags:
+      - Structure
+      summary: استعلام هویت از ثبت احوال (کد ملی + تاریخ تولد)
+      responses:
+        '200':
+          description: OK
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Forbidden
+        '404':
+          description: Not found or not visible
+        '409':
+          description: Conflict (state machine / business rule)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      description: Officers/admins of the chamber only; rate limited; every lookup is audited. 422 identity_not_found, 502 identity_unavailable.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                chamberId: *id004
+                nationalCode: *id001
+                birthDate: *id001
+  /api/people/{id}/verify-identity:
+    post:
+      tags:
+      - Structure
+      summary: تأیید هویت شخص موجود
+      responses:
+        '200':
+          description: OK
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Forbidden
+        '404':
+          description: Not found or not visible
+        '409':
+          description: Conflict (state machine / business rule)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                nationalCode: *id001
+                birthDate: *id001
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: *id004
   /api/people/{id}:
     get:
       tags:

@@ -26,6 +26,10 @@ services:
       KAVENEGAR_API_KEY: ${KAVENEGAR_API_KEY:-}
       KAVENEGAR_SENDER: ${KAVENEGAR_SENDER:-}
       PUSH_PROVIDER: ${PUSH_PROVIDER:-expo}
+      IDENTITY_PROVIDER: ${IDENTITY_PROVIDER:-none}
+      IDENTITY_API_URL: ${IDENTITY_API_URL:-https://s.api.ir/api/sw1/PersonInfo}
+      IDENTITY_API_TOKEN: ${IDENTITY_API_TOKEN:-}
+      IDENTITY_REQUIRED: ${IDENTITY_REQUIRED:-false}
     volumes:
       - uploads:/data/uploads
     depends_on:
