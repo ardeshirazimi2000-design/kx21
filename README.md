@@ -53,11 +53,17 @@ EXPO_PUBLIC_API_URL=http://<IP-سرور>:4000 npx expo start
 ```
 برای Push روی دستگاه واقعی، پروژه را به EAS متصل کنید (`npx eas-cli init`) و Development Build بسازید.
 
-### Docker
+### Docker (پیشنهادی برای نصب آزمایشی)
+روی سروری که Docker و Docker Compose دارد:
 ```bash
-JWT_SECRET=$(openssl rand -hex 32) docker compose up --build   # وب: http://localhost:8000
-docker compose exec api node dist/db/seed.js                    # اختیاری: داده آزمایشی
+git clone -b claude/commission-platform https://github.com/ardeshirazimi2000-design/kx21.git
+cd kx21
+bash deploy/docker-install.sh          # وب: http://IP-سرور:8000
 ```
+اسکریپت یک‌بار فایل `.env` با رمزهای تصادفی می‌سازد (این فایل را نگه دارید)، سرویس‌ها را build و اجرا می‌کند و داده آزمایشی را بارگذاری می‌کند. بدون داده آزمایشی: `SEED=0 bash deploy/docker-install.sh`؛ پورت دیگر: `WEB_PORT=9000 bash deploy/docker-install.sh`.
+
+- لاگ: `docker compose logs -f api` — توقف: `docker compose down` — به‌روزرسانی: `git pull && bash deploy/docker-install.sh`
+- داده‌ها در volumeهای `db-data` و `uploads` نگهداری می‌شوند؛ `docker compose down -v` همه داده‌ها را پاک می‌کند.
 
 ## تست
 ```bash

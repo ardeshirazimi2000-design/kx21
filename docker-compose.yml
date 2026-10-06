@@ -1,5 +1,5 @@
-# Local/staging stack:  docker compose up --build
-# optional demo data:   docker compose exec api node dist/db/seed.js
+# Trial/staging stack. Easiest:  bash deploy/docker-install.sh
+# (creates .env with secrets, starts everything on WEB_PORT=8000, loads demo data)
 services:
   db:
     image: postgres:16-alpine
@@ -31,8 +31,6 @@ services:
     depends_on:
       db:
         condition: service_healthy
-    ports:
-      - "4000:4000"
 
   web:
     build:
