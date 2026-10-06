@@ -32,8 +32,9 @@ interface AuthState {
   logout: () => Promise<void>;
   refreshMe: () => Promise<void>;
   isAdmin: boolean;
-  /** Chamber in focus for admin pages. */
+  /** Chamber in focus for admin pages (selectable by super admins / multi-chamber admins). */
   chamberId: string | null;
+  setChamberId: (id: string) => void;
 }
 
 const Ctx = createContext<AuthState | null>(null);
@@ -85,10 +86,30 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const isAdmin = !!me && (me.is_super_admin || me.adminChambers.length > 0);
-  const chamberId = me ? (me.adminChambers[0] ?? me.chamber_id ?? me.memberships[0]?.chamber_id ?? null) : null;
+  const [selected, setSelected] = useState<string | null>(() => {
+    try {
+      return localStorage.getItem('kx.chamber');
+    } catch {
+      return null;
+    }
+  });
+  const setChamberId = (id: string) => {
+    setSelected(id);
+    try {
+      localStorage.setItem('kx.chamber', id);
+    } catch {
+      /* ignore */
+    }
+  };
+  const allowedSelection = !!me && !!selected && (me.is_super_admin || me.adminChambers.includes(selected));
+  const chamberId = me
+    ? allowedSelection
+      ? selected
+      : (me.adminChambers[0] ?? me.chamber_id ?? me.memberships[0]?.chamber_id ?? null)
+    : null;
 
   return (
-    <Ctx.Provider value={{ me, loading, login, verifyMfa, logout, refreshMe, isAdmin, chamberId }}>{children}</Ctx.Provider>
+    <Ctx.Provider value={{ me, loading, login, verifyMfa, logout, refreshMe, isAdmin, chamberId, setChamberId }}>{children}</Ctx.Provider>
   );
 }
 

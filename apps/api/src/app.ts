@@ -18,7 +18,7 @@ import { minutesRouter } from './routes/minutes.js';
 import { reportsRouter } from './routes/reports.js';
 import { resolutionsRouter } from './routes/resolutions.js';
 import { structureRouter } from './routes/structure.js';
-import rateLimit from 'express-rate-limit';
+import rateLimit, { ipKeyGenerator } from 'express-rate-limit';
 
 const openapiPath = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'openapi.yaml');
 
@@ -69,7 +69,7 @@ export function createApp() {
       limit: config.isTest ? 100000 : 600,
       standardHeaders: 'draft-8',
       legacyHeaders: false,
-      keyGenerator: (req) => req.user?.id ?? req.ip ?? 'anon',
+      keyGenerator: (req) => req.user?.id ?? ipKeyGenerator(req.ip ?? '0.0.0.0'),
     }),
   );
   api.use(structureRouter);

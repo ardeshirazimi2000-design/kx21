@@ -24,10 +24,16 @@ const chamberSchema = z.object({
 });
 
 structureRouter.get('/chambers', async (req, res) => {
-  const ids = await visibleChamberIds(currentUser(req));
+  const u = currentUser(req);
+  const ids = await visibleChamberIds(u);
   const rows = await query(
-    `SELECT * FROM chambers WHERE ($1::uuid[] IS NULL OR id = ANY($1)) ORDER BY name`,
-    [ids],
+    `SELECT c.*,
+       CASE WHEN $2 OR c.id = ANY($3::uuid[]) THEN (
+         SELECT COALESCE(json_agg(json_build_object('id', u.id, 'full_name', u.full_name, 'email', u.email, 'mobile', u.mobile) ORDER BY u.full_name), '[]')
+           FROM chamber_admins a JOIN users u ON u.id = a.user_id WHERE a.chamber_id = c.id) END AS admins,
+       (SELECT count(*) FROM commissions k JOIN terms t ON t.id = k.term_id WHERE k.chamber_id = c.id AND t.status = 'active') AS commission_count
+     FROM chambers c WHERE ($1::uuid[] IS NULL OR c.id = ANY($1)) ORDER BY c.name`,
+    [ids, u.isSuperAdmin, u.adminChambers],
   );
   res.json(rows);
 });
@@ -78,13 +84,45 @@ structureRouter.patch('/chambers/:id', async (req, res) => {
   res.json(row);
 });
 
+/**
+ * Assign a provincial chamber admin (Super Admin only). Either an existing person of that chamber
+ * (`userId`) or a new person created in the chamber (`person`, with a login password).
+ */
 structureRouter.post('/chambers/:id/admins', async (req, res) => {
   const id = param(req, 'id');
   requireSuperAdmin(currentUser(req));
-  const b = body(req, z.object({ userId: uuid }));
+  const b = body(
+    req,
+    z
+      .object({ userId: uuid.optional(), person: personSchema.extend({ password: z.string().min(8, 'رمز عبور باید حداقل ۸ کاراکتر باشد') }).optional() })
+      .refine((v) => v.userId || v.person, 'شخص موجود یا مشخصات شخص جدید لازم است'),
+  );
+  const admin = await tx(async (c) => {
+    const chamber = await one('SELECT id FROM chambers WHERE id = $1', [id], c);
+    if (!chamber) throw notFound('اتاق یافت نشد');
+    let userId = b.userId;
+    if (userId) {
+      const p = await one('SELECT chamber_id FROM users WHERE id = $1', [userId], c);
+      if (!p) throw notFound('شخص یافت نشد');
+      if (p.chamber_id !== id) throw badRequest('این شخص متعلق به اتاق دیگری است');
+    } else {
+      userId = (await createPerson(c, req, id, b.person!)).id;
+    }
+    await c.query('INSERT INTO chamber_admins (chamber_id, user_id) VALUES ($1,$2) ON CONFLICT DO NOTHING', [id, userId]);
+    await audit(c, req, { chamberId: id, action: 'chamber.admin_added', entity: 'user', entityId: userId });
+    return one('SELECT id, full_name, email, mobile FROM users WHERE id = $1', [userId], c);
+  });
+  res.status(201).json(admin);
+});
+
+structureRouter.delete('/chambers/:id/admins/:userId', async (req, res) => {
+  const id = param(req, 'id');
+  const userId = param(req, 'userId');
+  requireSuperAdmin(currentUser(req));
   await tx(async (c) => {
-    await c.query('INSERT INTO chamber_admins (chamber_id, user_id) VALUES ($1,$2) ON CONFLICT DO NOTHING', [id, b.userId]);
-    await audit(c, req, { chamberId: id, action: 'chamber.admin_added', entity: 'user', entityId: b.userId });
+    await c.query('DELETE FROM chamber_admins WHERE chamber_id = $1 AND user_id = $2', [id, userId]);
+    await c.query('UPDATE refresh_tokens SET revoked_at = now() WHERE user_id = $1 AND revoked_at IS NULL', [userId]);
+    await audit(c, req, { chamberId: id, action: 'chamber.admin_removed', entity: 'user', entityId: userId });
   });
   res.status(204).end();
 });
@@ -350,6 +388,10 @@ structureRouter.post('/commissions/:id/members', async (req, res) => {
     if (!commission) throw notFound('کمیسیون یافت نشد');
     requireChamberAdmin(u, commission.chamber_id);
     const userId = b.userId ?? (await createPerson(c, req, commission.chamber_id, b.person!)).id;
+    if (b.userId) {
+      const person = await one('SELECT chamber_id FROM users WHERE id = $1', [b.userId], c);
+      if (!person || person.chamber_id !== commission.chamber_id) throw badRequest('این شخص متعلق به این اتاق نیست');
+    }
     const existing = await one(
       `SELECT * FROM commission_memberships WHERE commission_id = $1 AND user_id = $2 AND status = 'active'`,
       [commissionId, userId],

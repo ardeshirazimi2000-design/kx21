@@ -62,6 +62,10 @@ resolutionsRouter.post('/resolutions', async (req, res) => {
       if (!vs || vs.status !== 'closed') throw badRequest('رأی‌گیری مربوطه بسته نشده است');
       if (!vs.result?.passed) throw conflict('این موضوع در رأی‌گیری تصویب نشده است', 'not_passed');
     }
+    if (b.ownerId) {
+      const owner = await one('SELECT chamber_id FROM users WHERE id = $1', [b.ownerId], c);
+      if (!owner || owner.chamber_id !== ca.commission.chamber_id) throw badRequest('مسئول اجرا متعلق به این اتاق نیست');
+    }
     const { n } = (await one<{ n: number }>('SELECT count(*) + 1 AS n FROM resolutions WHERE commission_id = $1', [b.commissionId], c))!;
     const number = `${ca.commission.code}-${String(n).padStart(3, '0')}`;
     const r = await one(
@@ -153,6 +157,10 @@ resolutionsRouter.patch('/resolutions/:id', async (req, res) => {
     const { r, canManage } = await loadResolution(u, param(req, 'id'), c, true);
     if (!canManage) throw forbidden();
     if (r.status === 'done') throw conflict('مصوبه انجام‌شده قابل ویرایش نیست');
+    if (b.ownerId) {
+      const owner = await one('SELECT chamber_id FROM users WHERE id = $1', [b.ownerId], c);
+      if (!owner || owner.chamber_id !== r.chamber_id) throw badRequest('مسئول اجرا متعلق به این اتاق نیست');
+    }
     const row = await one(
       `UPDATE resolutions SET text = COALESCE($2, text), owner_id = COALESCE($3, owner_id), addressee = COALESCE($4, addressee),
          due_date = COALESCE($5, due_date), priority = COALESCE($6, priority), kpi = COALESCE($7, kpi), status = COALESCE($8, status),
@@ -342,6 +350,8 @@ resolutionsRouter.post('/referrals', async (req, res) => {
   const ca = await commissionAccess(u, b.commissionId);
   ca.require('issue.manage');
   const row = await tx(async (c) => {
+    const expert = await one('SELECT chamber_id FROM users WHERE id = $1', [b.expertId], c);
+    if (!expert || expert.chamber_id !== ca.commission.chamber_id) throw badRequest('کارشناس متعلق به این اتاق نیست');
     if (b.issueId) {
       const i = await one('SELECT commission_id FROM issues WHERE id = $1', [b.issueId], c);
       if (!i || i.commission_id !== b.commissionId) throw badRequest('موضوع متعلق به این کمیسیون نیست');

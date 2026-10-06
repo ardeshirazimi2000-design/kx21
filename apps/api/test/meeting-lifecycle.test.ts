@@ -406,10 +406,59 @@ describe('structure', () => {
     expect(t.status).toBe(201);
     const terms = await as('admin').get(`/api/terms?chamberId=${chamberId}`);
     expect(terms.body.find((x: any) => x.number === 10).status).toBe('closed');
-    const { rows } = await pool.query(`SELECT count(*)::int AS n FROM commission_memberships WHERE status = 'active'`);
+    const { rows } = await pool.query(`SELECT count(*)::int AS n FROM commission_memberships WHERE status = 'active' AND chamber_id = $1`, [chamberId]);
     expect(rows[0].n).toBe(0);
     const { rows: hist } = await pool.query(`SELECT count(*)::int AS n FROM commission_memberships`);
     expect(hist[0].n).toBeGreaterThan(10);
+  });
+});
+
+describe('multi-chamber isolation', () => {
+  it('lets each provincial admin manage only its own chamber', async () => {
+    await login('isf', 'admin.isf@kx.local');
+    const yazdChamber = (await as('admin').get('/api/auth/me')).body.adminChambers[0];
+    const isfChamber = (await as('isf').get('/api/auth/me')).body.adminChambers[0];
+    expect(isfChamber).not.toBe(yazdChamber);
+
+    // each admin sees only its own chamber and commissions
+    expect((await as('isf').get('/api/chambers')).body.map((c: any) => c.id)).toEqual([isfChamber]);
+    const isfList = await as('isf').get('/api/commissions');
+    expect(isfList.body.items.every((c: any) => c.chamber_id === isfChamber)).toBe(true);
+    const yazdCommission = (await as('admin').get('/api/commissions')).body.items[0];
+    expect(yazdCommission.chamber_id).toBe(yazdChamber);
+    expect((await as('isf').get(`/api/commissions/${yazdCommission.id}`)).status).toBe(404);
+    expect((await as('isf').get(`/api/people?chamberId=${yazdChamber}`)).status).toBe(403);
+
+    // cannot define terms/commissions in another chamber
+    const yazdTerm = (await as('admin').get(`/api/terms?chamberId=${yazdChamber}`)).body[0];
+    expect((await as('isf').post('/api/terms', { chamberId: yazdChamber, number: 20, title: 'دوره غیرمجاز', startDate: '2027-01-01' })).status).toBe(403);
+    expect((await as('isf').post('/api/commissions', { chamberId: yazdChamber, termId: yazdTerm.id, name: 'کمیسیون غیرمجاز', code: 'BAD' })).status).toBe(403);
+
+    // defines its own commission and cannot add a person from another chamber to it
+    const isfTerm = (await as('isf').get(`/api/terms?chamberId=${isfChamber}`)).body[0];
+    const created = await as('isf').post('/api/commissions', { chamberId: isfChamber, termId: isfTerm.id, name: 'کمیسیون کشاورزی اصفهان', code: 'AGR' });
+    expect(created.status).toBe(201);
+    expect((await as('isf').post(`/api/commissions/${created.body.id}/members`, { userId: ids.m1, position: 'member' })).status).toBe(400);
+    expect((await as('admin').get(`/api/commissions/${created.body.id}`)).status).toBe(404);
+  });
+
+  it('lets the super admin create a chamber and assign its provincial admin', async () => {
+    const ch = await as('root').post('/api/chambers', { name: 'اتاق بازرگانی کرمان', province: 'کرمان' });
+    expect(ch.status).toBe(201);
+    expect((await as('admin').post(`/api/chambers/${ch.body.id}/admins`, { userId: ids.m1 })).status).toBe(403);
+    expect((await as('root').post(`/api/chambers/${ch.body.id}/admins`, { userId: ids.m1 })).status).toBe(400); // person of another chamber
+    const adm = await as('root').post(`/api/chambers/${ch.body.id}/admins`, {
+      person: { fullName: 'مدیر اتاق کرمان', email: 'admin.krm@kx.local', password: 'Kerman#2026' },
+    });
+    expect(adm.status).toBe(201);
+    const l = await request(app).post('/api/auth/login').send({ identifier: 'admin.krm@kx.local', password: 'Kerman#2026' });
+    tokens.krm = l.body.accessToken;
+    expect((await as('krm').get('/api/auth/me')).body.adminChambers).toEqual([ch.body.id]);
+    const t = await as('krm').post('/api/terms', { chamberId: ch.body.id, number: 1, title: 'دوره اول', startDate: '2026-04-21', status: 'active' });
+    expect(t.status).toBe(201);
+    expect((await as('krm').post('/api/commissions', { chamberId: ch.body.id, termId: t.body.id, name: 'کمیسیون معدن کرمان', code: 'MIN' })).status).toBe(201);
+    const list = await as('root').get('/api/chambers');
+    expect(list.body.find((c: any) => c.id === ch.body.id).admins[0].full_name).toBe('مدیر اتاق کرمان');
   });
 });
 

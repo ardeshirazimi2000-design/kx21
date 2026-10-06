@@ -28,7 +28,7 @@ export async function seed() {
 
     const chamber = await ins(
       `INSERT INTO chambers (name, province, phone, email, address) VALUES ($1,$2,$3,$4,$5) RETURNING id`,
-      ['اتاق بازرگانی، صنایع، معادن و کشاورزی استان نمونه', 'استان نمونه', '021-00000000', 'info@chamber.local', 'خیابان نمونه، پلاک ۱'],
+      ['اتاق بازرگانی، صنایع، معادن و کشاورزی یزد', 'یزد', '035-00000000', 'info@yazd.chamber.local', 'یزد'],
     );
     const person = async (fullName: string, email: string, mobile: string, org: string, opts: { superAdmin?: boolean } = {}) =>
       (
@@ -58,7 +58,7 @@ export async function seed() {
     );
     const commission = await ins(
       `INSERT INTO commissions (chamber_id, term_id, name, code, domain, settings) VALUES ($1,$2,$3,$4,$5,$6) RETURNING id`,
-      [chamber.id, term.id, 'کمیسیون صادرات و تجارت خارجی', 'EXP', 'صادرات، گمرک و تجارت بین‌الملل', JSON.stringify(DEFAULT_COMMISSION_SETTINGS)],
+      [chamber.id, term.id, 'کمیسیون تجارت و صادرات یزد', 'EXP', 'صادرات، گمرک و تجارت بین‌الملل', JSON.stringify(DEFAULT_COMMISSION_SETTINGS)],
     );
     const commission2 = await ins(
       `INSERT INTO commissions (chamber_id, term_id, name, code, domain, settings) VALUES ($1,$2,$3,$4,$5,$6) RETURNING id`,
@@ -139,12 +139,41 @@ export async function seed() {
       `INSERT INTO issues (chamber_id, commission_id, title, description, created_by) VALUES ($1,$2,$3,$4,$5)`,
       [chamber.id, commission.id, 'افزایش هزینه‌های حمل‌ونقل صادراتی', 'گزارش اعضا از افزایش ۴۰ درصدی کرایه حمل جاده‌ای', members[1]],
     );
+    // Second, fully separate chamber: its admin sees and manages only Isfahan.
+    const isf = await ins(
+      `INSERT INTO chambers (name, province, phone, email, address) VALUES ($1,$2,$3,$4,$5) RETURNING id`,
+      ['اتاق بازرگانی، صنایع، معادن و کشاورزی اصفهان', 'اصفهان', '031-00000000', 'info@isfahan.chamber.local', 'اصفهان'],
+    );
+    const isfPerson = async (fullName: string, email: string, mobile: string) =>
+      (
+        await ins(
+          `INSERT INTO users (chamber_id, full_name, email, mobile, organization, password_hash) VALUES ($1,$2,$3,$4,$5,$6) RETURNING id`,
+          [isf.id, fullName, email, mobile, 'اتاق اصفهان', hash],
+        )
+      ).id as string;
+    const isfAdmin = await isfPerson('مدیر اتاق اصفهان', 'admin.isf@kx.local', '09130000001');
+    await c.query('INSERT INTO chamber_admins (chamber_id, user_id) VALUES ($1,$2)', [isf.id, isfAdmin]);
+    const isfChair = await isfPerson('رئیس کمیسیون تجارت اصفهان', 'chair.isf@kx.local', '09130000002');
+    const isfTerm = await ins(
+      `INSERT INTO terms (chamber_id, number, title, start_date, status) VALUES ($1, 10, 'دوره دهم', '2023-04-21', 'active') RETURNING id`,
+      [isf.id],
+    );
+    const isfCommission = await ins(
+      `INSERT INTO commissions (chamber_id, term_id, name, code, domain, settings) VALUES ($1,$2,$3,'TRD',$4,$5) RETURNING id`,
+      [isf.id, isfTerm.id, 'کمیسیون تجارت اصفهان', 'تجارت داخلی و خارجی', JSON.stringify(DEFAULT_COMMISSION_SETTINGS)],
+    );
+    await c.query(
+      `INSERT INTO commission_memberships (chamber_id, commission_id, user_id, position, has_vote) VALUES ($1,$2,$3,'chair',true)`,
+      [isf.id, isfCommission.id, isfChair],
+    );
+
     await c.query('COMMIT');
     console.log('Seed complete. Accounts (password: %s):', SEED_PASSWORD);
     console.table([
       ['root@kx.local', 'Super Admin'],
-      ['admin@kx.local', 'Chamber Admin'],
-      ['chair@kx.local', 'رئیس کمیسیون صادرات'],
+      ['admin@kx.local', 'مدیر اتاق یزد'],
+      ['admin.isf@kx.local', 'مدیر اتاق اصفهان'],
+      ['chair@kx.local', 'رئیس کمیسیون تجارت یزد'],
       ['secretary@kx.local', 'دبیر'],
       ['member1@kx.local … member6@kx.local', 'اعضا'],
       ['expert@kx.local', 'کارشناس'],

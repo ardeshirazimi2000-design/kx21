@@ -11,7 +11,7 @@ export function CommissionsPage() {
   const nav = useNavigate();
   const [page, setPage] = useState(1);
   const [q, setQ] = useState('');
-  const { data, loading, reload } = useApi(`/commissions?page=${page}&q=${encodeURIComponent(q)}`);
+  const { data, loading, reload } = useApi(`/commissions?page=${page}&q=${encodeURIComponent(q)}${isAdmin && chamberId ? `&chamberId=${chamberId}` : ''}`);
   const [open, setOpen] = useState(false);
   return (
     <>

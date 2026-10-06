@@ -57,7 +57,14 @@ export function App() {
 }
 
 function Shell({ children }: { children: ReactNode }) {
-  const { me, logout, isAdmin } = useAuth();
+  const { me, logout, isAdmin, chamberId, setChamberId } = useAuth();
+  const chambers = useApi<any[]>(isAdmin ? '/chambers' : null);
+  const selectable = (chambers.data ?? []).filter((c) => me!.is_super_admin || me!.adminChambers.includes(c.id));
+  // A super admin without a home chamber starts on the first chamber.
+  useEffect(() => {
+    if (!chamberId && selectable.length) setChamberId(selectable[0].id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [chamberId, selectable.length]);
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState('');
   const loc = useLocation();
@@ -121,6 +128,25 @@ function Shell({ children }: { children: ReactNode }) {
             <input className="input" placeholder="جستجو در کمیسیون‌ها، جلسات و مصوبات…" value={q} onChange={(e) => setQ(e.target.value)} />
           </form>
           <div className="grow" />
+          {selectable.length > 1 && (
+            <select
+              className="input"
+              style={{ maxWidth: 260 }}
+              aria-label="اتاق"
+              value={chamberId ?? ''}
+              onChange={(e) => {
+                setChamberId(e.target.value);
+                nav('/');
+              }}
+            >
+              {selectable.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.name}
+                </option>
+              ))}
+            </select>
+          )}
+          {selectable.length === 1 && <span className="muted small">{selectable[0].name}</span>}
           <Link to="/profile" className="muted">
             {me!.full_name}
           </Link>

@@ -1,14 +1,16 @@
 import { TERM_STATUS_LABELS, type TermStatus } from '@kx/shared';
 import { useState } from 'react';
-import { patch, post } from '../lib/api';
+import { del, patch, post } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { useApi } from '../lib/hooks';
 import { Badge, Button, Card, dateFa, Empty, ErrorBox, Field, fa, JalaliDateInput, Loading, Modal, PageHeader, Pager } from '../components/ui';
 
-/** Chambers (super admin) */
+/** Chambers (super admin): each provincial chamber has its own admins, terms and commissions. */
 export function ChambersPage() {
+  const { me, setChamberId } = useAuth();
   const { data, reload, loading } = useApi<any[]>('/chambers');
   const [open, setOpen] = useState(false);
+  const [adminFor, setAdminFor] = useState<any | null>(null);
   const [form, setForm] = useState({ name: '', province: '', phone: '', email: '', address: '' });
   const [err, setErr] = useState<Error | null>(null);
   const save = async () => {
@@ -20,33 +22,68 @@ export function ChambersPage() {
       setErr(e as Error);
     }
   };
+  const removeAdmin = async (chamberId: string, a: any) => {
+    if (!confirm(`دسترسی مدیریت «${a.full_name}» از این اتاق حذف شود؟`)) return;
+    await del(`/chambers/${chamberId}/admins/${a.id}`);
+    void reload();
+  };
   return (
     <>
-      <PageHeader title="اتاق‌ها" subtitle="مدیریت اتاق‌های استانی (Multi-tenant)" actions={<Button onClick={() => setOpen(true)}>اتاق جدید</Button>} />
+      <PageHeader
+        title="اتاق‌ها"
+        subtitle="هر اتاق استانی دوره‌ها، کمیسیون‌ها، اعضا و جلسات مستقل خود را دارد و مدیر آن فقط به اتاق خودش دسترسی دارد."
+        actions={me!.is_super_admin && <Button onClick={() => setOpen(true)}>اتاق جدید</Button>}
+      />
       <Card>
         {loading && !data ? (
           <Loading />
         ) : (
-          <table className="table">
-            <thead>
-              <tr>
-                <th>نام</th>
-                <th>استان</th>
-                <th>تلفن</th>
-                <th>ایمیل</th>
-              </tr>
-            </thead>
-            <tbody>
-              {data?.map((c) => (
-                <tr key={c.id}>
-                  <td>{c.name}</td>
-                  <td>{c.province}</td>
-                  <td className="ltr">{c.phone}</td>
-                  <td className="ltr">{c.email}</td>
+          <div className="table-wrap">
+            <table className="table">
+              <thead>
+                <tr>
+                  <th>نام</th>
+                  <th>استان</th>
+                  <th>کمیسیون‌های دوره جاری</th>
+                  <th>مدیران اتاق</th>
+                  <th />
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {data?.map((c) => (
+                  <tr key={c.id}>
+                    <td>{c.name}</td>
+                    <td>{c.province}</td>
+                    <td>{fa(c.commission_count)}</td>
+                    <td>
+                      {(c.admins ?? []).length === 0 && <Badge tone="warning">تعیین نشده</Badge>}
+                      {(c.admins ?? []).map((a: any) => (
+                        <div key={a.id} className="row gap-sm">
+                          <span>{a.full_name}</span>
+                          <span className="muted small ltr">{a.email ?? a.mobile}</span>
+                          {me!.is_super_admin && (
+                            <button className="btn btn-ghost btn-sm" onClick={() => removeAdmin(c.id, a)}>
+                              حذف
+                            </button>
+                          )}
+                        </div>
+                      ))}
+                    </td>
+                    <td className="row gap-sm">
+                      {me!.is_super_admin && (
+                        <Button size="sm" variant="secondary" onClick={() => setAdminFor(c)}>
+                          تعیین مدیر اتاق
+                        </Button>
+                      )}
+                      <Button size="sm" variant="ghost" onClick={() => setChamberId(c.id)}>
+                        مدیریت این اتاق
+                      </Button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         )}
       </Card>
       {open && (
@@ -57,9 +94,79 @@ export function ChambersPage() {
               <input className="input" value={form[k]} onChange={(e) => setForm({ ...form, [k]: e.target.value })} />
             </Field>
           ))}
+          <p className="muted small">پس از ایجاد، با «تعیین مدیر اتاق» مدیر استانی را مشخص کنید تا دوره‌ها و کمیسیون‌های این اتاق را تعریف کند.</p>
         </Modal>
       )}
+      {adminFor && <ChamberAdminModal chamber={adminFor} onClose={() => setAdminFor(null)} onSaved={() => { setAdminFor(null); void reload(); }} />}
     </>
+  );
+}
+
+function ChamberAdminModal({ chamber, onClose, onSaved }: { chamber: any; onClose: () => void; onSaved: () => void }) {
+  const [mode, setMode] = useState<'new' | 'existing'>('new');
+  const [form, setForm] = useState({ fullName: '', mobile: '', email: '', password: '' });
+  const [q, setQ] = useState('');
+  const [userId, setUserId] = useState<string | null>(null);
+  const people = useApi(mode === 'existing' && q.length >= 2 ? `/people?chamberId=${chamber.id}&q=${encodeURIComponent(q)}&pageSize=8` : null);
+  const [err, setErr] = useState<Error | null>(null);
+  const save = async () => {
+    try {
+      if (mode === 'existing') await post(`/chambers/${chamber.id}/admins`, { userId });
+      else
+        await post(`/chambers/${chamber.id}/admins`, {
+          person: { fullName: form.fullName, mobile: form.mobile || null, email: form.email || null, password: form.password },
+        });
+      onSaved();
+    } catch (e) {
+      setErr(e as Error);
+    }
+  };
+  return (
+    <Modal title={`تعیین مدیر — ${chamber.name}`} onClose={onClose} footer={<Button disabled={mode === 'existing' && !userId} onClick={save}>ثبت</Button>}>
+      <ErrorBox error={err} />
+      <div className="row gap-sm mb">
+        <Button size="sm" variant={mode === 'new' ? 'primary' : 'secondary'} onClick={() => setMode('new')}>
+          شخص جدید
+        </Button>
+        <Button size="sm" variant={mode === 'existing' ? 'primary' : 'secondary'} onClick={() => setMode('existing')}>
+          از اشخاص همین اتاق
+        </Button>
+      </div>
+      {mode === 'new' ? (
+        <>
+          <Field label="نام و نام خانوادگی">
+            <input className="input" value={form.fullName} onChange={(e) => setForm({ ...form, fullName: e.target.value })} />
+          </Field>
+          <div className="grid grid-2">
+            <Field label="ایمیل (نام کاربری)">
+              <input className="input ltr" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} />
+            </Field>
+            <Field label="موبایل">
+              <input className="input ltr" placeholder="09xxxxxxxxx" value={form.mobile} onChange={(e) => setForm({ ...form, mobile: e.target.value })} />
+            </Field>
+          </div>
+          <Field label="رمز عبور اولیه" hint="حداقل ۸ کاراکتر؛ مدیر پس از ورود از «پروفایل» آن را تغییر دهد">
+            <input className="input ltr" type="password" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} />
+          </Field>
+        </>
+      ) : (
+        <>
+          <Field label="جستجوی شخص">
+            <input className="input" value={q} onChange={(e) => { setQ(e.target.value); setUserId(null); }} />
+          </Field>
+          <ul className="list">
+            {people.data?.items.map((p: any) => (
+              <li key={p.id}>
+                <label className="check" style={{ margin: 0 }}>
+                  <input type="radio" checked={userId === p.id} onChange={() => setUserId(p.id)} /> {p.full_name}
+                  {!p.can_login && <span className="muted small"> (رمز عبور ندارد)</span>}
+                </label>
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
+    </Modal>
   );
 }
 

@@ -43,7 +43,7 @@ npm run dev:api                              # http://localhost:4000
 npm run dev:web                              # http://localhost:5173
 ```
 
-حساب‌های آزمایشی (رمز همه `Passw0rd!`): `admin@kx.local` (مدیر اتاق)، `chair@kx.local` (رئیس)، `secretary@kx.local` (دبیر)، `member1@kx.local` … `member6@kx.local` (اعضا)، `expert@kx.local`، `guest@kx.local`، `root@kx.local` (Super Admin).
+حساب‌های آزمایشی (رمز همه `Passw0rd!`): `admin@kx.local` (مدیر اتاق یزد)، `admin.isf@kx.local` (مدیر اتاق اصفهان)، `chair@kx.local` (رئیس کمیسیون تجارت یزد)، `secretary@kx.local` (دبیر)، `member1@kx.local` … `member6@kx.local` (اعضا)، `expert@kx.local`، `guest@kx.local`، `root@kx.local` (Super Admin).
 
 ### موبایل
 ```bash
