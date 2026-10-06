@@ -2,7 +2,7 @@ import crypto from 'node:crypto';
 import cors from 'cors';
 import express, { type NextFunction, type Request, type Response } from 'express';
 import helmet from 'helmet';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { authenticate } from './auth/middleware.js';
@@ -26,7 +26,13 @@ export function createApp() {
   const app = express();
   app.set('trust proxy', 1);
   app.disable('x-powered-by');
-  app.use(helmet());
+  app.use(
+    helmet({
+      // On a plain-HTTP trial install (e.g. http://server:8000) these would break loading.
+      hsts: config.publicHttps,
+      contentSecurityPolicy: { directives: { upgradeInsecureRequests: config.publicHttps ? [] : null } },
+    }),
+  );
   app.use(cors({ origin: config.corsOrigins, credentials: true }));
   app.use(express.json({ limit: '1mb' }));
 
@@ -74,6 +80,14 @@ export function createApp() {
   api.use(documentsRouter);
   api.use(reportsRouter);
   app.use('/api', api);
+
+  // Single-port mode: serve the built web app and fall back to index.html for client routes.
+  if (config.webDistDir && existsSync(path.join(config.webDistDir, 'index.html'))) {
+    const dir = path.resolve(config.webDistDir);
+    app.use(express.static(dir, { index: false, maxAge: '1h' }));
+    app.get(/^(?!\/api\/|\/socket\.io\/).*/, (_req, res) => res.sendFile(path.join(dir, 'index.html')));
+    logger.info({ dir }, 'serving web app');
+  }
 
   app.use((_req, res) => {
     res.status(404).json({ error: { code: 'not_found', message: 'مسیر یافت نشد' } });

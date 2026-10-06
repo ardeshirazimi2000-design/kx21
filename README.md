@@ -11,6 +11,24 @@
 | اپ موبایل (Android/iOS) | `apps/mobile` | Expo SDK 57، expo-router |
 | مستندات | `docs/` | معماری، دیتابیس، API، مجوزها، چرخه جلسه، اعلان‌ها، تست، تصمیم‌ها، راهنما |
 
+## نصب آزمایشی روی سرور (پورت 8000)
+
+روی یک سرور Ubuntu 22.04 یا 24.04 (حداقل ۲ گیگ RAM):
+
+```bash
+git clone -b claude/commission-platform https://github.com/ardeshirazimi2000-design/kx21.git
+cd kx21
+sudo bash deploy/install.sh
+```
+
+اسکریپت Node.js 22 و PostgreSQL را نصب، برنامه را build و سرویس systemd به نام `kx21` را روی پورت **8000** راه‌اندازی می‌کند (وب، API و WebSocket روی یک پورت). سپس `http://IP-سرور:8000` را باز کنید و با `admin@kx.local` / `Passw0rd!` وارد شوید.
+
+- نصب بدون داده آزمایشی: `sudo SEED=0 bash deploy/install.sh` — پورت دیگر: `sudo PORT=9000 bash deploy/install.sh`
+- اگر دسترسی به npm محدود است: `sudo NPM_REGISTRY=<آدرس mirror> bash deploy/install.sh`
+- لاگ‌ها: `journalctl -u kx21 -f` — تنظیمات: `/etc/kx21.env` (پس از تغییر: `systemctl restart kx21`)
+- به‌روزرسانی: `git pull` و اجرای دوباره همان اسکریپت (رمزها و داده‌ها حفظ می‌شوند)
+- پس از راه‌اندازی HTTPS (مثلاً nginx + certbot)، در `/etc/kx21.env` مقدار `PUBLIC_HTTPS=true` را اضافه کنید.
+
 ## اجرای سریع (توسعه)
 
 پیش‌نیاز: Node.js 22 و PostgreSQL 16.
@@ -37,7 +55,7 @@ EXPO_PUBLIC_API_URL=http://<IP-سرور>:4000 npx expo start
 
 ### Docker
 ```bash
-JWT_SECRET=$(openssl rand -hex 32) docker compose up --build   # وب: http://localhost:8080
+JWT_SECRET=$(openssl rand -hex 32) docker compose up --build   # وب: http://localhost:8000
 docker compose exec api node dist/db/seed.js                    # اختیاری: داده آزمایشی
 ```
 

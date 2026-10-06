@@ -26,6 +26,10 @@ export const config = {
   kavenegarApiKey: process.env.KAVENEGAR_API_KEY,
   kavenegarSender: process.env.KAVENEGAR_SENDER,
   schedulerIntervalSeconds: Number(env('SCHEDULER_INTERVAL_SECONDS', '300')),
+  /** Built web app (apps/web/dist) to serve from this process, for single-port installs. */
+  webDistDir: process.env.WEB_DIST_DIR,
+  /** Set to true once the site is served over HTTPS (enables HSTS and upgrade-insecure-requests). */
+  publicHttps: process.env.PUBLIC_HTTPS === 'true',
 };
 
 if (isProd && config.jwtSecret.length < 32) {

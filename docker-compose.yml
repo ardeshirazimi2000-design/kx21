@@ -21,7 +21,7 @@ services:
     environment:
       DATABASE_URL: postgres://kx:${POSTGRES_PASSWORD:-kx}@db:5432/kx
       JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET (at least 32 characters)}
-      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:8080}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:8000}
       SMS_PROVIDER: ${SMS_PROVIDER:-log}
       KAVENEGAR_API_KEY: ${KAVENEGAR_API_KEY:-}
       KAVENEGAR_SENDER: ${KAVENEGAR_SENDER:-}
@@ -41,7 +41,7 @@ services:
     depends_on:
       - api
     ports:
-      - "8080:80"
+      - "${WEB_PORT:-8000}:80"
 
 volumes:
   db-data:
