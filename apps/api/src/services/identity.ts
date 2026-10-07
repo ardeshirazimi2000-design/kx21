@@ -43,12 +43,14 @@ const LAST = ['lastname', 'last_name', 'family', 'familyname', 'family_name', 's
 const FATHER = ['fathername', 'father_name', 'father', 'fathersname'];
 
 async function sapi(nationalCode: string, birthDate: string): Promise<IdentityResult> {
-  if (!config.identityApiToken) throw new HttpError(503, 'identity_not_configured', 'توکن سرویس استعلام هویت تنظیم نشده است');
+  // Accept the token with or without a pasted "Bearer " prefix and surrounding quotes/spaces.
+  const token = (config.identityApiToken ?? '').trim().replace(/^["']|["']$/g, '').replace(/^Bearer\s+/i, '').trim();
+  if (!token) throw new HttpError(503, 'identity_not_configured', 'توکن سرویس استعلام هویت تنظیم نشده است');
   let res: Response;
   try {
     res = await fetch(config.identityApiUrl, {
       method: 'POST',
-      headers: { 'content-type': 'application/json', authorization: `Bearer ${config.identityApiToken}` },
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
       body: JSON.stringify({ nationalCode, birthDate }),
       signal: AbortSignal.timeout(15000),
     });
