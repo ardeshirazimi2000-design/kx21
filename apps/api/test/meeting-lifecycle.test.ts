@@ -184,6 +184,9 @@ describe('meeting lifecycle', () => {
   it('only the chair/secretary can start the meeting', async () => {
     expect((await as('m1').post(`/api/meetings/${meetingId}/start`)).status).toBe(403);
     expect((await as('admin').post(`/api/meetings/${meetingId}/start`)).status).toBe(403);
+    // the chamber admin supervises: it sees the live attendance but cannot run the meeting
+    expect((await as('admin').get(`/api/meetings/${meetingId}/attendance`)).body.attendance).toBeTruthy();
+    expect((await as('admin').post(`/api/meetings/${meetingId}/attendance/${ids.m5}/confirm`, { status: 'absent', reason: 'تست' })).status).toBe(403);
     const r = await as('chair').post(`/api/meetings/${meetingId}/start`);
     expect(r.status).toBe(200);
     expect(r.body.status).toBe('in_progress');
@@ -359,6 +362,7 @@ describe('meeting creation and cancellation', () => {
     const commissions = await as('secretary').get('/api/commissions');
     const exp = commissions.body.items.find((c: any) => c.code === 'EXP');
     expect((await as('m1').post('/api/meetings', { commissionId: exp.id, title: 'جلسه غیرمجاز', scheduledAt: new Date().toISOString() })).status).toBe(403);
+    expect((await as('admin').post('/api/meetings', { commissionId: exp.id, title: 'جلسه توسط مدیر اتاق', scheduledAt: new Date().toISOString() })).status).toBe(403);
     const r = await as('secretary').post('/api/meetings', {
       commissionId: exp.id,
       title: 'جلسه فوق‌العاده',
@@ -510,22 +514,22 @@ describe('documents', () => {
     const pdf = Buffer.from('%PDF-1.4\n%âãÏÓ\n1 0 obj<<>>endobj\ntrailer<<>>\n%%EOF');
     const ok = await request(app)
       .post('/api/documents')
-      .set('authorization', `Bearer ${tokens.root}`)
+      .set('authorization', `Bearer ${tokens.secretary}`)
       .field('meetingId', meetingId)
       .attach('file', pdf, { filename: 'گزارش.pdf', contentType: 'application/pdf' });
     expect(ok.status).toBe(201);
     expect(ok.body.file_name).toBe('گزارش.pdf');
     const fake = await request(app)
       .post('/api/documents')
-      .set('authorization', `Bearer ${tokens.root}`)
+      .set('authorization', `Bearer ${tokens.secretary}`)
       .field('meetingId', meetingId)
       .attach('file', Buffer.from('MZ\x90\x00binary'), { filename: 'virus.pdf', contentType: 'application/pdf' });
     expect(fake.status).toBe(400);
-    const dl = await as('root').get(`/api/documents/${ok.body.id}/download`);
+    const dl = await as('secretary').get(`/api/documents/${ok.body.id}/download`);
     expect(dl.status).toBe(200);
     expect((await as('expert').get(`/api/documents/${ok.body.id}/download`)).status).toBe(404);
     // signed short-lived link for mobile viewers
-    const link = await as('root').post(`/api/documents/${ok.body.id}/link`);
+    const link = await as('secretary').post(`/api/documents/${ok.body.id}/link`);
     const url = new URL(link.body.url);
     expect((await request(app).get(url.pathname + url.search)).status).toBe(200);
     expect((await request(app).get(url.pathname + '?token=forged')).status).toBe(404);

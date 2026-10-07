@@ -52,11 +52,12 @@ export function resolveCapabilities(ctx: AccessContext): Set<Capability> {
   const caps = new Set<Capability>();
   if (ctx.isSuperAdmin || ctx.isChamberAdmin) {
     for (const c of CAPABILITIES) caps.add(c);
-    // Admins manage structure and reports; live control and ballots belong to the commission.
-    caps.delete('vote.cast');
-    caps.delete('attendance.self');
-    caps.delete('minutes.approve');
-    caps.delete('meeting.control');
+    // Admins define the structure (terms, commissions, members, positions) and supervise.
+    // Executive work of a commission — meetings, attendance, live control, minutes, resolutions,
+    // expert referrals — belongs to that commission's secretary (and chair), not to the admin.
+    for (const c of ['vote.cast', 'attendance.self', 'minutes.approve', 'meeting.control', 'meeting.manage', 'resolution.manage', 'issue.manage'] as const) {
+      caps.delete(c);
+    }
     if (!ctx.isSuperAdmin) caps.delete('chamber.manage');
   }
 

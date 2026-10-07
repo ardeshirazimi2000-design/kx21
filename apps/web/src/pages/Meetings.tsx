@@ -24,7 +24,8 @@ export function MeetingsPage() {
   }, [jy, jm]);
   const { data, loading, reload } = useApi(`/meetings?from=${range.from}&to=${range.to}&pageSize=100&mine=${mine}`);
   const [open, setOpen] = useState(false);
-  const canCreate = me!.memberships.some((m) => ['chair', 'vice_chair', 'secretary'].includes(m.position)) || me!.adminChambers.length > 0;
+  // Meetings are created by each commission's secretary/chair (executive work), not by the chamber admin.
+  const canCreate = me!.memberships.some((m) => ['chair', 'vice_chair', 'secretary'].includes(m.position));
   const shift = (d: number) => {
     let m = jm + d;
     let y = jy;
@@ -112,7 +113,7 @@ export function NewMeetingModal({ commissionId, onClose, onSaved }: { commission
   const { me } = useAuth();
   const commissions = useApi(commissionId ? null : '/commissions?pageSize=100');
   const options = (commissions.data?.items ?? []).filter(
-    (c: any) => me!.adminChambers.includes(c.chamber_id) || ['chair', 'vice_chair', 'secretary'].includes(c.my_position),
+    (c: any) => ['chair', 'vice_chair', 'secretary'].includes(c.my_position),
   );
   const [form, setForm] = useState({
     commissionId: commissionId ?? '',

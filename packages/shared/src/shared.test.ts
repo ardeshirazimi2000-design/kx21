@@ -115,6 +115,14 @@ describe('permissions', () => {
     const c = resolveCapabilities({ isSuperAdmin: false, isChamberAdmin: false, position: 'member', inviteeRole: 'member', hasVote: true, resultVisibility: 'officers' });
     expect(c.has('vote.results.view')).toBe(false);
   });
+  it('chamber admin supervises but does not run commission work', () => {
+    const c = resolveCapabilities({ isSuperAdmin: false, isChamberAdmin: true });
+    expect(c.has('commission.manage')).toBe(true);
+    expect(c.has('meeting.view')).toBe(true);
+    expect(c.has('attendance.view_all')).toBe(true);
+    expect(c.has('report.chamber')).toBe(true);
+    for (const x of ['meeting.manage', 'meeting.control', 'resolution.manage', 'issue.manage', 'minutes.approve', 'vote.cast'] as const) expect(c.has(x)).toBe(false);
+  });
   it('outsider sees nothing', () => {
     expect(resolveCapabilities({ isSuperAdmin: false, isChamberAdmin: false }).size).toBe(0);
   });

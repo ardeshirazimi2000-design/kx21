@@ -8,12 +8,15 @@ import { useApi } from '../lib/hooks';
 export function HomePage() {
   const { me, isAdmin, chamberId } = useAuth();
   const home = useApi('/me/home');
-  const officerOf = me!.memberships.find((m) => ['chair', 'vice_chair', 'secretary'].includes(m.position));
+  // A secretary/chair may serve several commissions: show the follow-up dashboard of each.
+  const officerOf = me!.memberships.filter((m) => ['chair', 'vice_chair', 'secretary'].includes(m.position));
   return (
     <>
       <PageHeader title={`سلام، ${me!.full_name}`} subtitle="خلاصه وضعیت جلسات، مصوبات و کارهای شما" />
       {isAdmin && chamberId && <ChamberDashboard chamberId={chamberId} />}
-      {officerOf && <CommissionDashboard commissionId={officerOf.commission_id} name={officerOf.commission_name} />}
+      {officerOf.map((m) => (
+        <CommissionDashboard key={m.commission_id} commissionId={m.commission_id} name={m.commission_name} />
+      ))}
       {home.loading && !home.data ? <Loading /> : home.data && <MyHome data={home.data} />}
     </>
   );

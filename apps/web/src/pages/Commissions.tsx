@@ -46,7 +46,7 @@ export function CommissionsPage() {
                     <td className="ltr">{c.code}</td>
                     <td>{c.term_title}</td>
                     <td>{c.chair_name ?? '—'}</td>
-                    <td>{c.secretary_name ?? '—'}</td>
+                    <td>{c.secretary_name ?? <Badge tone="warning">دبیر تعیین نشده</Badge>}</td>
                     <td>{fa(c.member_count)}</td>
                     <td>{c.my_position ? <Badge tone="info">{ROLE_LABELS[c.my_position as Position]}</Badge> : '—'}</td>
                   </tr>

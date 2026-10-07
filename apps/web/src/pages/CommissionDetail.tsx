@@ -255,6 +255,7 @@ function Meetings({ commission }: { commission: any }) {
 function Issues({ commission }: { commission: any }) {
   const { data, reload } = useApi<any[]>(`/commissions/${commission.id}/issues`);
   const canManage = commission.capabilities.includes('issue.manage');
+  const canRaise = canManage || ['chair', 'vice_chair', 'secretary', 'member'].includes(commission.myPosition);
   const referrals = useApi<any[]>(canManage ? `/referrals?commissionId=${commission.id}` : null);
   const members = useApi<any[]>(canManage ? `/commissions/${commission.id}/members` : null);
   const [form, setForm] = useState({ title: '', description: '' });
@@ -267,12 +268,12 @@ function Issues({ commission }: { commission: any }) {
   return (
     <div className="grid grid-2">
       <Card title="مسائل و موضوعات کمیسیون">
-        <div className="row gap-sm mb">
+        {canRaise && <div className="row gap-sm mb">
           <input className="input" placeholder="عنوان موضوع جدید" value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} />
           <Button disabled={form.title.length < 3} onClick={add}>
             ثبت
           </Button>
-        </div>
+        </div>}
         {data?.length === 0 && <Empty>موضوعی ثبت نشده است.</Empty>}
         <ul className="list">
           {data?.map((i) => (
