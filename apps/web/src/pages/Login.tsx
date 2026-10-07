@@ -30,14 +30,12 @@ export function LoginPage() {
 
   return (
     <div className="login">
+      <div className="login-brand">
+        <img src="/iran-chamber-logo.png" width={96} height={96} alt="لوگوی اتاق ایران" />
+        <h1>اتاق بازرگانی، صنایع، معادن و کشاورزی ایران</h1>
+        <p>سامانه کمیسیون‌های تخصصی</p>
+      </div>
       <form className="card" onSubmit={submit}>
-        <div className="row gap" style={{ marginBottom: 16 }}>
-          <img src="/favicon.svg" width={44} height={44} alt="" />
-          <div>
-            <h1 style={{ fontSize: '1.2rem' }}>سامانه کمیسیون‌های تخصصی</h1>
-            <div className="muted small">اتاق بازرگانی، صنایع، معادن و کشاورزی</div>
-          </div>
-        </div>
         <ErrorBox error={error} />
         {!mfaToken ? (
           <>

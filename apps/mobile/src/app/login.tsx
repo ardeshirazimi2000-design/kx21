@@ -1,6 +1,6 @@
 import { router } from 'expo-router';
 import { useState } from 'react';
-import { KeyboardAvoidingView, Platform, View } from 'react-native';
+import { Image, KeyboardAvoidingView, Platform, View } from 'react-native';
 import { Button, Card, ErrorText, Input, T } from '../components/ui';
 import { useAuth } from '../lib/auth';
 import { getApiUrl, normalizeServerUrl, setApiUrl } from '../lib/config';
@@ -43,11 +43,14 @@ export default function LoginScreen() {
   };
   return (
     <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1, backgroundColor: t.primary, justifyContent: 'center', padding: 20 }}>
-      <View style={{ alignItems: 'center', marginBottom: 24 }}>
-        <T bold size={22} color="#fff">
+      <View style={{ alignItems: 'center', marginBottom: 24, gap: 8 }}>
+        <Image source={require('../../assets/iran-chamber-logo.png')} style={{ width: 96, height: 96 }} accessibilityLabel="لوگوی اتاق ایران" />
+        <T bold size={18} color="#fff" style={{ textAlign: 'center' }}>
+          اتاق بازرگانی، صنایع، معادن و کشاورزی ایران
+        </T>
+        <T color="#d6e6ea" style={{ textAlign: 'center' }}>
           سامانه کمیسیون‌های تخصصی
         </T>
-        <T color="#d6e6ea">اتاق بازرگانی، صنایع، معادن و کشاورزی</T>
       </View>
       <Card>
         <ErrorText error={error} />

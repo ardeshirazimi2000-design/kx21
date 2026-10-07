@@ -86,10 +86,10 @@ function Shell({ children }: { children: ReactNode }) {
     <div className="shell">
       <aside className={`sidebar ${open ? 'open' : ''}`}>
         <Link to="/" className="brand">
-          <img src="/favicon.svg" width={34} height={34} alt="" />
+          <img src="/iran-chamber-logo.png" width={52} height={52} alt="لوگوی اتاق ایران" />
           <span>
-            سامانه کمیسیون‌ها
-            <small>اتاق بازرگانی</small>
+            اتاق بازرگانی، صنایع، معادن و کشاورزی ایران
+            <small>سامانه کمیسیون‌های تخصصی</small>
           </span>
         </Link>
         <nav className="nav">
