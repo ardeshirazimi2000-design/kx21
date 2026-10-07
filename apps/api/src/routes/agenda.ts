@@ -336,11 +336,13 @@ agendaRouter.post('/agenda-items/:id/vote', async (req, res) => {
       : await openSessionFor(id, c);
     if (!session || session.status !== 'open') throw conflict('رأی‌گیری باز نیست', 'vote_closed');
     if (!(session.options as string[]).includes(b.choice)) throw badRequest('گزینه رأی معتبر نیست');
-    const att = await one('SELECT status FROM attendance WHERE meeting_id = $1 AND user_id = $2', [a.meeting.id, u.id], c);
-    if (!att || !isAttending(att.status)) throw forbidden('برای رأی دادن ابتدا باید حضور شما ثبت شده باشد', );
+    // A representative votes in the name of the invitee (one ballot per invitee).
+    const voterId = a.delegateFor?.principalId ?? u.id;
+    const att = await one('SELECT status FROM attendance WHERE meeting_id = $1 AND user_id = $2', [a.meeting.id, voterId], c);
+    if (!att || !isAttending(att.status)) throw forbidden('برای رأی دادن ابتدا باید حضور شما ثبت شده باشد');
     const v = await one(
-      `INSERT INTO votes (vote_session_id, voter_id, choice) VALUES ($1,$2,$3) ON CONFLICT (vote_session_id, voter_id) DO NOTHING RETURNING id, created_at`,
-      [session.id, u.id, b.choice],
+      `INSERT INTO votes (vote_session_id, voter_id, choice, cast_by) VALUES ($1,$2,$3,$4) ON CONFLICT (vote_session_id, voter_id) DO NOTHING RETURNING id, created_at`,
+      [session.id, voterId, b.choice, u.id],
       c,
     );
     if (!v) throw conflict('رأی شما قبلاً ثبت شده است', 'already_voted');
@@ -432,13 +434,15 @@ agendaRouter.get('/vote-sessions/:id', async (req, res) => {
   const session = await one('SELECT * FROM vote_sessions WHERE id = $1', [param(req, 'id')]);
   if (!session) throw notFound();
   const a = await meetingAccess(u, session.meeting_id);
-  const mine = await one('SELECT choice, created_at FROM votes WHERE vote_session_id = $1 AND voter_id = $2', [session.id, u.id]);
+  const mine = await one('SELECT choice, created_at FROM votes WHERE vote_session_id = $1 AND voter_id = $2', [session.id, a.delegateFor?.principalId ?? u.id]);
   const [{ count }] = await query('SELECT count(*) FROM votes WHERE vote_session_id = $1 AND is_valid', [session.id]);
   let voters = null;
   // Named ballots are visible for open (non-secret) votes once closed; secret votes never expose voter identity.
   if (!session.secret && session.status === 'closed' && a.can('vote.results.view')) {
     voters = await query(
-      `SELECT v.voter_id, u.full_name, v.choice, v.is_valid FROM votes v JOIN users u ON u.id = v.voter_id WHERE v.vote_session_id = $1 ORDER BY u.full_name`,
+      `SELECT v.voter_id, u.full_name, v.choice, v.is_valid, CASE WHEN v.cast_by <> v.voter_id THEN cb.full_name END AS cast_by_name
+         FROM votes v JOIN users u ON u.id = v.voter_id LEFT JOIN users cb ON cb.id = v.cast_by
+        WHERE v.vote_session_id = $1 ORDER BY u.full_name`,
       [session.id],
     );
   }

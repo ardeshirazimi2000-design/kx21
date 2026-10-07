@@ -231,6 +231,8 @@ const settingsSchema = z
     requireQuorumForVoting: z.boolean(),
     requireQuorumToStart: z.boolean(),
     allowProxy: z.boolean(),
+    proxyCanVote: z.boolean(),
+    requireDelegateLetter: z.boolean(),
     secretVoteDefault: z.boolean(),
     resultVisibility: z.enum(['invitees', 'officers']),
     passRule: z.enum(['majority_of_present', 'majority_of_cast', 'simple_majority', 'two_thirds_of_present']),
@@ -359,7 +361,7 @@ const nationalCode = z
   .transform(normalizeNationalCode)
   .refine(isValidNationalCode, 'کد ملی معتبر نیست');
 
-const personSchema = z.object({
+export const personSchema = z.object({
   /** Optional when the identity is verified: the official name from the registry is used. */
   fullName: z.string().min(2).nullish(),
   nationalId: nationalCode.nullish(),
@@ -381,7 +383,7 @@ async function resolveIdentity(p: z.infer<typeof personSchema>) {
   return null;
 }
 
-async function createPerson(c: any, req: any, chamberId: string, p: z.infer<typeof personSchema>) {
+export async function createPerson(c: any, req: any, chamberId: string, p: z.infer<typeof personSchema>) {
   const identity = await resolveIdentity(p);
   if (p.nationalId) {
     const dup = await one('SELECT id, full_name FROM users WHERE chamber_id = $1 AND national_id = $2', [chamberId, p.nationalId], c);

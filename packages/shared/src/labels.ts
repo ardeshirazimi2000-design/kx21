@@ -109,5 +109,6 @@ export function roleLabel(key: string | null | undefined, customTitle?: string |
   if (customTitle) return customTitle;
   if (!key) return '—';
   if (key === 'chamber_admin') return 'مدیر اتاق';
+  if (key === 'delegate') return 'نماینده';
   return (ROLE_LABELS as Record<string, string>)[key] ?? key;
 }

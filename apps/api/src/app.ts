@@ -12,6 +12,7 @@ import { HttpError } from './lib/errors.js';
 import { logger } from './lib/logger.js';
 import { agendaRouter } from './routes/agenda.js';
 import { authRouter } from './routes/auth.js';
+import { delegatesRouter } from './routes/delegates.js';
 import { documentsRouter, filesRouter } from './routes/documents.js';
 import { meetingsRouter } from './routes/meetings.js';
 import { minutesRouter } from './routes/minutes.js';
@@ -81,6 +82,7 @@ export function createApp() {
   api.use(documentsRouter);
   api.use(reportsRouter);
   api.use(rolesRouter);
+  api.use(delegatesRouter);
   app.use('/api', api);
 
   // Single-port mode: serve the built web app and fall back to index.html for client routes.

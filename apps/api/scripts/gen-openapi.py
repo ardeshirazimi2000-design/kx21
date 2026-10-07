@@ -120,6 +120,8 @@ E = [
     ("post", "/api/meetings/{id}/attendance/{memberId}/confirm", "Attendance", "ثبت/اصلاح حضور توسط دبیر (دلیل الزامی)", S(status=ref("AttendanceStatus"), reason=str_, proxyName=str_), None),
     ("get", "/api/meetings/{id}/quorum", "Attendance", "محاسبه حد نصاب", None, None),
     ("get", "/api/meetings/{id}/ics", "Meetings", "فایل تقویم (iCalendar)", None, None),
+    ("post", "/api/meetings/{id}/delegates", "Meetings", "معرفی نماینده برای یک مدعو (توسط خود مدعو یا دبیر)", S(principalId=uuid, delegateUserId=uuid, person=S(nationalId=str_, birthDate=str_, mobile=str_, fullName=str_), letterDocumentId=uuid, note=str_), "Returns a one-time temporary password when the representative has no account."),
+    ("delete", "/api/meetings/{id}/delegates/{delegationId}", "Meetings", "لغو نماینده", S(reason=str_), None),
     ("post", "/api/meetings/{id}/start", "Live", "شروع رسمی جلسه", None, "409 quorum_not_reached when requireQuorumToStart."),
     ("post", "/api/meetings/{id}/end", "Live", "پایان جلسه و تولید پیش‌نویس صورتجلسه", None, "409 vote_open."),
     ("post", "/api/meetings/{id}/cancel", "Meetings", "لغو جلسه با دلیل", S(reason=str_), None),

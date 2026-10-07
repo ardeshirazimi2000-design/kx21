@@ -10,7 +10,7 @@ import {
   type InviteeRole,
   type MeetingType,
 } from '@kx/shared';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { AgendaBadge, AttendanceBadge, MeetingStatusBadge, MinutesBadge, ResolutionBadge } from '../components/status';
 import { Badge, Button, Card, dateFa, dateTimeFa, Empty, ErrorBox, Field, fa, JalaliDateInput, Loading, Modal, PageHeader, Tabs } from '../components/ui';
@@ -148,12 +148,24 @@ export function MeetingRoomPage() {
       />
       <ErrorBox error={actionError} />
       {m.status === 'cancelled' && <div className="alert alert-danger">این جلسه لغو شده است. دلیل: {m.cancel_reason}</div>}
+      {m.my.delegateFor && (
+        <div className="alert alert-info">
+          شما به <strong>نمایندگی از {m.my.delegateFor.fullName}</strong>
+          {m.my.delegateFor.organization ? ` (${m.my.delegateFor.organization})` : ''} در این جلسه حضور دارید. اعلام حضور و رأی شما به نام ایشان ثبت می‌شود.
+        </div>
+      )}
+      {m.my.role && !m.my.delegateFor && m.settings.allowProxy && OPEN_FOR_DELEGATES.includes(m.status) && <MyDelegate m={m} reload={reload} />}
       <QuorumPanel quorum={m.quorum} detailed={can('attendance.view_all')} />
       <div className="mt" />
       <Tabs tabs={tabs} value={tab} onChange={setTab} />
       {tab === 'agenda' && <Agenda m={m} run={run} reload={reload} />}
       {tab === 'attendance' && <Attendance m={m} flash={flash} run={run} />}
-      {tab === 'invitees' && <Invitees m={m} run={run} />}
+      {tab === 'invitees' && (
+        <>
+          {m.capabilities.includes('attendance.view_all') && <DelegatesCard m={m} reload={reload} />}
+          <Invitees m={m} run={run} />
+        </>
+      )}
       {tab === 'documents' && <Documents m={m} />}
       {tab === 'minutes' && <Minutes m={m} reloadMeeting={reload} />}
       {tab === 'resolutions' && <MeetingResolutions m={m} />}
@@ -377,7 +389,9 @@ function VotePanel({ v, m, run }: { v: any; m: any; run: (fn: () => Promise<unkn
           </div>
           {voters && (
             <div className="small muted mt">
-              {voters.map((x) => `${x.full_name}: ${VOTE_OPTION_LABELS[x.choice] ?? x.choice}${x.is_valid ? '' : ' (ابطال)'}`).join(' — ')}
+              {voters
+                .map((x) => `${x.full_name}${x.cast_by_name ? ` (با رأی نماینده: ${x.cast_by_name})` : ''}: ${VOTE_OPTION_LABELS[x.choice] ?? x.choice}${x.is_valid ? '' : ' (ابطال)'}`)
+                .join(' — ')}
             </div>
           )}
         </>
@@ -876,6 +890,13 @@ function NewResolutionModal({ m, vote, onClose, onSaved }: { m: any; vote?: any;
     kpi: '',
   });
   const members = useApi<any[]>(`/commissions/${m.commission.id}/members`);
+  // The responsible person is the invitee themself (e.g. the head of an organisation), never their representative.
+  const owners = useMemo(() => {
+    const list = new Map<string, { user_id: string; full_name: string; organization: string | null; label: string }>();
+    for (const x of members.data ?? []) list.set(x.user_id, { user_id: x.user_id, full_name: x.full_name, organization: x.organization, label: roleLabel(x.position, x.role_title) });
+    for (const x of m.invitees ?? []) if (!list.has(x.user_id)) list.set(x.user_id, { user_id: x.user_id, full_name: x.full_name, organization: x.organization, label: roleLabel(x.role, x.role_title) });
+    return [...list.values()];
+  }, [members.data, m.invitees]);
   const [err, setErr] = useState<Error | null>(null);
   const save = async () => {
     try {
@@ -914,11 +935,19 @@ function NewResolutionModal({ m, vote, onClose, onSaved }: { m: any; vote?: any;
       </Field>
       <div className="grid grid-2">
         <Field label="مسئول اجرا">
-          <select className="input" value={form.ownerId} onChange={(e) => setForm({ ...form, ownerId: e.target.value })}>
+          <select
+            className="input"
+            value={form.ownerId}
+            onChange={(e) => {
+              const o = owners.find((x) => x.user_id === e.target.value);
+              setForm({ ...form, ownerId: e.target.value, addressee: form.addressee || o?.organization || '' });
+            }}
+          >
             <option value="">—</option>
-            {members.data?.map((x) => (
+            {owners.map((x) => (
               <option key={x.user_id} value={x.user_id}>
-                {x.full_name} ({roleLabel(x.position, x.role_title)})
+                {x.full_name}
+                {x.organization ? ` — ${x.organization}` : ''} ({x.label})
               </option>
             ))}
           </select>
@@ -945,3 +974,175 @@ function NewResolutionModal({ m, vote, onClose, onSaved }: { m: any; vote?: any;
   );
 }
 
+
+const OPEN_FOR_DELEGATES = ['draft', 'scheduled', 'invitation_sent', 'checkin_open', 'in_progress', 'agenda_processing'];
+
+/** The invitee's own representative: introduce, see, revoke. */
+function MyDelegate({ m, reload }: { m: any; reload: () => Promise<void> }) {
+  const { me } = useAuth();
+  const mine = (m.delegates ?? []).find((d: any) => d.principal_id === me!.id);
+  const [open, setOpen] = useState(false);
+  if (mine) {
+    return (
+      <div className="alert alert-info row between wrap gap-sm">
+        <span>
+          نماینده شما در این جلسه: <strong>{mine.delegate_name}</strong>
+        </span>
+        <RevokeDelegate m={m} d={mine} reload={reload} />
+      </div>
+    );
+  }
+  return (
+    <div className="row between wrap gap-sm mb">
+      <span className="muted small">اگر خودتان در جلسه حاضر نمی‌شوید، نماینده معرفی کنید.</span>
+      <Button size="sm" variant="secondary" onClick={() => setOpen(true)}>
+        معرفی نماینده
+      </Button>
+      {open && <DelegateModal m={m} onClose={() => setOpen(false)} onDone={reload} />}
+    </div>
+  );
+}
+
+function RevokeDelegate({ m, d, reload }: { m: any; d: any; reload: () => Promise<void> }) {
+  return (
+    <Button
+      size="sm"
+      variant="ghost"
+      onClick={async () => {
+        if (!confirm(`نماینده «${d.delegate_name}» لغو شود؟`)) return;
+        await del(`/meetings/${m.id}/delegates/${d.id}`);
+        await reload();
+      }}
+    >
+      لغو نماینده
+    </Button>
+  );
+}
+
+/** Officers: all representatives of the meeting, and introducing one for an invitee (e.g. from a letter). */
+function DelegatesCard({ m, reload }: { m: any; reload: () => Promise<void> }) {
+  const [principal, setPrincipal] = useState<any | null>(null);
+  const canManage = m.capabilities.includes('meeting.manage') && OPEN_FOR_DELEGATES.includes(m.status) && m.settings.allowProxy;
+  const without = m.invitees.filter((i: any) => !(m.delegates ?? []).some((d: any) => d.principal_id === i.user_id));
+  return (
+    <Card title="نمایندگان معرفی‌شده">
+      {(m.delegates ?? []).length === 0 && <div className="muted small mb">نماینده‌ای معرفی نشده است.</div>}
+      <ul className="list">
+        {(m.delegates ?? []).map((d: any) => (
+          <li key={d.id} className="row between wrap gap-sm">
+            <span>
+              <strong>{d.delegate_name}</strong> به نمایندگی از {d.principal_name}
+              {d.principal_organization ? ` (${d.principal_organization})` : ''}
+              {d.delegate_verified_at ? <Badge tone="success">هویت تأییدشده</Badge> : null}
+              {d.letter_document_id ? (
+                <a href="#" className="small" onClick={(e) => { e.preventDefault(); void download(`/documents/${d.letter_document_id}/download`, 'letter'); }}>
+                  {' '}
+                  معرفی‌نامه
+                </a>
+              ) : null}
+            </span>
+            {canManage && <RevokeDelegate m={m} d={d} reload={reload} />}
+          </li>
+        ))}
+      </ul>
+      {canManage && without.length > 0 && (
+        <div className="row gap-sm mt">
+          <select className="input" style={{ maxWidth: 320 }} defaultValue="" onChange={(e) => setPrincipal(without.find((i: any) => i.user_id === e.target.value) ?? null)}>
+            <option value="">ثبت نماینده برای…</option>
+            {without.map((i: any) => (
+              <option key={i.user_id} value={i.user_id}>
+                {i.full_name}
+                {i.organization ? ` — ${i.organization}` : ''}
+              </option>
+            ))}
+          </select>
+        </div>
+      )}
+      {principal && <DelegateModal m={m} principal={principal} onClose={() => setPrincipal(null)} onDone={reload} />}
+    </Card>
+  );
+}
+
+function DelegateModal({ m, principal, onClose, onDone }: { m: any; principal?: any; onClose: () => void; onDone: () => Promise<void> }) {
+  const [form, setForm] = useState({ nationalId: '', birthDate: '', mobile: '', fullName: '', note: '' });
+  const [letter, setLetter] = useState<File | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<Error | null>(null);
+  const [result, setResult] = useState<any | null>(null);
+  const save = async () => {
+    setBusy(true);
+    setErr(null);
+    try {
+      let letterDocumentId: string | undefined;
+      if (letter) letterDocumentId = (await upload({ meetingId: m.id, kind: 'letter', title: `معرفی‌نامه نماینده ${principal?.full_name ?? ''}`.trim() }, letter)).id;
+      const r = await post(`/meetings/${m.id}/delegates`, {
+        principalId: principal?.user_id,
+        person: {
+          nationalId: form.nationalId || null,
+          birthDate: form.birthDate || null,
+          mobile: form.mobile || null,
+          fullName: form.fullName || null,
+        },
+        letterDocumentId,
+        note: form.note || null,
+      });
+      setResult(r);
+      await onDone();
+    } catch (e) {
+      setErr(e as Error);
+    } finally {
+      setBusy(false);
+    }
+  };
+  if (result) {
+    return (
+      <Modal title="نماینده ثبت شد" onClose={onClose} footer={<Button onClick={onClose}>بستن</Button>}>
+        <p>
+          <strong>{result.delegateName}</strong> به‌عنوان نماینده ثبت شد و اعلان جلسه برایش ارسال می‌شود.
+        </p>
+        {result.login && (
+          <div className="alert alert-warning">
+            اطلاعات ورود نماینده به اپ و سامانه (فقط همین یک‌بار نمایش داده می‌شود؛ به نماینده تحویل دهید):
+            <div className="ltr mt">
+              نام کاربری: <strong>{result.login.username}</strong>
+              <br />
+              رمز موقت: <strong>{result.login.temporaryPassword}</strong>
+            </div>
+          </div>
+        )}
+      </Modal>
+    );
+  }
+  return (
+    <Modal
+      title={principal ? `ثبت نماینده برای ${principal.full_name}` : 'معرفی نماینده'}
+      onClose={onClose}
+      footer={<Button busy={busy} disabled={form.mobile.length < 11 || (!form.nationalId && form.fullName.length < 2)} onClick={save}>ثبت</Button>}
+    >
+      <ErrorBox error={err} />
+      <p className="muted small">
+        نماینده فقط در همین جلسه به‌جای شما حضور می‌یابد{m.settings.proxyCanVote ? ' و رأی می‌دهد' : ''}. مسئولیت مصوبات همچنان با شماست.
+      </p>
+      <div className="grid grid-2">
+        <Field label="کد ملی نماینده">
+          <input className="input ltr" maxLength={10} value={form.nationalId} onChange={(e) => setForm({ ...form, nationalId: e.target.value })} />
+        </Field>
+        <Field label="تاریخ تولد (شمسی)">
+          <input className="input ltr" placeholder="1365/01/01" value={form.birthDate} onChange={(e) => setForm({ ...form, birthDate: e.target.value })} />
+        </Field>
+        <Field label="موبایل نماینده" hint="برای ورود به اپ و دریافت اعلان">
+          <input className="input ltr" placeholder="09xxxxxxxxx" value={form.mobile} onChange={(e) => setForm({ ...form, mobile: e.target.value })} />
+        </Field>
+        <Field label="نام و نام خانوادگی" hint="در صورت استعلام هویت، نام رسمی جایگزین می‌شود">
+          <input className="input" value={form.fullName} onChange={(e) => setForm({ ...form, fullName: e.target.value })} />
+        </Field>
+      </div>
+      <Field label={`معرفی‌نامه رسمی${m.settings.requireDelegateLetter ? ' (الزامی)' : ' (اختیاری)'}`}>
+        <input type="file" accept=".pdf,.jpg,.jpeg,.png" onChange={(e) => setLetter(e.target.files?.[0] ?? null)} />
+      </Field>
+      <Field label="توضیح (اختیاری)">
+        <input className="input" value={form.note} onChange={(e) => setForm({ ...form, note: e.target.value })} />
+      </Field>
+    </Modal>
+  );
+}

@@ -417,6 +417,8 @@ function Settings({ commission, onSaved }: { commission: any; onSaved: () => voi
             <input type="checkbox" disabled={disabled} checked={s.quorum.countProxy} onChange={(e) => setS({ ...s, quorum: { ...s.quorum, countProxy: e.target.checked } })} /> حضور نماینده در نصاب محاسبه شود
           </label>
           {check('allowProxy', 'حضور نماینده به‌جای عضو مجاز است')}
+          {check('proxyCanVote', 'نماینده به‌جای مدعو دارای حق رأی، رأی می‌دهد')}
+          {check('requireDelegateLetter', 'معرفی نماینده فقط با بارگذاری معرفی‌نامه رسمی')}
           {check('requireQuorumToStart', 'شروع رسمی جلسه بدون نصاب ممنوع است')}
           {check('requireQuorumForVoting', 'رأی‌گیری بدون نصاب ممنوع است')}
         </div>

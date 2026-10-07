@@ -52,7 +52,7 @@ async function scanFile(_buf: Buffer): Promise<'clean' | 'infected'> {
 
 type Target = { chamberId: string; commissionId: string | null; meetingId: string | null };
 
-async function resolveTarget(u: AuthUser, t: Record<string, string | null | undefined>, write: boolean): Promise<Target> {
+async function resolveTarget(u: AuthUser, t: Record<string, string | null | undefined>, write: boolean, kind?: string): Promise<Target> {
   if (t.agendaItemId || t.meetingId) {
     const meetingId = t.meetingId ?? (await meetingIdOfAgendaItem(t.agendaItemId!));
     const a = await meetingAccess(u, meetingId);
@@ -60,7 +60,9 @@ async function resolveTarget(u: AuthUser, t: Record<string, string | null | unde
       const it = await one('SELECT meeting_id FROM agenda_items WHERE id = $1', [t.agendaItemId]);
       if (it?.meeting_id !== meetingId) throw badRequest('دستور جلسه متعلق به این جلسه نیست');
     }
-    if (write) a.require('meeting.manage');
+    // Invitees may upload their own introduction letter (معرفی‌نامه نماینده) to the meeting.
+    const ownLetter = kind === 'letter' && !t.agendaItemId && !!a.inviteeRole && !a.delegateFor;
+    if (write && !ownLetter) a.require('meeting.manage');
     return { chamberId: a.meeting.chamber_id, commissionId: a.meeting.commission_id, meetingId };
   }
   if (t.resolutionId) {
@@ -109,7 +111,7 @@ documentsRouter.post('/documents', upload.single('file'), async (req, res) => {
   const fileName = Buffer.from(file.originalname, 'latin1').toString('utf8');
   validateFile(fileName, file.mimetype, file.buffer);
   if ((await scanFile(file.buffer)) !== 'clean') throw badRequest('فایل آلوده تشخیص داده شد');
-  const target = await resolveTarget(u, meta, true);
+  const target = await resolveTarget(u, meta, true, meta.kind);
   const sha256 = crypto.createHash('sha256').update(file.buffer).digest('hex');
   const id = crypto.randomUUID();
   const storageKey = path.join(target.chamberId, id);

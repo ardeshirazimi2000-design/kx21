@@ -22,13 +22,23 @@ reportsRouter.get('/me/home', async (req, res) => {
          FROM meeting_invitees i JOIN meetings m ON m.id = i.meeting_id JOIN commissions c ON c.id = m.commission_id
          LEFT JOIN attendance a ON a.meeting_id = m.id AND a.user_id = i.user_id
         WHERE i.user_id = $1 AND m.status IN ('scheduled','invitation_sent','checkin_open') AND m.scheduled_at > now() - interval '1 day'
-        ORDER BY m.scheduled_at LIMIT 10`,
+       UNION ALL
+       SELECT m.id, m.title, m.number, m.scheduled_at, m.location, m.type, m.status, c.name, 'delegate', 'نماینده ' || p.full_name, a.status
+         FROM meeting_delegates d JOIN meetings m ON m.id = d.meeting_id JOIN commissions c ON c.id = m.commission_id
+         JOIN users p ON p.id = d.principal_id LEFT JOIN attendance a ON a.meeting_id = m.id AND a.user_id = d.principal_id
+        WHERE d.delegate_id = $1 AND d.status = 'active' AND m.status IN ('scheduled','invitation_sent','checkin_open')
+          AND m.scheduled_at > now() - interval '1 day'
+        ORDER BY 4 LIMIT 10`,
       [u.id],
     ),
     query(
       `SELECT m.id, m.title, m.number, m.status, c.name AS commission_name FROM meeting_invitees i JOIN meetings m ON m.id = i.meeting_id
          JOIN commissions c ON c.id = m.commission_id
-        WHERE i.user_id = $1 AND m.status IN ('checkin_open','in_progress','agenda_processing') ORDER BY m.scheduled_at`,
+        WHERE i.user_id = $1 AND m.status IN ('checkin_open','in_progress','agenda_processing')
+       UNION
+       SELECT m.id, m.title, m.number, m.status, c.name FROM meeting_delegates d JOIN meetings m ON m.id = d.meeting_id
+         JOIN commissions c ON c.id = m.commission_id
+        WHERE d.delegate_id = $1 AND d.status = 'active' AND m.status IN ('checkin_open','in_progress','agenda_processing')`,
       [u.id],
     ),
     query(

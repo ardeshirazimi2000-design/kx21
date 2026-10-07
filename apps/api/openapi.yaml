@@ -2177,6 +2177,99 @@ paths:
         in: path
         required: true
         schema: *id004
+  /api/meetings/{id}/delegates:
+    post:
+      tags:
+      - Meetings
+      summary: معرفی نماینده برای یک مدعو (توسط خود مدعو یا دبیر)
+      responses:
+        '200':
+          description: OK
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Forbidden
+        '404':
+          description: Not found or not visible
+        '409':
+          description: Conflict (state machine / business rule)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      description: Returns a one-time temporary password when the representative has no account.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                principalId: *id004
+                delegateUserId: *id004
+                person:
+                  type: object
+                  properties:
+                    nationalId: *id001
+                    birthDate: *id001
+                    mobile: *id001
+                    fullName: *id001
+                letterDocumentId: *id004
+                note: *id001
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: *id004
+  /api/meetings/{id}/delegates/{delegationId}:
+    delete:
+      tags:
+      - Meetings
+      summary: لغو نماینده
+      responses:
+        '200':
+          description: OK
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Forbidden
+        '404':
+          description: Not found or not visible
+        '409':
+          description: Conflict (state machine / business rule)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reason: *id001
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: *id004
+      - name: delegationId
+        in: path
+        required: true
+        schema: *id004
   /api/meetings/{id}/start:
     post:
       tags:

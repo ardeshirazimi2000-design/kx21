@@ -520,6 +520,62 @@ describe('configurable roles and permissions', () => {
   });
 });
 
+describe('representatives (نماینده)', () => {
+  it('lets an invitee send a representative who checks in and votes on their behalf', async () => {
+    await login('isfchair', 'chair.isf@kx.local');
+    const commission = (await as('isfchair').get('/api/commissions')).body.items.find((c: any) => c.code === 'TRD');
+    const created = await as('isfchair').post('/api/meetings', {
+      commissionId: commission.id, title: 'جلسه با حضور نماینده', scheduledAt: new Date(Date.now() + 3600e3).toISOString(),
+      agenda: [{ title: 'بررسی تعرفه‌های واردات' }], schedule: true,
+    });
+    const meetingId = created.body.id;
+    await as('isfchair').post(`/api/meetings/${meetingId}/invite`);
+
+    // new person without phone/email cannot log in → rejected
+    expect((await as('isfchair').post(`/api/meetings/${meetingId}/delegates`, { person: { nationalId: '0012345679', birthDate: '1360/1/1' } })).status).toBe(400);
+    const d = await as('isfchair').post(`/api/meetings/${meetingId}/delegates`, {
+      person: { nationalId: '0012345679', birthDate: '1360/1/1', mobile: '09135550001' },
+    });
+    expect(d.status).toBe(201);
+    expect(d.body.login.username).toBe('09135550001');
+    const l = await request(app).post('/api/auth/login').send({ identifier: '09135550001', password: d.body.login.temporaryPassword });
+    expect(l.status).toBe(200);
+    tokens.rep = l.body.accessToken;
+
+    const view = await as('rep').get(`/api/meetings/${meetingId}`);
+    expect(view.status).toBe(200);
+    expect(view.body.my.delegateFor.fullName).toBe('رئیس کمیسیون تجارت اصفهان');
+    expect(view.body.capabilities).not.toContain('meeting.manage');
+    expect((await as('rep').get('/api/meetings?mine=true')).body.items.some((m: any) => m.id === meetingId && m.my_role === 'delegate')).toBe(true);
+    // a representative cannot introduce another one
+    expect((await as('rep').post(`/api/meetings/${meetingId}/delegates`, { delegateUserId: ids.m1 })).status).toBe(403);
+
+    await as('isfchair').post(`/api/meetings/${meetingId}/checkin/open`);
+    const ci = await as('rep').post(`/api/meetings/${meetingId}/check-in`, { method: 'app' });
+    expect(ci.status).toBe(201);
+    expect(ci.body.status).toBe('proxy');
+    expect(ci.body.proxy_name).toBe('شخص آزمایشی 5679');
+
+    expect((await as('isfchair').post(`/api/meetings/${meetingId}/start`)).status).toBe(200);
+    const item = (await as('isfchair').get(`/api/meetings/${meetingId}`)).body.agenda[0];
+    await as('isfchair').post(`/api/meetings/${meetingId}/agenda/${item.id}/activate`);
+    const vs = await as('isfchair').post(`/api/agenda-items/${item.id}/vote/start`);
+    expect(vs.status).toBe(201);
+    expect((await as('rep').post(`/api/agenda-items/${item.id}/vote`, { choice: 'yes' })).status).toBe(201);
+    const dup = await as('isfchair').post(`/api/agenda-items/${item.id}/vote`, { choice: 'no' });
+    expect(dup.body.error.code).toBe('already_voted'); // one ballot per invitee
+    const closed = await as('isfchair').post(`/api/vote-sessions/${vs.body.id}/close`);
+    expect(closed.body.result.counts.yes).toBe(1);
+    const detail = await as('isfchair').get(`/api/vote-sessions/${vs.body.id}`);
+    expect(detail.body.voters[0]).toMatchObject({ full_name: 'رئیس کمیسیون تجارت اصفهان', cast_by_name: 'شخص آزمایشی 5679' });
+
+    // revoking ends the representative's access
+    const del = await request(app).delete(`/api/meetings/${meetingId}/delegates/${d.body.id}`).set('authorization', `Bearer ${tokens.isfchair}`).send({});
+    expect(del.status).toBe(204);
+    expect((await as('rep').get(`/api/meetings/${meetingId}`)).status).toBe(404);
+  });
+});
+
 describe('identity inquiry (national registry)', () => {
   it('validates the national code before calling the service', async () => {
     const chamberId = (await as('admin').get('/api/auth/me')).body.adminChambers[0];

@@ -28,6 +28,7 @@ import {
   transition,
 } from '../services/meetings.js';
 import { generateMinutesDraft } from '../services/minutes.js';
+import { listDelegates } from './delegates.js';
 import { adminBrowsableChambers, assertRole, browsableCommissionIds, defaultHasVote } from '../services/roles.js';
 import { notify } from '../services/notifications.js';
 
@@ -49,6 +50,7 @@ meetingsRouter.get('/meetings', async (req, res) => {
     AND ($5::text IS NULL OR m.title ILIKE '%' || $5 || '%' OR c.name ILIKE '%' || $5 || '%')
     AND (
       EXISTS (SELECT 1 FROM meeting_invitees i WHERE i.meeting_id = m.id AND i.user_id = $6)
+      OR EXISTS (SELECT 1 FROM meeting_delegates d WHERE d.meeting_id = m.id AND d.delegate_id = $6 AND d.status = 'active')
       OR (NOT $9 AND (
         $7::boolean OR m.chamber_id = ANY($8::uuid[]) OR m.commission_id = ANY($10::uuid[])))
     )`;
@@ -57,10 +59,12 @@ meetingsRouter.get('/meetings', async (req, res) => {
   const items = await query(
     `SELECT m.id, m.commission_id, c.name AS commission_name, m.number, m.title, m.scheduled_at, m.duration_minutes,
             m.location, m.online_link, m.type, m.status, ch.name AS chamber_name,
-            i.role AS my_role, a.status AS my_attendance
+            COALESCE(i.role, CASE WHEN dl.id IS NOT NULL THEN 'delegate' END) AS my_role, COALESCE(a.status, pa.status) AS my_attendance
        FROM meetings m JOIN commissions c ON c.id = m.commission_id JOIN chambers ch ON ch.id = m.chamber_id
        LEFT JOIN meeting_invitees i ON i.meeting_id = m.id AND i.user_id = $6
        LEFT JOIN attendance a ON a.meeting_id = m.id AND a.user_id = $6
+       LEFT JOIN meeting_delegates dl ON dl.meeting_id = m.id AND dl.delegate_id = $6 AND dl.status = 'active'
+       LEFT JOIN attendance pa ON pa.meeting_id = m.id AND pa.user_id = dl.principal_id
       WHERE ${where}
       ORDER BY m.scheduled_at ${req.query.order === 'desc' ? 'DESC' : 'ASC'} LIMIT ${pageSize} OFFSET ${offset}`,
     params,
@@ -167,7 +171,7 @@ export async function meetingDetail(a: MeetingAccess, userId: string) {
               (SELECT count(*) FROM votes v WHERE v.vote_session_id = vs.id AND v.is_valid) AS cast_count,
               (SELECT v.choice FROM votes v WHERE v.vote_session_id = vs.id AND v.voter_id = $2) AS my_choice
          FROM vote_sessions vs WHERE vs.meeting_id = $1 ORDER BY vs.opened_at`,
-      [m.id, userId, a.can('vote.results.view')],
+      [m.id, a.delegateFor?.principalId ?? userId, a.can('vote.results.view')],
     ),
     one('SELECT id, status, version, minutes_number, approved_at FROM minutes WHERE meeting_id = $1', [m.id]),
     query(
@@ -177,15 +181,19 @@ export async function meetingDetail(a: MeetingAccess, userId: string) {
     ),
   ]);
   const q = quorumOf(attendance, a.settings);
-  const me = attendance.find((r) => r.user_id === userId) ?? null;
+  const me = attendance.find((r) => r.user_id === (a.delegateFor?.principalId ?? userId)) ?? null;
+  const allDelegates = await listDelegates(m.id);
+  // Officers see every representative; an invitee sees their own.
+  const delegates = a.can('attendance.view_all') ? allDelegates : allDelegates.filter((d: any) => d.principal_id === userId);
   return {
     ...m,
+    delegates,
     commission: { id: a.commission.id, name: a.commission.name, code: a.commission.code },
     settings: a.settings,
     capabilities: [...a.caps],
     availableActions: a.can('meeting.manage') || a.can('meeting.control') ? availableActions(m.status) : [],
     checkinOpen: isCheckinWindow(m.status) && !m.checkin_closed_at,
-    my: { role: a.inviteeRole, hasVote: a.hasVote, attendance: me },
+    my: { role: a.inviteeRole, hasVote: a.hasVote, attendance: me, delegateFor: a.delegateFor },
     // Members see the invited list; the live status of each person is for officers.
     invitees: a.can('attendance.view_all')
       ? attendance
@@ -472,21 +480,24 @@ meetingsRouter.post('/meetings/:id/check-in', async (req, res) => {
     if (!isCheckinWindow(a.meeting.status)) throw conflict('اعلام حضور برای این جلسه باز نیست', 'checkin_closed');
     if (a.meeting.checkin_closed_at) throw conflict('مهلت اعلام حضور به پایان رسیده است؛ با دبیر هماهنگ کنید', 'checkin_closed');
     if (b.proxyName && !a.settings.allowProxy) throw forbidden('حضور نماینده در این کمیسیون مجاز نیست');
-    const existing = await one('SELECT * FROM attendance WHERE meeting_id = $1 AND user_id = $2 FOR UPDATE', [id, u.id], c);
-    const status: AttendanceStatus = b.proxyName ? 'proxy' : b.method === 'online' ? 'online' : 'present';
+    // A representative checks in on the invitee's attendance row (status «proxy»).
+    const forUser = a.delegateFor?.principalId ?? u.id;
+    const proxyName = a.delegateFor ? u.fullName : (b.proxyName ?? null);
+    const existing = await one('SELECT * FROM attendance WHERE meeting_id = $1 AND user_id = $2 FOR UPDATE', [id, forUser], c);
+    const status: AttendanceStatus = proxyName ? 'proxy' : b.method === 'online' ? 'online' : 'present';
     // Idempotent: a repeated check-in keeps the original timestamp and creates no new record.
     if (existing && existing.status === status && existing.checked_in_at) return { row: existing, settings: a.settings, created: false };
     const row = await one(
-      `INSERT INTO attendance (meeting_id, user_id, status, method, checked_in_at, proxy_name, updated_by, updated_at)
-       VALUES ($1,$2,$3,$4,now(),$5,$2,now())
+      `INSERT INTO attendance (meeting_id, user_id, status, method, checked_in_at, proxy_name, proxy_user_id, updated_by, updated_at)
+       VALUES ($1,$2,$3,$4,now(),$5,$6,$7,now())
        ON CONFLICT (meeting_id, user_id) DO UPDATE SET status = EXCLUDED.status, method = EXCLUDED.method,
          checked_in_at = COALESCE(attendance.checked_in_at, EXCLUDED.checked_in_at), proxy_name = EXCLUDED.proxy_name,
-         updated_by = EXCLUDED.updated_by, updated_at = now()
+         proxy_user_id = EXCLUDED.proxy_user_id, updated_by = EXCLUDED.updated_by, updated_at = now()
        RETURNING *`,
-      [id, u.id, status, b.method, b.proxyName ?? null],
+      [id, forUser, status, b.method, proxyName, a.delegateFor ? u.id : null, u.id],
       c,
     );
-    await audit(c, req, { chamberId: a.meeting.chamber_id, action: 'attendance.check_in', entity: 'attendance', entityId: `${id}:${u.id}`, before: existing, after: row });
+    await audit(c, req, { chamberId: a.meeting.chamber_id, action: 'attendance.check_in', entity: 'attendance', entityId: `${id}:${forUser}`, before: existing, after: row });
     return { row, settings: a.settings, created: true };
   });
   if (created) await broadcastAttendance(id, settings);
@@ -502,7 +513,8 @@ meetingsRouter.get('/meetings/:id/attendance', async (req, res) => {
     res.json({ attendance: rows, quorum: q });
     return;
   }
-  res.json({ me: rows.find((r) => r.user_id === u.id) ?? null, quorum: quorumSummary(q) });
+  const meId = a.delegateFor?.principalId ?? u.id;
+  res.json({ me: rows.find((r) => r.user_id === meId) ?? null, quorum: quorumSummary(q) });
 });
 
 /** Secretary/chair records or corrects someone's attendance. A reason is mandatory and the change is audited. */

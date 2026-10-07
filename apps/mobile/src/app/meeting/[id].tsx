@@ -17,7 +17,7 @@ import { Stack, useLocalSearchParams } from 'expo-router';
 import { useEffect, useRef, useState } from 'react';
 import { Alert, Linking, Modal, Pressable, ScrollView, View } from 'react-native';
 import { Badge, Button, Card, Empty, ErrorText, fa, Input, Loading, Row, Screen, T, type Tone } from '../../components/ui';
-import { ApiError, post } from '../../lib/api';
+import { api, ApiError, post } from '../../lib/api';
 import { addMeetingToCalendar } from '../../lib/calendar';
 import { useRealtime } from '../../lib/socket';
 import { useTheme } from '../../lib/theme';
@@ -175,6 +175,18 @@ export default function MeetingRoomScreen() {
       </Card>
 
       <ErrorText error={actionError} />
+
+      {m.my.delegateFor && (
+        <Card style={{ backgroundColor: t.infoSoft, borderColor: 'transparent' }}>
+          <T>
+            شما به نمایندگی از <T bold>{m.my.delegateFor.fullName}</T>
+            {m.my.delegateFor.organization ? ` (${m.my.delegateFor.organization})` : ''} در این جلسه حضور دارید؛ اعلام حضور و رأی شما به نام ایشان ثبت می‌شود.
+          </T>
+        </Card>
+      )}
+      {m.my.role && !m.my.delegateFor && m.settings.allowProxy && !live && !['minutes_draft', 'pending_approval', 'approved', 'archived', 'cancelled'].includes(m.status) && (
+        <DelegateCard m={m} onChanged={reload} />
+      )}
 
       {/* My check-in */}
       {m.my.role && (
@@ -554,3 +566,79 @@ function MinutesModal({ meetingId, onClose }: { meetingId: string; onClose: () =
   );
 }
 
+
+/** The invitee's representative for this meeting (introduce / revoke). */
+function DelegateCard({ m, onChanged }: { m: any; onChanged: () => Promise<void> }) {
+  const t = useTheme();
+  const mine = (m.delegates ?? [])[0];
+  const [open, setOpen] = useState(false);
+  const [form, setForm] = useState({ nationalId: '', birthDate: '', mobile: '', fullName: '' });
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<Error | null>(null);
+  const [login, setLogin] = useState<any | null>(null);
+  if (mine) {
+    return (
+      <Card>
+        <Row>
+          <T>
+            نماینده شما: <T bold>{mine.delegate_name}</T>
+          </T>
+          <Button
+            title="لغو"
+            variant="ghost"
+            onPress={() =>
+              Alert.alert('لغو نماینده', `نماینده «${mine.delegate_name}» لغو شود؟`, [
+                { text: 'خیر', style: 'cancel' },
+                { text: 'لغو', style: 'destructive', onPress: () => void api(`/meetings/${m.id}/delegates/${mine.id}`, { method: 'DELETE', json: {} }).then(onChanged) },
+              ])
+            }
+          />
+        </Row>
+      </Card>
+    );
+  }
+  if (login) {
+    return (
+      <Card title="نماینده ثبت شد">
+        <T>اطلاعات ورود نماینده (فقط همین یک‌بار نمایش داده می‌شود):</T>
+        <T bold>نام کاربری: {login.username}</T>
+        <T bold>رمز موقت: {login.temporaryPassword}</T>
+        <Button title="بستن" variant="secondary" onPress={() => setLogin(null)} />
+      </Card>
+    );
+  }
+  if (!open) return <Button title="معرفی نماینده (اگر خودتان حاضر نمی‌شوید)" variant="secondary" onPress={() => setOpen(true)} />;
+  return (
+    <Card title="معرفی نماینده">
+      <T muted size={12}>نماینده فقط در همین جلسه به‌جای شما حاضر می‌شود{m.settings.proxyCanVote ? ' و رأی می‌دهد' : ''}. مسئولیت مصوبات با خود شماست.</T>
+      <ErrorText error={err} />
+      <Input label="کد ملی نماینده" keyboardType="number-pad" maxLength={10} value={form.nationalId} onChangeText={(v) => setForm({ ...form, nationalId: v })} />
+      <Input label="تاریخ تولد (شمسی)" placeholder="1365/01/01" value={form.birthDate} onChangeText={(v) => setForm({ ...form, birthDate: v })} />
+      <Input label="موبایل نماینده" keyboardType="phone-pad" value={form.mobile} onChangeText={(v) => setForm({ ...form, mobile: v })} />
+      <Input label="نام و نام خانوادگی" value={form.fullName} onChangeText={(v) => setForm({ ...form, fullName: v })} />
+      {m.settings.requireDelegateLetter && <T color={t.warning} size={12}>این کمیسیون معرفی‌نامه رسمی می‌خواهد؛ آن را از نسخه وب بارگذاری کنید یا به دبیرخانه بفرستید.</T>}
+      <Button
+        title="ثبت نماینده"
+        busy={busy}
+        disabled={form.mobile.length < 11}
+        onPress={async () => {
+          setBusy(true);
+          setErr(null);
+          try {
+            const r = await post(`/meetings/${m.id}/delegates`, {
+              person: { nationalId: form.nationalId || null, birthDate: form.birthDate || null, mobile: form.mobile, fullName: form.fullName || null },
+            });
+            setOpen(false);
+            if (r.login) setLogin(r.login);
+            await onChanged();
+          } catch (e) {
+            setErr(e as Error);
+          } finally {
+            setBusy(false);
+          }
+        }}
+      />
+      <Button title="انصراف" variant="ghost" onPress={() => setOpen(false)} />
+    </Card>
+  );
+}

@@ -1,6 +1,7 @@
 import {
   mergeCommissionSettings,
   resolveCapabilities,
+  roleCapabilities,
   type AccessContext,
   type Capability,
   type CommissionSettings,
@@ -121,6 +122,8 @@ export interface MeetingAccess {
   position: Position | string | null;
   inviteeRole: InviteeRole | string | null;
   hasVote: boolean;
+  /** Set when the user attends as the representative (نماینده) of an invitee. */
+  delegateFor: { principalId: string; fullName: string; organization: string | null; role: string } | null;
   caps: Set<Capability>;
   can: (c: Capability) => boolean;
   require: (c: Capability) => void;
@@ -151,23 +154,44 @@ export async function meetingAccess(
     db,
   );
   const settings = mergeCommissionSettings(commission.settings);
+  const roleMatrix = await loadRoleMatrix(meeting.chamber_id, db);
+  // A representative introduced for an invitee acts in this meeting on the invitee's behalf.
+  const delegation = inv
+    ? null
+    : await one<{ principal_id: string; full_name: string; organization: string | null; role: string; has_vote: boolean }>(
+        `SELECT d.principal_id, u.full_name, u.organization, i.role, i.has_vote
+           FROM meeting_delegates d JOIN users u ON u.id = d.principal_id
+           JOIN meeting_invitees i ON i.meeting_id = d.meeting_id AND i.user_id = d.principal_id
+          WHERE d.meeting_id = $1 AND d.delegate_id = $2 AND d.status = 'active'`,
+        [meetingId, user.id],
+        db,
+      );
   const caps = resolveCapabilities({
     isSuperAdmin: user.isSuperAdmin,
     isChamberAdmin: user.adminChambers.includes(meeting.chamber_id),
     position,
-    inviteeRole: inv?.role ?? null,
+    inviteeRole: inv?.role ?? (delegation ? 'guest' : null),
     hasVote: inv?.has_vote ?? false,
     resultVisibility: settings.resultVisibility,
-    roleMatrix: await loadRoleMatrix(meeting.chamber_id, db),
+    roleMatrix,
   });
+  if (delegation) {
+    // Participation rights of the principal's role carry over; executive rights never do.
+    const principalCaps = roleCapabilities(delegation.role, roleMatrix);
+    for (const c of ['attendance.self', 'comment.create', 'vote.results.view'] as const) if (principalCaps.includes(c)) caps.add(c);
+    if (settings.proxyCanVote && delegation.has_vote && principalCaps.includes('vote.cast')) caps.add('vote.cast');
+  }
   if (!caps.has('meeting.view')) throw notFound('جلسه یافت نشد');
   return {
     meeting,
     commission,
     settings,
     position,
-    inviteeRole: inv?.role ?? null,
-    hasVote: inv?.has_vote ?? false,
+    inviteeRole: inv?.role ?? (delegation ? 'delegate' : null),
+    hasVote: inv?.has_vote ?? (!!delegation && caps.has('vote.cast')),
+    delegateFor: delegation
+      ? { principalId: delegation.principal_id, fullName: delegation.full_name, organization: delegation.organization, role: delegation.role }
+      : null,
     caps,
     can: (c) => caps.has(c),
     require: (c) => {

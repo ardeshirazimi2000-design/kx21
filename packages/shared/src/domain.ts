@@ -130,6 +130,10 @@ export interface CommissionSettings {
   requireQuorumToStart: boolean;
   /** Allow a proxy to attend instead of the member. */
   allowProxy: boolean;
+  /** A delegate (نماینده معرفی‌شده) may vote on behalf of an invitee who has a voting right. */
+  proxyCanVote: boolean;
+  /** Delegates must be introduced with an official letter (معرفی‌نامه). */
+  requireDelegateLetter: boolean;
   /** Default secret ballot for new votes. */
   secretVoteDefault: boolean;
   /** Who can see vote results: everybody invited, or only officers (chair/secretary). */
@@ -148,6 +152,8 @@ export const DEFAULT_COMMISSION_SETTINGS: CommissionSettings = {
   requireQuorumForVoting: true,
   requireQuorumToStart: false,
   allowProxy: true,
+  proxyCanVote: true,
+  requireDelegateLetter: false,
   secretVoteDefault: false,
   resultVisibility: 'invitees',
   passRule: 'majority_of_present',

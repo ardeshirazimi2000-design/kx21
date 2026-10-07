@@ -56,11 +56,11 @@ export async function buildMinutesBody(db: Db, meetingId: string): Promise<strin
   lines.push('');
   lines.push('**حاضرین:**');
   for (const a of attending) {
-    lines.push(
-      `- ${a.full_name} (${roleLabel(a.role, a.role_title)})${a.status !== 'present' ? ` — ${ATTENDANCE_STATUS_LABELS[a.status]}` : ''}${
-        a.proxy_name ? ` — نماینده: ${a.proxy_name}` : ''
-      }`,
-    );
+    if (a.status === 'proxy' && a.proxy_name) {
+      lines.push(`- ${a.proxy_name} به نمایندگی از ${a.full_name} (${roleLabel(a.role, a.role_title)})`);
+      continue;
+    }
+    lines.push(`- ${a.full_name} (${roleLabel(a.role, a.role_title)})${a.status !== 'present' ? ` — ${ATTENDANCE_STATUS_LABELS[a.status]}` : ''}`);
   }
   if (notAttending.length) {
     lines.push('');
