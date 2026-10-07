@@ -7,8 +7,8 @@ import {
   isAttending,
   MEETING_TYPE_LABELS,
   mergeCommissionSettings,
-  ROLE_LABELS,
-  type InviteeRole,
+  roleLabel,
+
   type MeetingType,
   toPersianDigits,
 } from '@kx/shared';
@@ -57,7 +57,7 @@ export async function buildMinutesBody(db: Db, meetingId: string): Promise<strin
   lines.push('**حاضرین:**');
   for (const a of attending) {
     lines.push(
-      `- ${a.full_name} (${ROLE_LABELS[a.role as InviteeRole]})${a.status !== 'present' ? ` — ${ATTENDANCE_STATUS_LABELS[a.status]}` : ''}${
+      `- ${a.full_name} (${roleLabel(a.role, a.role_title)})${a.status !== 'present' ? ` — ${ATTENDANCE_STATUS_LABELS[a.status]}` : ''}${
         a.proxy_name ? ` — نماینده: ${a.proxy_name}` : ''
       }`,
     );
@@ -65,7 +65,7 @@ export async function buildMinutesBody(db: Db, meetingId: string): Promise<strin
   if (notAttending.length) {
     lines.push('');
     lines.push('**غایبین:**');
-    for (const a of notAttending) lines.push(`- ${a.full_name} (${ROLE_LABELS[a.role as InviteeRole]}) — ${ATTENDANCE_STATUS_LABELS[a.status]}`);
+    for (const a of notAttending) lines.push(`- ${a.full_name} (${roleLabel(a.role, a.role_title)}) — ${ATTENDANCE_STATUS_LABELS[a.status]}`);
   }
   lines.push('');
   lines.push(`**وضعیت حد نصاب:** ${q.reached ? 'حاصل شد' : 'حاصل نشد'} — ${q.explanation}`);

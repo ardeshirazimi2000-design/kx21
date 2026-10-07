@@ -2,14 +2,11 @@ import {
   ATTENDANCE_STATUSES,
   availableActions,
   formatJalaliDateTime,
-  INVITEE_ROLES,
   isCheckinWindow,
   isEditable,
   isLive,
   MEETING_TYPES,
-  positionHasVote,
   type AttendanceStatus,
-  type Position,
 } from '@kx/shared';
 import { Router } from 'express';
 import { z } from 'zod';
@@ -31,6 +28,7 @@ import {
   transition,
 } from '../services/meetings.js';
 import { generateMinutesDraft } from '../services/minutes.js';
+import { adminBrowsableChambers, assertRole, browsableCommissionIds, defaultHasVote } from '../services/roles.js';
 import { notify } from '../services/notifications.js';
 
 export const meetingsRouter = Router();
@@ -52,11 +50,10 @@ meetingsRouter.get('/meetings', async (req, res) => {
     AND (
       EXISTS (SELECT 1 FROM meeting_invitees i WHERE i.meeting_id = m.id AND i.user_id = $6)
       OR (NOT $9 AND (
-        $7::boolean OR m.chamber_id = ANY($8::uuid[])
-        OR EXISTS (SELECT 1 FROM commission_memberships cm WHERE cm.commission_id = m.commission_id AND cm.user_id = $6
-                     AND cm.status = 'active' AND cm.position <> 'expert')))
+        $7::boolean OR m.chamber_id = ANY($8::uuid[]) OR m.commission_id = ANY($10::uuid[])))
     )`;
-  const params = [commissionId, from, to, status, q, u.id, u.isSuperAdmin, u.adminChambers, mine];
+  const [browse, adminBrowse] = await Promise.all([browsableCommissionIds(u), adminBrowsableChambers(u)]);
+  const params = [commissionId, from, to, status, q, u.id, u.isSuperAdmin, adminBrowse, mine, browse];
   const items = await query(
     `SELECT m.id, m.commission_id, c.name AS commission_name, m.number, m.title, m.scheduled_at, m.duration_minutes,
             m.location, m.online_link, m.type, m.status, ch.name AS chamber_name,
@@ -94,7 +91,7 @@ const meetingSchema = z.object({
   onlineLink: z.string().url().nullish(),
   type: z.enum(MEETING_TYPES).default('in_person'),
   inviteAllMembers: z.boolean().default(true),
-  invitees: z.array(z.object({ userId: uuid, role: z.enum(INVITEE_ROLES).default('guest'), hasVote: z.boolean().optional() })).default([]),
+  invitees: z.array(z.object({ userId: uuid, role: z.string().default('guest'), hasVote: z.boolean().optional() })).default([]),
   agenda: z.array(agendaInput).default([]),
   schedule: z.boolean().default(false),
 });
@@ -131,10 +128,11 @@ meetingsRouter.post('/meetings', async (req, res) => {
       );
     }
     for (const inv of b.invitees) {
+      await assertRole(m.chamber_id, inv.role, 'meeting', c);
       await c.query(
         `INSERT INTO meeting_invitees (meeting_id, user_id, role, has_vote) VALUES ($1,$2,$3,$4)
          ON CONFLICT (meeting_id, user_id) DO UPDATE SET role = EXCLUDED.role, has_vote = EXCLUDED.has_vote`,
-        [m.id, inv.userId, inv.role, inv.hasVote ?? (inv.role !== 'guest' && positionHasVote(inv.role as Position))],
+        [m.id, inv.userId, inv.role, inv.hasVote ?? (await defaultHasVote(m.chamber_id, inv.role, c))],
       );
     }
     let order = 1;
@@ -191,7 +189,7 @@ export async function meetingDetail(a: MeetingAccess, userId: string) {
     // Members see the invited list; the live status of each person is for officers.
     invitees: a.can('attendance.view_all')
       ? attendance
-      : attendance.map((r) => ({ user_id: r.user_id, full_name: r.full_name, organization: r.organization, role: r.role })),
+      : attendance.map((r) => ({ user_id: r.user_id, full_name: r.full_name, organization: r.organization, role: r.role, role_title: r.role_title })),
     quorum: a.can('attendance.view_all') ? q : quorumSummary(q),
     agenda,
     votes,
@@ -249,14 +247,15 @@ meetingsRouter.patch('/meetings/:id', async (req, res) => {
 meetingsRouter.post('/meetings/:id/invitees', async (req, res) => {
   const u = currentUser(req);
   const id = param(req, 'id');
-  const b = body(req, z.object({ userId: uuid, role: z.enum(INVITEE_ROLES).default('guest'), hasVote: z.boolean().optional() }));
+  const b = body(req, z.object({ userId: uuid, role: z.string().default('guest'), hasVote: z.boolean().optional() }));
   const sendNow = await tx(async (c) => {
     const a = await meetingAccess(u, id, c, { forUpdate: true });
     a.require('meeting.manage');
     if (!isEditable(a.meeting.status) && !isLive(a.meeting.status)) throw conflict('امکان افزودن مدعو در این وضعیت وجود ندارد');
     const person = await one('SELECT chamber_id FROM users WHERE id = $1 AND is_active', [b.userId], c);
     if (!person || person.chamber_id !== a.meeting.chamber_id) throw badRequest('فرد متعلق به این اتاق نیست');
-    const hasVote = b.hasVote ?? (b.role !== 'guest' && positionHasVote(b.role as Position));
+    await assertRole(a.meeting.chamber_id, b.role, 'meeting', c);
+    const hasVote = b.hasVote ?? (await defaultHasVote(a.meeting.chamber_id, b.role, c));
     await c.query(
       `INSERT INTO meeting_invitees (meeting_id, user_id, role, has_vote, invited_at) VALUES ($1,$2,$3,$4, CASE WHEN $5 THEN now() END)
        ON CONFLICT (meeting_id, user_id) DO UPDATE SET role = EXCLUDED.role, has_vote = EXCLUDED.has_vote`,

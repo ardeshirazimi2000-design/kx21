@@ -98,6 +98,13 @@ E = [
     ("get", "/api/people/{id}", "Structure", "مشخصات و سوابق عضویت", None, None),
     ("patch", "/api/people/{id}", "Structure", "ویرایش/غیرفعال‌سازی شخص", S(fullName=str_, isActive=bool_, password=str_), None),
 
+    ("get", "/api/roles", "Roles", "نقش‌ها و دسترسی‌های اتاق (?chamberId) — مدیر اتاق", None, None),
+    ("get", "/api/roles/options", "Roles", "نقش‌های تعریف‌شده اتاق برای انتخاب سمت", None, None),
+    ("post", "/api/roles", "Roles", "تعریف نقش جدید", S(chamberId=uuid, title=str_, description=str_, hasVote=bool_, capabilities={"type": "array", "items": str_}), None),
+    ("put", "/api/roles/{key}", "Roles", "تعیین دسترسی‌های یک نقش", S(chamberId=uuid, capabilities={"type": "array", "items": str_}), None),
+    ("patch", "/api/roles/{key}", "Roles", "ویرایش نقش تعریف‌شده", S(chamberId=uuid, title=str_, hasVote=bool_), None),
+    ("delete", "/api/roles/{key}", "Roles", "حذف نقش تعریف‌شده (?chamberId)", None, "409 role_in_use"),
+    ("post", "/api/roles/{key}/reset", "Roles", "بازگردانی دسترسی پیش‌فرض نقش پایه", S(chamberId=uuid), None),
     ("get", "/api/meetings", "Meetings", "تقویم/فهرست جلسات (?commissionId&from&to&status&mine&q)", None, None),
     ("post", "/api/meetings", "Meetings", "ایجاد جلسه با مدعوین و دستور جلسه", ref("MeetingCreate"), None),
     ("get", "/api/meetings/{id}", "Meetings", "جزئیات جلسه (Meeting Room)", None, "Response: MeetingDetail. Members get a quorum summary; officers get full attendance."),
@@ -194,7 +201,7 @@ for method, path, tag, summary, body, notes in E:
     params = []
     for seg in path.split("/"):
         if seg.startswith("{"):
-            params.append({"name": seg[1:-1], "in": "path", "required": True, "schema": uuid})
+            params.append({"name": seg[1:-1], "in": "path", "required": True, "schema": str_ if seg == "{key}" else uuid})
     if params:
         op["parameters"] = params
     paths.setdefault(path, {})[method] = op

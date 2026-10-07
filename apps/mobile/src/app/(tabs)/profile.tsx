@@ -1,4 +1,4 @@
-import { ROLE_LABELS, type Position } from '@kx/shared';
+import { roleLabel } from '@kx/shared';
 import { router } from 'expo-router';
 import { Badge, Button, Card, Row, Screen, T } from '../../components/ui';
 import { useAuth } from '../../lib/auth';
@@ -18,7 +18,7 @@ export default function ProfileScreen() {
         {me.memberships.map((m) => (
           <Row key={m.id}>
             <T>{m.commission_name}</T>
-            <Badge tone="info" label={ROLE_LABELS[m.position as Position]} />
+            <Badge tone="info" label={roleLabel(m.position, (m as any).role_title)} />
           </Row>
         ))}
       </Card>

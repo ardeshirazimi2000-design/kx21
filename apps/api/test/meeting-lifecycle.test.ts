@@ -20,6 +20,7 @@ const as = (who: string) => ({
   get: (url: string) => request(app).get(url).set('authorization', `Bearer ${tokens[who]}`),
   post: (url: string, body: object = {}) => request(app).post(url).set('authorization', `Bearer ${tokens[who]}`).send(body),
   patch: (url: string, body: object = {}) => request(app).patch(url).set('authorization', `Bearer ${tokens[who]}`).send(body),
+  put: (url: string, body: object = {}) => request(app).put(url).set('authorization', `Bearer ${tokens[who]}`).send(body),
 });
 
 async function login(who: string, email: string) {
@@ -463,6 +464,59 @@ describe('multi-chamber isolation', () => {
     expect((await as('krm').post('/api/commissions', { chamberId: ch.body.id, termId: t.body.id, name: 'کمیسیون معدن کرمان', code: 'MIN' })).status).toBe(201);
     const list = await as('root').get('/api/chambers');
     expect(list.body.find((c: any) => c.id === ch.body.id).admins[0].full_name).toBe('مدیر اتاق کرمان');
+  });
+});
+
+describe('configurable roles and permissions', () => {
+  it('lets a chamber admin define roles and change permissions for its own chamber only', async () => {
+    const isfChamber = (await as('isf').get('/api/auth/me')).body.adminChambers[0];
+    const r = await as('isf').get(`/api/roles?chamberId=${isfChamber}`);
+    expect(r.status).toBe(200);
+    expect(r.body.roles.find((x: any) => x.key === 'secretary').capabilities).toContain('meeting.manage');
+    expect((await as('admin').get(`/api/roles?chamberId=${isfChamber}`)).status).toBe(403);
+    expect((await as('m1').get(`/api/roles?chamberId=${isfChamber}`)).status).toBe(403);
+
+    // custom role «مشاور»
+    const created = await as('isf').post('/api/roles', {
+      chamberId: isfChamber, title: 'مشاور', capabilities: ['commission.browse', 'comment.create', 'resolution.manage'],
+    });
+    expect(created.status).toBe(201);
+    const key = created.body.key;
+    expect((await as('isf').post('/api/roles', { chamberId: isfChamber, title: 'مشاور' })).status).toBe(409);
+
+    const commission = (await as('isf').get('/api/commissions')).body.items.find((c: any) => c.code === 'TRD');
+    const person = await as('isf').post('/api/people', { chamberId: isfChamber, fullName: 'مشاور اقتصادی', email: 'adviser.isf@kx.local', password: 'Adviser#2026' });
+    expect((await as('isf').post(`/api/commissions/${commission.id}/members`, { userId: person.body.id, position: 'not_a_role' })).status).toBe(400);
+    const mem = await as('isf').post(`/api/commissions/${commission.id}/members`, { userId: person.body.id, position: key });
+    expect(mem.status).toBe(201);
+    const members = await as('isf').get(`/api/commissions/${commission.id}/members`);
+    expect(members.body.find((m: any) => m.user_id === person.body.id).role_title).toBe('مشاور');
+
+    const l = await request(app).post('/api/auth/login').send({ identifier: 'adviser.isf@kx.local', password: 'Adviser#2026' });
+    tokens.adv = l.body.accessToken;
+    const view = await as('adv').get(`/api/commissions/${commission.id}`);
+    expect(view.body.capabilities).toContain('resolution.manage');
+    expect(view.body.capabilities).not.toContain('meeting.manage');
+    expect((await as('adv').post('/api/meetings', { commissionId: commission.id, title: 'جلسه مشاور', scheduledAt: new Date().toISOString() })).status).toBe(403);
+
+    // give the chamber admin role the right to run meetings, then restore the default
+    const before = (await as('isf').post('/api/meetings', { commissionId: commission.id, title: 'جلسه مدیر اتاق', scheduledAt: new Date().toISOString() })).status;
+    expect(before).toBe(403);
+    const adminCaps = r.body.roles.find((x: any) => x.key === 'chamber_admin').capabilities;
+    expect((await as('isf').put('/api/roles/chamber_admin', { chamberId: isfChamber, capabilities: [...adminCaps, 'meeting.manage'] })).status).toBe(200);
+    expect((await as('isf').post('/api/meetings', { commissionId: commission.id, title: 'جلسه مدیر اتاق', scheduledAt: new Date().toISOString() })).status).toBe(201);
+    expect((await as('isf').post('/api/roles/chamber_admin/reset', { chamberId: isfChamber })).status).toBe(200);
+    expect((await as('isf').post('/api/meetings', { commissionId: commission.id, title: 'جلسه مدیر اتاق ۲', scheduledAt: new Date().toISOString() })).status).toBe(403);
+    // locked structure rights survive an empty set
+    await as('isf').put('/api/roles/chamber_admin', { chamberId: isfChamber, capabilities: [] });
+    expect((await as('isf').get(`/api/commissions/${commission.id}/members`)).status).toBe(200);
+    await as('isf').post('/api/roles/chamber_admin/reset', { chamberId: isfChamber });
+
+    // a role in use cannot be deleted; the change history is audited
+    const del = await request(app).delete(`/api/roles/${key}?chamberId=${isfChamber}`).set('authorization', `Bearer ${tokens.isf}`);
+    expect(del.status).toBe(409);
+    const log = await as('isf').get('/api/audit?action=role.');
+    expect(log.body.items.map((x: any) => x.action)).toEqual(expect.arrayContaining(['role.created', 'role.permissions_changed', 'role.permissions_reset']));
   });
 });
 

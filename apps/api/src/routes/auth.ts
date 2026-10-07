@@ -86,8 +86,9 @@ authRouter.get('/me', authenticate, async (req, res) => {
     [u.id],
   );
   const memberships = await query(
-    `SELECT m.id, m.commission_id, m.position, m.has_vote, c.name AS commission_name, c.chamber_id, ch.name AS chamber_name
+    `SELECT m.id, m.commission_id, m.position, cr.title AS role_title, m.has_vote, c.name AS commission_name, c.chamber_id, ch.name AS chamber_name
        FROM commission_memberships m JOIN commissions c ON c.id = m.commission_id JOIN chambers ch ON ch.id = c.chamber_id
+       LEFT JOIN custom_roles cr ON cr.chamber_id = m.chamber_id AND cr.key = m.position
       WHERE m.user_id = $1 AND m.status = 'active' ORDER BY c.name`,
     [u.id],
   );

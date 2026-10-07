@@ -6,11 +6,10 @@ import {
   formatTime,
   MEETING_STATUS_LABELS,
   MEETING_TYPE_LABELS,
-  ROLE_LABELS,
-  VOTE_OPTION_LABELS,
+  roleLabel, VOTE_OPTION_LABELS,
   type AgendaStatus,
   type AttendanceStatus,
-  type InviteeRole,
+  
   type MeetingStatus,
   type MeetingType,
 } from '@kx/shared';
@@ -194,7 +193,7 @@ export default function MeetingRoomScreen() {
             <T muted>{myAtt ? `وضعیت حضور: ${ATTENDANCE_STATUS_LABELS[myAtt]}` : 'اعلام حضور هنوز باز نشده است.'}</T>
           )}
           <T muted size={12}>
-            نقش شما: {ROLE_LABELS[m.my.role as InviteeRole]} — {m.my.hasVote ? 'دارای حق رأی' : 'بدون حق رأی'}
+            نقش شما: {roleLabel(m.my.role, m.invitees.find((x: any) => x.user_id === m.my.attendance?.user_id)?.role_title)} — {m.my.hasVote ? 'دارای حق رأی' : 'بدون حق رأی'}
           </T>
         </Card>
       )}
@@ -272,7 +271,7 @@ export default function MeetingRoomScreen() {
               <View>
                 <T>{p.full_name}</T>
                 <T muted size={12}>
-                  {ROLE_LABELS[p.role as InviteeRole]}
+                  {roleLabel(p.role, p.role_title)}
                   {p.has_vote ? ' — حق رأی' : ''}
                   {p.checked_in_at ? ` — ${formatTime(p.checked_in_at)}` : ''}
                 </T>
@@ -287,7 +286,7 @@ export default function MeetingRoomScreen() {
           {m.invitees.map((p: any) => (
             <Row key={p.user_id}>
               <T>{p.full_name}</T>
-              <T muted size={12}>{ROLE_LABELS[p.role as InviteeRole]}</T>
+              <T muted size={12}>{roleLabel(p.role, p.role_title)}</T>
             </Row>
           ))}
         </Card>

@@ -1,9 +1,8 @@
 import {
   ATTENDANCE_STATUS_LABELS,
   ATTENDANCE_STATUSES,
-  INVITEE_ROLES,
   MEETING_TYPE_LABELS,
-  ROLE_LABELS,
+  roleLabel,
   VOTE_OPTION_LABELS,
   formatJalaliLong,
   formatTime,
@@ -17,7 +16,7 @@ import { AgendaBadge, AttendanceBadge, MeetingStatusBadge, MinutesBadge, Resolut
 import { Badge, Button, Card, dateFa, dateTimeFa, Empty, ErrorBox, Field, fa, JalaliDateInput, Loading, Modal, PageHeader, Tabs } from '../components/ui';
 import { ApiError, del, download, get, post, upload } from '../lib/api';
 import { useAuth } from '../lib/auth';
-import { useApi, useSocket } from '../lib/hooks';
+import { useApi, useRoles, useSocket } from '../lib/hooks';
 
 type Tab = 'agenda' | 'attendance' | 'invitees' | 'documents' | 'minutes' | 'resolutions';
 
@@ -275,7 +274,7 @@ function Agenda({ m, run, reload }: { m: any; run: (fn: () => Promise<unknown>) 
       </div>
       <Card title="اطلاعات جلسه">
         <ul className="list small">
-          <li>نقش من: {m.my.role ? ROLE_LABELS[m.my.role as InviteeRole] : 'ناظر/مدیر'}</li>
+          <li>نقش من: {m.my.role ? roleLabel(m.my.role, m.invitees.find((x: any) => x.user_id === m.my.attendance?.user_id)?.role_title) : 'ناظر/مدیر'}</li>
           <li>حق رأی: {m.my.hasVote ? 'دارد' : 'ندارد'}</li>
           <li>وضعیت حضور من: {m.my.attendance ? ATTENDANCE_STATUS_LABELS[m.my.attendance.status as AttendanceStatus] : '—'}</li>
           <li>اعلام حضور: {m.checkinOpen ? 'باز' : 'بسته'}</li>
@@ -518,7 +517,7 @@ function Attendance({ m, flash, run }: { m: any; flash: Set<string>; run: (fn: (
                 <div>
                   <div>{a.full_name}</div>
                   <div className="muted small">
-                    {ROLE_LABELS[a.role as InviteeRole]}
+                    {roleLabel(a.role, a.role_title)}
                     {a.checked_in_at ? ` — ${formatTime(a.checked_in_at)}` : ''}
                     {a.proxy_name ? ` — نماینده: ${a.proxy_name}` : ''}
                   </div>
@@ -581,7 +580,8 @@ function Invitees({ m, run }: { m: any; run: (fn: () => Promise<unknown>) => Pro
   const { chamberId } = useAuth();
   const canManage = m.capabilities.includes('meeting.manage') && ['draft', 'scheduled', 'invitation_sent', 'checkin_open', 'in_progress', 'agenda_processing'].includes(m.status);
   const [q, setQ] = useState('');
-  const [role, setRole] = useState<InviteeRole>('guest');
+  const [role, setRole] = useState<string>('guest');
+  const roles = useRoles(m.chamber_id);
   const people = useApi(canManage && q.length >= 2 ? `/people?chamberId=${chamberId}&q=${encodeURIComponent(q)}&pageSize=6` : null);
   const preStart = ['draft', 'scheduled', 'invitation_sent', 'checkin_open'].includes(m.status);
   return (
@@ -601,7 +601,7 @@ function Invitees({ m, run }: { m: any; run: (fn: () => Promise<unknown>) => Pro
             <tr key={a.user_id}>
               <td>{a.full_name}</td>
               <td>{a.organization}</td>
-              <td>{ROLE_LABELS[a.role as InviteeRole]}</td>
+              <td>{roleLabel(a.role, a.role_title)}</td>
               {a.status !== undefined && <td>{a.has_vote ? '✓' : '—'}</td>}
               <td>
                 {canManage && preStart && (
@@ -619,10 +619,10 @@ function Invitees({ m, run }: { m: any; run: (fn: () => Promise<unknown>) => Pro
           <h3 className="mb">افزودن مدعو</h3>
           <div className="row gap-sm">
             <input className="input" placeholder="جستجوی شخص" value={q} onChange={(e) => setQ(e.target.value)} />
-            <select className="input" style={{ maxWidth: 150 }} value={role} onChange={(e) => setRole(e.target.value as InviteeRole)}>
-              {INVITEE_ROLES.map((r) => (
-                <option key={r} value={r}>
-                  {ROLE_LABELS[r]}
+            <select className="input" style={{ maxWidth: 150 }} value={role} onChange={(e) => setRole(e.target.value)}>
+              {roles.meetingRoles.map((r) => (
+                <option key={r.key} value={r.key}>
+                  {r.title}
                 </option>
               ))}
             </select>
@@ -918,7 +918,7 @@ function NewResolutionModal({ m, vote, onClose, onSaved }: { m: any; vote?: any;
             <option value="">—</option>
             {members.data?.map((x) => (
               <option key={x.user_id} value={x.user_id}>
-                {x.full_name} ({ROLE_LABELS[x.position as InviteeRole]})
+                {x.full_name} ({roleLabel(x.position, x.role_title)})
               </option>
             ))}
           </select>

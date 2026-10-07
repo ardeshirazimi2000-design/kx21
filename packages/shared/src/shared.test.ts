@@ -123,6 +123,19 @@ describe('permissions', () => {
     expect(c.has('report.chamber')).toBe(true);
     for (const x of ['meeting.manage', 'meeting.control', 'resolution.manage', 'issue.manage', 'minutes.approve', 'vote.cast'] as const) expect(c.has(x)).toBe(false);
   });
+  it('applies a chamber role matrix and custom roles', () => {
+    const matrix = { member: ['commission.browse', 'minutes.view'] as const, c_adviser: ['commission.browse', 'comment.create', 'resolution.manage'] as const };
+    const m = resolveCapabilities({ isSuperAdmin: false, isChamberAdmin: false, position: 'member', inviteeRole: 'member', hasVote: true, roleMatrix: matrix as any });
+    expect(m.has('vote.cast')).toBe(false); // voting removed from members in this chamber
+    const adv = resolveCapabilities({ isSuperAdmin: false, isChamberAdmin: false, position: 'c_adviser', roleMatrix: matrix as any });
+    expect(adv.has('meeting.view')).toBe(true);
+    expect(adv.has('resolution.manage')).toBe(true);
+    expect(adv.has('comment.create')).toBe(false); // invite-only right needs an invitation
+    const admin = resolveCapabilities({ isSuperAdmin: false, isChamberAdmin: true, roleMatrix: { chamber_admin: ['meeting.manage'] } });
+    expect(admin.has('meeting.manage')).toBe(true);
+    expect(admin.has('commission.manage')).toBe(true); // locked
+    expect(admin.has('commission.browse')).toBe(false);
+  });
   it('outsider sees nothing', () => {
     expect(resolveCapabilities({ isSuperAdmin: false, isChamberAdmin: false }).size).toBe(0);
   });

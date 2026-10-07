@@ -6,6 +6,7 @@ import { verifyAuditChain } from '../lib/audit.js';
 import { forbidden } from '../lib/errors.js';
 import { paged, pageParams, param, uuid } from '../lib/validate.js';
 import { commissionAccess, requireChamberAdmin } from '../services/access.js';
+import { adminBrowsableChambers, browsableCommissionIds } from '../services/roles.js';
 
 export const reportsRouter = Router();
 
@@ -16,6 +17,7 @@ reportsRouter.get('/me/home', async (req, res) => {
   const [upcoming, live, resolutions, referrals, unread] = await Promise.all([
     query(
       `SELECT m.id, m.title, m.number, m.scheduled_at, m.location, m.type, m.status, c.name AS commission_name, i.role AS my_role,
+              (SELECT cr.title FROM custom_roles cr WHERE cr.chamber_id = m.chamber_id AND cr.key = i.role) AS my_role_title,
               a.status AS my_attendance
          FROM meeting_invitees i JOIN meetings m ON m.id = i.meeting_id JOIN commissions c ON c.id = m.commission_id
          LEFT JOIN attendance a ON a.meeting_id = m.id AND a.user_id = i.user_id
@@ -220,9 +222,9 @@ reportsRouter.get('/search', async (req, res) => {
     res.json({ commissions: [], meetings: [], resolutions: [] });
     return;
   }
-  const commissionVisible = `($2::boolean OR c.chamber_id = ANY($3::uuid[]) OR EXISTS (SELECT 1 FROM commission_memberships cm
-     WHERE cm.commission_id = c.id AND cm.user_id = $4 AND cm.status = 'active' AND cm.position <> 'expert'))`;
-  const p = [q, u.isSuperAdmin, u.adminChambers, u.id];
+  const [browse, adminBrowse] = await Promise.all([browsableCommissionIds(u), adminBrowsableChambers(u)]);
+  const commissionVisible = `($2::boolean OR c.chamber_id = ANY($3::uuid[]) OR c.id = ANY($5::uuid[]))`;
+  const p = [q, u.isSuperAdmin, adminBrowse, u.id, browse];
   const [commissions, meetings, resolutions] = await Promise.all([
     query(`SELECT c.id, c.name, c.code FROM commissions c WHERE c.name ILIKE '%' || $1 || '%' AND ${commissionVisible} LIMIT 10`, p),
     query(

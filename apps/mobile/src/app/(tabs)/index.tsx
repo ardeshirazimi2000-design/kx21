@@ -1,4 +1,4 @@
-import { formatJalaliDateTime, MEETING_STATUS_LABELS, ROLE_LABELS, type InviteeRole, type MeetingStatus } from '@kx/shared';
+import { formatJalaliDateTime, MEETING_STATUS_LABELS, roleLabel, type MeetingStatus } from '@kx/shared';
 import { router } from 'expo-router';
 import { Pressable } from 'react-native';
 import { Badge, Card, Empty, fa, Loading, ProgressBar, Row, Screen, T } from '../../components/ui';
@@ -36,7 +36,7 @@ export default function HomeScreen() {
           <Pressable key={m.id} onPress={() => router.push(`/meeting/${m.id}`)} style={{ paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: t.border }}>
             <Row>
               <T bold>{m.title}</T>
-              <Badge tone="info" label={ROLE_LABELS[m.my_role as InviteeRole]} />
+              <Badge tone="info" label={roleLabel(m.my_role, m.my_role_title)} />
             </Row>
             <T muted size={13}>
               {m.commission_name} — {formatJalaliDateTime(m.scheduled_at)}

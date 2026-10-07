@@ -67,7 +67,7 @@ async function resolveTarget(u: AuthUser, t: Record<string, string | null | unde
     const r = await one('SELECT chamber_id, commission_id, owner_id FROM resolutions WHERE id = $1', [t.resolutionId]);
     if (!r) throw notFound();
     const ca = await commissionAccess(u, r.commission_id).catch(() => null);
-    const allowed = r.owner_id === u.id || (write ? ca?.can('resolution.manage') : ca && ca.position !== 'expert') || ca?.can('commission.manage');
+    const allowed = r.owner_id === u.id || (write ? ca?.can('resolution.manage') : ca?.can('commission.browse')) || ca?.can('commission.manage');
     if (!allowed) throw forbidden();
     return { chamberId: r.chamber_id, commissionId: r.commission_id, meetingId: null };
   }
@@ -76,14 +76,14 @@ async function resolveTarget(u: AuthUser, t: Record<string, string | null | unde
     if (!i) throw notFound();
     const isExpert = !!(await one('SELECT 1 FROM referrals WHERE issue_id = $1 AND expert_id = $2', [t.issueId, u.id]));
     const ca = await commissionAccess(u, i.commission_id).catch(() => null);
-    const allowed = isExpert || (write ? ca?.can('issue.manage') : ca && ca.position !== 'expert');
+    const allowed = isExpert || (write ? ca?.can('issue.manage') : ca?.can('commission.browse'));
     if (!allowed) throw forbidden();
     return { chamberId: i.chamber_id, commissionId: i.commission_id, meetingId: null };
   }
   if (t.commissionId) {
     const ca = await commissionAccess(u, t.commissionId);
     if (write) ca.require('meeting.manage');
-    else if (ca.position === 'expert') throw forbidden();
+    else if (!ca.can('commission.browse')) throw forbidden();
     return { chamberId: ca.commission.chamber_id, commissionId: ca.commission.id, meetingId: null };
   }
   throw badRequest('مقصد سند (جلسه، دستور جلسه، مصوبه، موضوع یا کمیسیون) مشخص نشده است');

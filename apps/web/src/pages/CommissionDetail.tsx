@@ -1,11 +1,11 @@
-import { ISSUE_STATUS_LABELS, POSITIONS, ROLE_LABELS, type CommissionSettings, type IssueStatus, type Position } from '@kx/shared';
+import { ISSUE_STATUS_LABELS, roleLabel, type CommissionSettings, type IssueStatus } from '@kx/shared';
 import { useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { MeetingStatusBadge } from '../components/status';
 import { Badge, Button, Card, dateFa, dateTimeFa, Empty, ErrorBox, Field, fa, JalaliDateInput, Loading, Modal, PageHeader, Tabs } from '../components/ui';
 import { patch, post } from '../lib/api';
 import { useAuth } from '../lib/auth';
-import { useApi } from '../lib/hooks';
+import { useApi, useRoles } from '../lib/hooks';
 import { CommissionDashboard } from './Home';
 import { NewMeetingModal } from './Meetings';
 import { PersonModal } from './Structure';
@@ -38,7 +38,7 @@ export function CommissionDetailPage() {
         }
         actions={c.officers.map((o: any) => (
           <Badge key={o.position} tone="info">
-            {ROLE_LABELS[o.position as Position]}: {o.full_name}
+            {roleLabel(o.position)}: {o.full_name}
           </Badge>
         ))}
       />
@@ -95,7 +95,7 @@ function Members({ commission }: { commission: any }) {
                 <td>{m.full_name}</td>
                 <td>{m.organization}</td>
                 <td>
-                  <Badge tone={['chair', 'vice_chair', 'secretary'].includes(m.position) ? 'accent' : 'neutral'}>{ROLE_LABELS[m.position as Position]}</Badge>
+                  <Badge tone={['chair', 'vice_chair', 'secretary'].includes(m.position) ? 'accent' : 'neutral'}>{roleLabel(m.position, m.role_title)}</Badge>
                   {m.status === 'ended' && <span className="muted small"> (پایان‌یافته{m.note ? `: ${m.note}` : ''})</span>}
                 </td>
                 <td>{m.has_vote ? '✓' : '—'}</td>
@@ -128,7 +128,8 @@ function AddMemberModal({ commission, chamberId, onClose, onSaved }: { commissio
   const [q, setQ] = useState('');
   const people = useApi(q.length >= 2 ? `/people?chamberId=${chamberId}&q=${encodeURIComponent(q)}&pageSize=8` : null);
   const [userId, setUserId] = useState<string | null>(null);
-  const [position, setPosition] = useState<Position>('member');
+  const [position, setPosition] = useState<string>('member');
+  const roles = useRoles(chamberId);
   const [startDate, setStartDate] = useState('');
   const [replace, setReplace] = useState(false);
   const [creating, setCreating] = useState(false);
@@ -166,10 +167,10 @@ function AddMemberModal({ commission, chamberId, onClose, onSaved }: { commissio
       </Button>
       <div className="grid grid-2 mt">
         <Field label="سمت">
-          <select className="input" value={position} onChange={(e) => setPosition(e.target.value as Position)}>
-            {POSITIONS.map((p) => (
-              <option key={p} value={p}>
-                {ROLE_LABELS[p]}
+          <select className="input" value={position} onChange={(e) => setPosition(e.target.value)}>
+            {roles.positions.map((p) => (
+              <option key={p.key} value={p.key}>
+                {p.title}
               </option>
             ))}
           </select>
@@ -196,7 +197,8 @@ function AddMemberModal({ commission, chamberId, onClose, onSaved }: { commissio
 }
 
 function ChangePositionModal({ m, onClose, onSaved }: { m: any; onClose: () => void; onSaved: () => void }) {
-  const [position, setPosition] = useState<Position>(m.position);
+  const [position, setPosition] = useState<string>(m.position);
+  const roles = useRoles(m.chamber_id);
   const [hasVote, setHasVote] = useState<boolean>(m.has_vote);
   const [err, setErr] = useState<Error | null>(null);
   const save = async () => {
@@ -212,10 +214,10 @@ function ChangePositionModal({ m, onClose, onSaved }: { m: any; onClose: () => v
       <ErrorBox error={err} />
       <p className="muted small">سابقه سمت فعلی حفظ شده و سمت جدید از امروز ثبت می‌شود.</p>
       <Field label="سمت جدید">
-        <select className="input" value={position} onChange={(e) => setPosition(e.target.value as Position)}>
-          {POSITIONS.map((p) => (
-            <option key={p} value={p}>
-              {ROLE_LABELS[p]}
+        <select className="input" value={position} onChange={(e) => setPosition(e.target.value)}>
+          {roles.positions.map((p) => (
+            <option key={p.key} value={p.key}>
+              {p.title}
             </option>
           ))}
         </select>

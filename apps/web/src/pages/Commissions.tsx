@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ROLE_LABELS, type Position } from '@kx/shared';
+import { roleLabel } from '@kx/shared';
 import { post } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { useApi } from '../lib/hooks';
@@ -48,7 +48,7 @@ export function CommissionsPage() {
                     <td>{c.chair_name ?? '—'}</td>
                     <td>{c.secretary_name ?? <Badge tone="warning">دبیر تعیین نشده</Badge>}</td>
                     <td>{fa(c.member_count)}</td>
-                    <td>{c.my_position ? <Badge tone="info">{ROLE_LABELS[c.my_position as Position]}</Badge> : '—'}</td>
+                    <td>{c.my_position ? <Badge tone="info">{roleLabel(c.my_position, c.my_position_title)}</Badge> : '—'}</td>
                   </tr>
                 ))}
               </tbody>

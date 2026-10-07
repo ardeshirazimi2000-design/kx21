@@ -1,4 +1,4 @@
-import { ROLE_LABELS, type InviteeRole } from '@kx/shared';
+import { roleLabel } from '@kx/shared';
 import { Link, useNavigate } from 'react-router-dom';
 import { MeetingStatusBadge, ResolutionBadge } from '../components/status';
 import { Badge, Card, dateFa, dateTimeFa, Empty, fa, Loading, PageHeader, Progress, Stat } from '../components/ui';
@@ -48,7 +48,7 @@ function MyHome({ data }: { data: any }) {
                     {m.commission_name} — {dateTimeFa(m.scheduled_at)}
                   </div>
                 </div>
-                <Badge tone="info">{ROLE_LABELS[m.my_role as InviteeRole]}</Badge>
+                <Badge tone="info">{roleLabel(m.my_role, m.my_role_title)}</Badge>
               </li>
             ))}
         </ul>

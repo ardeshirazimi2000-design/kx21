@@ -103,3 +103,11 @@ export const ISSUE_STATUS_LABELS: Record<IssueStatus, string> = {
   resolved: 'حل‌شده',
   closed: 'بسته',
 };
+
+/** Persian title of a role: custom roles carry their own title, built-ins use ROLE_LABELS. */
+export function roleLabel(key: string | null | undefined, customTitle?: string | null): string {
+  if (customTitle) return customTitle;
+  if (!key) return '—';
+  if (key === 'chamber_admin') return 'مدیر اتاق';
+  return (ROLE_LABELS as Record<string, string>)[key] ?? key;
+}

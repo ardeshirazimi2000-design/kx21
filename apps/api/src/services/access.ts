@@ -11,6 +11,7 @@ import {
 import type { AuthUser } from '../auth/middleware.js';
 import { one, query, pool, type Db } from '../db/pool.js';
 import { forbidden, notFound } from '../lib/errors.js';
+import { loadRoleMatrix } from './roles.js';
 
 export function isChamberAdmin(user: AuthUser, chamberId: string): boolean {
   return user.isSuperAdmin || user.adminChambers.includes(chamberId);
@@ -51,14 +52,14 @@ export interface CommissionRow {
 export interface CommissionAccess {
   commission: CommissionRow;
   settings: CommissionSettings;
-  position: Position | null;
+  position: Position | string | null;
   caps: Set<Capability>;
   can: (c: Capability) => boolean;
   require: (c: Capability) => void;
 }
 
-export async function activePosition(userId: string, commissionId: string, db: Db = pool): Promise<Position | null> {
-  const m = await one<{ position: Position }>(
+export async function activePosition(userId: string, commissionId: string, db: Db = pool): Promise<string | null> {
+  const m = await one<{ position: string }>(
     `SELECT position FROM commission_memberships WHERE user_id = $1 AND commission_id = $2 AND status = 'active'
        AND (end_date IS NULL OR end_date >= current_date)`,
     [userId, commissionId],
@@ -77,6 +78,7 @@ export async function commissionAccess(user: AuthUser, commissionId: string, db:
     isChamberAdmin: user.adminChambers.includes(commission.chamber_id),
     position,
     resultVisibility: settings.resultVisibility,
+    roleMatrix: await loadRoleMatrix(commission.chamber_id, db),
   };
   const caps = resolveCapabilities(ctx);
   if (!caps.has('commission.view')) throw notFound('کمیسیون یافت نشد');
@@ -116,8 +118,8 @@ export interface MeetingAccess {
   meeting: MeetingRow;
   commission: CommissionRow;
   settings: CommissionSettings;
-  position: Position | null;
-  inviteeRole: InviteeRole | null;
+  position: Position | string | null;
+  inviteeRole: InviteeRole | string | null;
   hasVote: boolean;
   caps: Set<Capability>;
   can: (c: Capability) => boolean;
@@ -143,7 +145,7 @@ export async function meetingAccess(
   if (!meeting) throw notFound('جلسه یافت نشد');
   const commission = (await one<CommissionRow>('SELECT * FROM commissions WHERE id = $1', [meeting.commission_id], db))!;
   const position = await activePosition(user.id, meeting.commission_id, db);
-  const inv = await one<{ role: InviteeRole; has_vote: boolean }>(
+  const inv = await one<{ role: string; has_vote: boolean }>(
     'SELECT role, has_vote FROM meeting_invitees WHERE meeting_id = $1 AND user_id = $2',
     [meetingId, user.id],
     db,
@@ -156,6 +158,7 @@ export async function meetingAccess(
     inviteeRole: inv?.role ?? null,
     hasVote: inv?.has_vote ?? false,
     resultVisibility: settings.resultVisibility,
+    roleMatrix: await loadRoleMatrix(meeting.chamber_id, db),
   });
   if (!caps.has('meeting.view')) throw notFound('جلسه یافت نشد');
   return {

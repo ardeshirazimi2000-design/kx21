@@ -21,6 +21,7 @@ export interface AttendanceRow {
   full_name: string;
   organization: string | null;
   role: string;
+  role_title: string | null;
   has_vote: boolean;
   status: AttendanceStatus;
   method: string | null;
@@ -32,10 +33,12 @@ export interface AttendanceRow {
 
 export async function loadAttendance(meetingId: string, db: Db = pool): Promise<AttendanceRow[]> {
   return query<AttendanceRow>(
-    `SELECT i.user_id, u.full_name, u.organization, i.role, i.has_vote,
+    `SELECT i.user_id, u.full_name, u.organization, i.role, cr.title AS role_title, i.has_vote,
             COALESCE(a.status, 'pending') AS status, a.method, a.checked_in_at, a.proxy_name, a.note, a.updated_at
        FROM meeting_invitees i
        JOIN users u ON u.id = i.user_id
+       JOIN meetings mt ON mt.id = i.meeting_id
+       LEFT JOIN custom_roles cr ON cr.chamber_id = mt.chamber_id AND cr.key = i.role
        LEFT JOIN attendance a ON a.meeting_id = i.meeting_id AND a.user_id = i.user_id
       WHERE i.meeting_id = $1
       ORDER BY array_position(ARRAY['chair','vice_chair','secretary','member','expert','observer','guest'], i.role), u.full_name`,

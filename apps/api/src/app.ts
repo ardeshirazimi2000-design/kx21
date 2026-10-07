@@ -17,6 +17,7 @@ import { meetingsRouter } from './routes/meetings.js';
 import { minutesRouter } from './routes/minutes.js';
 import { reportsRouter } from './routes/reports.js';
 import { resolutionsRouter } from './routes/resolutions.js';
+import { rolesRouter } from './routes/roles.js';
 import { structureRouter } from './routes/structure.js';
 import rateLimit, { ipKeyGenerator } from 'express-rate-limit';
 
@@ -79,6 +80,7 @@ export function createApp() {
   api.use(resolutionsRouter);
   api.use(documentsRouter);
   api.use(reportsRouter);
+  api.use(rolesRouter);
   app.use('/api', api);
 
   // Single-port mode: serve the built web app and fall back to index.html for client routes.

@@ -18,6 +18,7 @@ import { ReferralsPage } from './pages/Referrals';
 import { ReportsPage } from './pages/Reports';
 import { ResolutionDetailPage } from './pages/ResolutionDetail';
 import { ResolutionsPage } from './pages/Resolutions';
+import { RolesPage } from './pages/Roles';
 import { SearchPage } from './pages/Search';
 import { TermsPage } from './pages/Terms';
 
@@ -40,6 +41,7 @@ export function App() {
         <Route path="/commissions" element={<CommissionsPage />} />
         <Route path="/commissions/:id" element={<CommissionDetailPage />} />
         <Route path="/people" element={<PeoplePage />} />
+        <Route path="/roles" element={<RolesPage />} />
         <Route path="/meetings" element={<MeetingsPage />} />
         <Route path="/meetings/:id" element={<MeetingRoomPage />} />
         <Route path="/resolutions" element={<ResolutionsPage />} />
@@ -103,6 +105,7 @@ function Shell({ children }: { children: ReactNode }) {
           {item('/commissions', 'کمیسیون‌ها')}
           {isAdmin && item('/terms', 'دوره‌ها')}
           {(isAdmin || isOfficer) && item('/people', 'اشخاص و کاربران')}
+          {isAdmin && item('/roles', 'نقش‌ها و دسترسی‌ها')}
           {me!.is_super_admin && item('/chambers', 'اتاق‌ها')}
           {(isAdmin || isOfficer) && (
             <>

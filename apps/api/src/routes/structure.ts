@@ -1,5 +1,5 @@
 import bcrypt from 'bcryptjs';
-import { DEFAULT_COMMISSION_SETTINGS, isValidNationalCode, normalizeNationalCode, POSITIONS, positionHasVote, type Position } from '@kx/shared';
+import { DEFAULT_COMMISSION_SETTINGS, isValidNationalCode, normalizeNationalCode, positionHasVote } from '@kx/shared';
 import rateLimit from 'express-rate-limit';
 import { Router } from 'express';
 import { z } from 'zod';
@@ -10,6 +10,7 @@ import { audit } from '../lib/audit.js';
 import { badRequest, conflict, forbidden, notFound } from '../lib/errors.js';
 import { body, dateStr, paged, pageParams, param, uuid } from '../lib/validate.js';
 import { identityEnabled, inquireIdentity } from '../services/identity.js';
+import { assertRole } from '../services/roles.js';
 import { commissionAccess, isChamberAdmin, requireChamberAdmin, requireSuperAdmin, visibleChamberIds } from '../services/access.js';
 
 export const structureRouter = Router();
@@ -267,7 +268,9 @@ structureRouter.get('/commissions', async (req, res) => {
           WHERE m.commission_id = c.id AND m.status = 'active' AND m.position = 'chair') AS chair_name,
        (SELECT u.full_name FROM commission_memberships m JOIN users u ON u.id = m.user_id
           WHERE m.commission_id = c.id AND m.status = 'active' AND m.position = 'secretary') AS secretary_name,
-       (SELECT m.position FROM commission_memberships m WHERE m.commission_id = c.id AND m.user_id = $6 AND m.status = 'active') AS my_position
+       (SELECT m.position FROM commission_memberships m WHERE m.commission_id = c.id AND m.user_id = $6 AND m.status = 'active') AS my_position,
+       (SELECT cr.title FROM commission_memberships m JOIN custom_roles cr ON cr.chamber_id = m.chamber_id AND cr.key = m.position
+          WHERE m.commission_id = c.id AND m.user_id = $6 AND m.status = 'active') AS my_position_title
      FROM commissions c JOIN terms t ON t.id = c.term_id WHERE ${where}
      ORDER BY c.name LIMIT ${pageSize} OFFSET ${offset}`,
     params,
@@ -340,8 +343,9 @@ structureRouter.get('/commissions/:id/members', async (req, res) => {
   const a = await commissionAccess(currentUser(req), param(req, 'id'));
   const includeEnded = req.query.includeEnded === 'true';
   const rows = await query(
-    `SELECT m.*, u.full_name, u.organization, u.job_title, u.mobile, u.email
+    `SELECT m.*, u.full_name, u.organization, u.job_title, u.mobile, u.email, cr.title AS role_title
        FROM commission_memberships m JOIN users u ON u.id = m.user_id
+       LEFT JOIN custom_roles cr ON cr.chamber_id = m.chamber_id AND cr.key = m.position
       WHERE m.commission_id = $1 AND ($2 OR m.status = 'active')
       ORDER BY m.status, array_position(ARRAY['chair','vice_chair','secretary','member','expert','observer'], m.position), u.full_name`,
     [a.commission.id, includeEnded],
@@ -460,7 +464,7 @@ structureRouter.post('/commissions/:id/members', async (req, res) => {
       .object({
         userId: uuid.optional(),
         person: personSchema.optional(),
-        position: z.enum(POSITIONS),
+        position: z.string().min(2),
         hasVote: z.boolean().optional(),
         startDate: dateStr.optional(),
         endDate: dateStr.nullish(),
@@ -477,6 +481,7 @@ structureRouter.post('/commissions/:id/members', async (req, res) => {
       const person = await one('SELECT chamber_id FROM users WHERE id = $1', [b.userId], c);
       if (!person || person.chamber_id !== commission.chamber_id) throw badRequest('این شخص متعلق به این اتاق نیست');
     }
+    const custom = await assertRole(commission.chamber_id, b.position, 'position', c);
     const existing = await one(
       `SELECT * FROM commission_memberships WHERE commission_id = $1 AND user_id = $2 AND status = 'active'`,
       [commissionId, userId],
@@ -498,7 +503,7 @@ structureRouter.post('/commissions/:id/members', async (req, res) => {
     const r = await one(
       `INSERT INTO commission_memberships (chamber_id, commission_id, user_id, position, has_vote, start_date, end_date)
        VALUES ($1,$2,$3,$4,$5,COALESCE($6::date, current_date),$7) RETURNING *`,
-      [commission.chamber_id, commissionId, userId, b.position, b.hasVote ?? positionHasVote(b.position), b.startDate ?? null, b.endDate ?? null],
+      [commission.chamber_id, commissionId, userId, b.position, b.hasVote ?? (custom ? custom.has_vote : positionHasVote(b.position)), b.startDate ?? null, b.endDate ?? null],
       c,
     );
     await audit(c, req, { chamberId: commission.chamber_id, action: 'membership.created', entity: 'membership', entityId: r.id, after: r });
@@ -510,13 +515,14 @@ structureRouter.post('/commissions/:id/members', async (req, res) => {
 /** Change position / voting right: the old row is ended and a new one created, so history is preserved. */
 structureRouter.patch('/memberships/:id', async (req, res) => {
   const id = param(req, 'id');
-  const b = body(req, z.object({ position: z.enum(POSITIONS).optional(), hasVote: z.boolean().optional(), endDate: dateStr.nullish() }));
+  const b = body(req, z.object({ position: z.string().min(2).optional(), hasVote: z.boolean().optional(), endDate: dateStr.nullish() }));
   const row = await tx(async (c) => {
     const before = await one('SELECT * FROM commission_memberships WHERE id = $1 FOR UPDATE', [id], c);
     if (!before) throw notFound();
     requireChamberAdmin(currentUser(req), before.chamber_id);
     if (before.status !== 'active') throw conflict('عضویت پایان‌یافته قابل ویرایش نیست');
-    const position: Position = b.position ?? before.position;
+    const position: string = b.position ?? before.position;
+    const custom = await assertRole(before.chamber_id, position, 'position', c);
     if (position === before.position && b.hasVote === undefined) {
       const r = await one('UPDATE commission_memberships SET end_date = $2 WHERE id = $1 RETURNING *', [id, b.endDate ?? null], c);
       await audit(c, req, { chamberId: before.chamber_id, action: 'membership.updated', entity: 'membership', entityId: id, before, after: r });
@@ -526,7 +532,7 @@ structureRouter.patch('/memberships/:id', async (req, res) => {
     const r = await one(
       `INSERT INTO commission_memberships (chamber_id, commission_id, user_id, position, has_vote, start_date, end_date)
        VALUES ($1,$2,$3,$4,$5,current_date,$6) RETURNING *`,
-      [before.chamber_id, before.commission_id, before.user_id, position, b.hasVote ?? positionHasVote(position), b.endDate ?? before.end_date],
+      [before.chamber_id, before.commission_id, before.user_id, position, b.hasVote ?? (custom ? custom.has_vote : positionHasVote(position)), b.endDate ?? before.end_date],
       c,
     ).catch((e) => {
       if (e.code === '23505') throw conflict('این سمت در حال حاضر متصدی دارد', 'position_taken');
