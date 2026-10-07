@@ -14,7 +14,7 @@ import { currentUser } from '../auth/middleware.js';
 import { one, query, tx } from '../db/pool.js';
 import { audit } from '../lib/audit.js';
 import { badRequest, conflict, forbidden, notFound } from '../lib/errors.js';
-import { body, paged, pageParams, param, uuid } from '../lib/validate.js';
+import { body, listParam, paged, pageParams, param, uuid } from '../lib/validate.js';
 import { commissionAccess, meetingAccess, type MeetingAccess } from '../services/access.js';
 import {
   broadcastAttendance,
@@ -42,7 +42,7 @@ meetingsRouter.get('/meetings', async (req, res) => {
   const commissionId = req.query.commissionId ? uuid.parse(req.query.commissionId) : null;
   const from = typeof req.query.from === 'string' ? new Date(req.query.from) : null;
   const to = typeof req.query.to === 'string' ? new Date(req.query.to) : null;
-  const status = typeof req.query.status === 'string' ? req.query.status.split(',') : null;
+  const status = listParam(req.query.status);
   const mine = req.query.mine === 'true';
   const where = `($1::uuid IS NULL OR m.commission_id = $1)
     AND ($2::timestamptz IS NULL OR m.scheduled_at >= $2) AND ($3::timestamptz IS NULL OR m.scheduled_at < $3)

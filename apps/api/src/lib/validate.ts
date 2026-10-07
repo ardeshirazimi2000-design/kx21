@@ -32,3 +32,10 @@ export function param(req: Request, name: string): string {
 export function paged<T>(items: T[], total: number, page: number, pageSize: number) {
   return { items, total, page, pageSize };
 }
+
+/** Comma-separated list filter (?status=a,b); an empty value means "no filter". */
+export function listParam(v: unknown): string[] | null {
+  if (typeof v !== 'string') return null;
+  const items = v.split(',').map((s) => s.trim()).filter(Boolean);
+  return items.length ? items : null;
+}

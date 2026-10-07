@@ -5,7 +5,7 @@ import { one, query } from '../db/pool.js';
 import { verifyAuditChain } from '../lib/audit.js';
 import { badRequest, forbidden } from '../lib/errors.js';
 import { audit } from '../lib/audit.js';
-import { dateStr, paged, pageParams, param, uuid } from '../lib/validate.js';
+import { dateStr, listParam, paged, pageParams, param, uuid } from '../lib/validate.js';
 import { buildActivityDocx, buildActivityPptx, loadActivityData, summarize } from '../services/activityReport.js';
 import { pool } from '../db/pool.js';
 import { commissionAccess, requireChamberAdmin } from '../services/access.js';
@@ -181,7 +181,7 @@ reportsRouter.get('/reports/resolutions', async (req, res) => {
   if (commissionId) (await commissionAccess(u, commissionId)).require('report.commission');
   else if (chamberId) requireChamberAdmin(u, chamberId);
   else throw forbidden('کمیسیون یا اتاق را مشخص کنید');
-  const status = typeof req.query.status === 'string' ? req.query.status.split(',') : null;
+  const status = listParam(req.query.status);
   const rows = await query(
     `SELECT r.number, r.text, c.name AS commission_name, u.full_name AS owner_name, r.addressee, r.due_date, r.priority, r.status, r.progress,
             (r.due_date < current_date AND r.status NOT IN ('done','cancelled')) AS is_overdue, m.number AS meeting_number, r.created_at

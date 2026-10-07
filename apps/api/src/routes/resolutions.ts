@@ -4,7 +4,7 @@ import { currentUser, type AuthUser } from '../auth/middleware.js';
 import { one, query, tx } from '../db/pool.js';
 import { audit } from '../lib/audit.js';
 import { badRequest, conflict, forbidden, notFound } from '../lib/errors.js';
-import { body, dateStr, paged, pageParams, param, uuid } from '../lib/validate.js';
+import { body, dateStr, listParam, paged, pageParams, param, uuid } from '../lib/validate.js';
 import { commissionAccess } from '../services/access.js';
 import { adminBrowsableChambers, browsableCommissionIds } from '../services/roles.js';
 import { notify } from '../services/notifications.js';
@@ -110,7 +110,7 @@ resolutionsRouter.get('/resolutions', async (req, res) => {
   const commissionId = req.query.commissionId ? uuid.parse(req.query.commissionId) : null;
   const chamberId = req.query.chamberId ? uuid.parse(req.query.chamberId) : null;
   const meetingId = req.query.meetingId ? uuid.parse(req.query.meetingId) : null;
-  const status = typeof req.query.status === 'string' ? req.query.status.split(',') : null;
+  const status = listParam(req.query.status);
   const mine = req.query.mine === 'true';
   const overdue = req.query.overdue === 'true';
   const where = `${VISIBLE} AND ($4::uuid IS NULL OR r.commission_id = $4) AND ($5::uuid IS NULL OR r.chamber_id = $5)

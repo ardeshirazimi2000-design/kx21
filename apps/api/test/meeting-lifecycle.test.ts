@@ -735,6 +735,13 @@ describe('audit and scheduler', () => {
     expect(dash.body.overdueResolutions.length).toBeGreaterThan(0);
   });
 
+  it('treats an empty status filter as no filter (web list page)', async () => {
+    const all = await as('admin').get('/api/resolutions');
+    const empty = await as('admin').get('/api/resolutions?status=&mine=false&overdue=false&q=');
+    expect(all.body.total).toBeGreaterThan(0);
+    expect(empty.body.total).toBe(all.body.total);
+  });
+
   it('exports resolutions as CSV only for authorised users', async () => {
     const chamberId = (await as('admin').get('/api/auth/me')).body.adminChambers[0];
     const csv = await as('admin').get(`/api/reports/resolutions?chamberId=${chamberId}&format=csv`);
