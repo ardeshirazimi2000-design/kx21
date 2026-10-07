@@ -646,6 +646,77 @@ describe('documents', () => {
   });
 });
 
+describe('presentation archive and periodic report', () => {
+  const binary = (res: any, cb: (e: Error | null, b: Buffer) => void) => {
+    const chunks: Buffer[] = [];
+    res.on('data', (c: Buffer) => chunks.push(c));
+    res.on('end', () => cb(null, Buffer.concat(chunks)));
+  };
+
+  it('archives slides and photos presented in meetings, searchable per commission', async () => {
+    const meeting = (await as('secretary').get('/api/meetings?status=approved')).body.items[0];
+    const commissionId = (await as('secretary').get(`/api/meetings/${meeting.id}`)).body.commission.id;
+    const pptx = Buffer.concat([Buffer.from('PK\x03\x04', 'binary'), Buffer.alloc(64)]);
+    const slides = await request(app)
+      .post('/api/documents')
+      .set('authorization', `Bearer ${tokens.secretary}`)
+      .field('meetingId', meeting.id)
+      .attach('file', pptx, { filename: 'ارائه صادرات.pptx', contentType: 'application/octet-stream' });
+    expect(slides.status).toBe(201);
+    expect(slides.body.kind).toBe('presentation');
+    const jpg = Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0]), Buffer.alloc(32)]);
+    const photo = await request(app)
+      .post('/api/documents')
+      .set('authorization', `Bearer ${tokens.secretary}`)
+      .field('meetingId', meeting.id)
+      .attach('file', jpg, { filename: 'IMG_1.jpg', contentType: 'image/jpeg' });
+    expect(photo.body.kind).toBe('photo');
+    // a .pptx that is not a zip is refused
+    const bad = await request(app)
+      .post('/api/documents')
+      .set('authorization', `Bearer ${tokens.secretary}`)
+      .field('meetingId', meeting.id)
+      .attach('file', Buffer.from('not a deck'), { filename: 'x.pptx', contentType: 'application/octet-stream' });
+    expect(bad.status).toBe(400);
+
+    const archive = await as('admin').get(`/api/documents/archive?commissionId=${commissionId}&q=صادرات`);
+    expect(archive.status).toBe(200);
+    expect(archive.body.items.map((d: any) => d.id)).toContain(slides.body.id);
+    expect(archive.body.items[0].meeting_title).toBeTruthy();
+    const photos = await as('admin').get(`/api/documents/archive?commissionId=${commissionId}&kind=photo`);
+    expect(photos.body.items.every((d: any) => d.kind === 'photo')).toBe(true);
+    expect([403, 404]).toContain((await as('expert').get(`/api/documents/archive?commissionId=${commissionId}`)).status);
+  });
+
+  it('produces the periodic activity report as Word and PowerPoint', async () => {
+    const meeting = (await as('secretary').get('/api/meetings?status=approved')).body.items[0];
+    const commissionId = (await as('secretary').get(`/api/meetings/${meeting.id}`)).body.commission.id;
+    const from = new Date(Date.now() - 365 * 864e5).toISOString().slice(0, 10);
+    const to = new Date(Date.now() + 864e5).toISOString().slice(0, 10);
+    const preview = await as('admin').get(`/api/reports/commission-activity?commissionId=${commissionId}&from=${from}&to=${to}`);
+    expect(preview.status).toBe(200);
+    expect(preview.body.summary.held).toBeGreaterThan(0);
+    expect(preview.body.summary.resolutions).toBeGreaterThan(0);
+
+    for (const format of ['docx', 'pptx']) {
+      const r = await request(app)
+        .get(`/api/reports/commission-activity?commissionId=${commissionId}&from=${from}&to=${to}&format=${format}`)
+        .set('authorization', `Bearer ${tokens.admin}`)
+        .buffer(true)
+        .parse(binary);
+      expect(r.status).toBe(200);
+      expect(r.headers['content-disposition']).toContain(`.${format}`);
+      const body = r.body as Buffer;
+      expect(body.subarray(0, 2).toString()).toBe('PK');
+      expect(body.includes(Buffer.from(format === 'docx' ? 'word/document.xml' : 'ppt/slides/slide1.xml'))).toBe(true);
+    }
+    expect([403, 404]).toContain((await as('expert').get(`/api/reports/commission-activity?commissionId=${commissionId}`)).status);
+    expect((await as('admin').get(`/api/reports/commission-activity?commissionId=${commissionId}&from=${to}&to=${from}`)).status).toBe(400);
+    const { rows } = await pool.query(`SELECT count(*)::int AS n FROM audit_logs WHERE action = 'report.activity_exported'`);
+    expect(rows[0].n).toBe(2);
+  });
+});
+
 describe('audit and scheduler', () => {
   it('keeps an intact, append-only audit chain', async () => {
     const v = await as('admin').get(`/api/audit/verify?chamberId=${(await as('admin').get('/api/auth/me')).body.adminChambers[0]}`);

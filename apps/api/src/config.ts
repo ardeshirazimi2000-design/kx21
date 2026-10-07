@@ -19,7 +19,7 @@ export const config = {
   refreshTokenTtlDays: Number(env('REFRESH_TOKEN_TTL_DAYS', '30')),
   corsOrigins: env('CORS_ORIGINS', 'http://localhost:5173').split(',').map((s) => s.trim()),
   uploadDir: env('UPLOAD_DIR', './uploads'),
-  maxUploadMb: Number(env('MAX_UPLOAD_MB', '20')),
+  maxUploadMb: Number(env('MAX_UPLOAD_MB', '50')),
   smsProvider: env('SMS_PROVIDER', 'log'),
   emailProvider: env('EMAIL_PROVIDER', 'log'),
   pushProvider: env('PUSH_PROVIDER', 'log'),

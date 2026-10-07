@@ -305,7 +305,7 @@ structureRouter.post('/commissions', async (req, res) => {
 
 structureRouter.get('/commissions/:id', async (req, res) => {
   const a = await commissionAccess(currentUser(req), param(req, 'id'));
-  const term = await one('SELECT id, number, title, status FROM terms WHERE id = $1', [a.commission.term_id]);
+  const term = await one(`SELECT id, number, title, status, to_char(start_date, 'YYYY-MM-DD') AS start_date, to_char(end_date, 'YYYY-MM-DD') AS end_date FROM terms WHERE id = $1`, [a.commission.term_id]);
   const officers = await query(
     `SELECT m.position, u.id AS user_id, u.full_name FROM commission_memberships m JOIN users u ON u.id = m.user_id
       WHERE m.commission_id = $1 AND m.status = 'active' AND m.position IN ('chair','vice_chair','secretary')`,

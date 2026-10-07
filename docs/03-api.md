@@ -21,3 +21,9 @@
 | `comment.created` | همه | نظر جدید |
 | `vote.opened` / `vote.progress` / `vote.closed` | همه | شروع، تعداد آرا (بدون محتوا)، نتیجه طبق مجوز |
 | `notification` | شخص | اعلان داخل برنامه |
+
+## اسناد، آرشیو و گزارش دوره‌ای
+- `POST /api/documents` (multipart): `file` + یکی از `meetingId | agendaItemId | resolutionId | issueId | commissionId`، و `kind` اختیاری (`presentation | photo | attachment | report | letter | evidence`). اگر `kind` ارسال نشود از روی فایل تعیین می‌شود (ppt/pptx/ppsx ⇒ ارائه، تصاویر ⇒ عکس). پسوند و امضای باینری فایل با هم بررسی می‌شوند؛ حداکثر حجم `MAX_UPLOAD_MB` (پیش‌فرض ۵۰).
+- `POST /api/documents/{id}/link?inline=1`: لینک امضاشده دودقیقه‌ای؛ با `inline=1` فایل‌های PDF و تصویر در مرورگر یا گوشی نمایش داده می‌شوند.
+- `GET /api/documents/archive?commissionId&q&kind&meetingId&page`: آرشیو اسناد کمیسیون با جلسه، آیتم و مصوبه مرتبط و تعداد هر نوع (`kinds`). مجوز: `commission.browse`.
+- `GET /api/reports/commission-activity?commissionId&from&to&format=json|docx|pptx`: گزارش دوره‌ای فعالیت کمیسیون. `json` پیش‌نمایش شاخص‌هاست؛ `docx` گزارش کامل Word و `pptx` فایل ارائه با نمودار. بازه پیش‌فرض: شروع دوره تا امروز. مجوز: `report.commission`. دریافت فایل در Audit ثبت می‌شود.

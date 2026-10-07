@@ -17,6 +17,7 @@
     "@kx/shared": "1.0.0",
     "bcryptjs": "^3.0.0",
     "cors": "^2.8.5",
+    "docx": "^9.9.0",
     "express": "^5.1.0",
     "express-rate-limit": "^8.0.0",
     "helmet": "^8.0.0",
@@ -24,6 +25,7 @@
     "multer": "^2.0.0",
     "pg": "^8.13.0",
     "pino": "^9.0.0",
+    "pptxgenjs": "^4.0.1",
     "socket.io": "^4.8.0",
     "zod": "^4.0.0"
   },

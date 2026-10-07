@@ -110,5 +110,24 @@ export async function api<T = any>(path: string, init: { method?: string; json?:
 }
 
 export const get = <T = any>(p: string) => api<T>(p);
+
+/** Multipart upload of a local file (camera photo, gallery image, picked PDF/PowerPoint) to /documents. */
+export async function uploadFile(fields: Record<string, string>, file: { uri: string; name: string; type: string }, retry = true): Promise<any> {
+  const fd = new FormData();
+  Object.entries(fields).forEach(([k, v]) => fd.append(k, v));
+  fd.append('file', file as any);
+  const headers: Record<string, string> = { accept: 'application/json' };
+  if (session) headers.authorization = `Bearer ${session.accessToken}`;
+  let res: Response;
+  try {
+    res = await fetch(`${getApiUrl()}/api/documents`, { method: 'POST', headers, body: fd });
+  } catch {
+    throw new ApiError(0, 'network', 'ارسال فایل ممکن نشد؛ اتصال اینترنت را بررسی کنید');
+  }
+  if (res.status === 401 && retry && session && (await refresh())) return uploadFile(fields, file, false);
+  const data = await res.json().catch(() => null);
+  if (!res.ok) throw new ApiError(res.status, data?.error?.code ?? 'error', data?.error?.message ?? 'ارسال فایل ناموفق بود');
+  return data;
+}
 export const post = <T = any>(p: string, json: unknown = {}) => api<T>(p, { method: 'POST', json });
 export const patch = <T = any>(p: string, json: unknown = {}) => api<T>(p, { method: 'PATCH', json });

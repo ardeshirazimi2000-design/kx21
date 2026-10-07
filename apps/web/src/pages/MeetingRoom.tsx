@@ -12,6 +12,7 @@ import {
 } from '@kx/shared';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
+import { DocKind, UploadFiles, ViewButton } from '../components/docs';
 import { AgendaBadge, AttendanceBadge, MeetingStatusBadge, MinutesBadge, ResolutionBadge } from '../components/status';
 import { Badge, Button, Card, dateFa, dateTimeFa, Empty, ErrorBox, Field, fa, JalaliDateInput, Loading, Modal, PageHeader, Tabs } from '../components/ui';
 import { ApiError, del, download, get, post, upload } from '../lib/api';
@@ -667,27 +668,16 @@ function Documents({ m }: { m: any }) {
   const { data, reload } = useApi<any[]>(`/documents?meetingId=${m.id}`);
   const canUpload = m.capabilities.includes('meeting.manage');
   const [target, setTarget] = useState('');
-  const [err, setErr] = useState<Error | null>(null);
-  const [busy, setBusy] = useState(false);
-  const onFile = async (f: File | undefined) => {
-    if (!f) return;
-    setBusy(true);
-    setErr(null);
-    try {
-      await upload(target ? { agendaItemId: target } : { meetingId: m.id }, f);
-      void reload();
-    } catch (e) {
-      setErr(e as Error);
-    } finally {
-      setBusy(false);
-    }
-  };
+  const photos = data?.filter((d) => d.kind === 'photo').length ?? 0;
+  const slides = data?.filter((d) => d.kind === 'presentation').length ?? 0;
   return (
-    <Card title="مستندات جلسه">
-      <ErrorBox error={err} />
+    <Card
+      title="مستندات و ارائه‌های جلسه"
+      actions={data?.length ? <span className="muted small">{fa(slides)} ارائه — {fa(photos)} عکس — {fa(data.length)} فایل</span> : undefined}
+    >
       {canUpload && (
-        <div className="row gap-sm mb wrap">
-          <select className="input" style={{ maxWidth: 320 }} value={target} onChange={(e) => setTarget(e.target.value)}>
+        <div className="mb" style={{ display: "grid", gap: 8 }}>
+          <select className="input" style={{ maxWidth: 320 }} value={target} onChange={(e) => setTarget(e.target.value)} aria-label="محل پیوست">
             <option value="">پیوست کل جلسه</option>
             {m.agenda.map((a: any) => (
               <option key={a.id} value={a.id}>
@@ -695,25 +685,22 @@ function Documents({ m }: { m: any }) {
               </option>
             ))}
           </select>
-          <label className="btn btn-secondary">
-            {busy ? 'در حال بارگذاری…' : 'انتخاب فایل'}
-            <input type="file" hidden accept=".pdf,.docx,.xlsx,.pptx,.doc,.xls,.png,.jpg,.jpeg,.txt" onChange={(e) => void onFile(e.target.files?.[0])} />
-          </label>
-          <span className="muted small">PDF، Word، Excel، PowerPoint، تصویر — حداکثر ۲۰ مگابایت</span>
+          <UploadFiles target={target ? { agendaItemId: target } : { meetingId: m.id }} onDone={() => void reload()} />
+          <span className="muted small">پاورپوینت و PDF ارائه‌شده و عکس‌های جلسه در «آرشیو اسناد» کمیسیون هم قابل جست‌وجو هستند.</span>
         </div>
       )}
       {data?.length === 0 && <Empty>مستندی بارگذاری نشده است.</Empty>}
       <ul className="list">
         {data?.map((d) => (
-          <li key={d.id} className="row between gap">
-            <span>
-              <a href="#" onClick={(e) => { e.preventDefault(); void download(`/documents/${d.id}/download`, d.file_name); }}>
-                {d.title ?? d.file_name}
-              </a>
+          <li key={d.id} className="row between gap wrap">
+            <span className="row gap-sm" style={{ alignItems: 'center' }}>
+              <DocKind kind={d.kind} />
+              <span>{d.title ?? d.file_name}</span>
               {d.agenda_item_id && <span className="muted small"> — {m.agenda.find((a: any) => a.id === d.agenda_item_id)?.title}</span>}
             </span>
-            <span className="muted small">
+            <span className="row gap-sm muted small" style={{ alignItems: 'center' }}>
               {fa(Math.ceil(d.size_bytes / 1024))} KB — {d.owner_name} — {dateFa(d.created_at)}
+              <ViewButton d={d} />
             </span>
           </li>
         ))}

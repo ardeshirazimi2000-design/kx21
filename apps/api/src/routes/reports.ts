@@ -3,12 +3,18 @@ import { Router } from 'express';
 import { currentUser } from '../auth/middleware.js';
 import { one, query } from '../db/pool.js';
 import { verifyAuditChain } from '../lib/audit.js';
-import { forbidden } from '../lib/errors.js';
-import { paged, pageParams, param, uuid } from '../lib/validate.js';
+import { badRequest, forbidden } from '../lib/errors.js';
+import { audit } from '../lib/audit.js';
+import { dateStr, paged, pageParams, param, uuid } from '../lib/validate.js';
+import { buildActivityDocx, buildActivityPptx, loadActivityData, summarize } from '../services/activityReport.js';
+import { pool } from '../db/pool.js';
 import { commissionAccess, requireChamberAdmin } from '../services/access.js';
 import { adminBrowsableChambers, browsableCommissionIds } from '../services/roles.js';
 
 export const reportsRouter = Router();
+
+/** 'YYYY-MM-DD' → Jalali '1404-07-15' (latin digits, safe in file names). */
+const jalaliFileDate = (d: string) => formatJalaliDate(`${d}T12:00:00`, false).replace(/\//g, '-');
 
 // ─────────────────────────────── Personal home (mobile "خانه من") ───────────────────────────────
 
@@ -221,6 +227,50 @@ reportsRouter.get('/reports/attendance', async (req, res) => {
       [ca.commission.id],
     ),
   );
+});
+
+/**
+ * Periodic activity report (گزارش دوره‌ای فعالیت کمیسیون) as JSON preview, Word (docx) or PowerPoint (pptx).
+ * Period defaults to the commission's term start → today.
+ */
+reportsRouter.get('/reports/commission-activity', async (req, res) => {
+  const u = currentUser(req);
+  const ca = await commissionAccess(u, uuid.parse(req.query.commissionId));
+  ca.require('report.commission');
+  const term = await one<{ start_date: string }>(
+    `SELECT to_char(t.start_date, 'YYYY-MM-DD') AS start_date FROM terms t JOIN commissions c ON c.term_id = t.id WHERE c.id = $1`,
+    [ca.commission.id],
+  );
+  const today = new Date().toISOString().slice(0, 10);
+  const from = req.query.from ? dateStr.parse(req.query.from) : (term?.start_date ?? today);
+  const to = req.query.to ? dateStr.parse(req.query.to) : today;
+  if (from > to) throw badRequest('تاریخ شروع دوره باید پیش از تاریخ پایان باشد');
+  const format = String(req.query.format ?? 'json');
+  if (!['json', 'docx', 'pptx'].includes(format)) throw badRequest('قالب گزارش باید docx، pptx یا json باشد');
+  const data = await loadActivityData(ca.commission.id, from, to);
+  if (format === 'json') {
+    res.json({ from, to, summary: summarize(data), meetings: data.meetings.length, resolutions: data.resolutions.length, attendance: data.attendance });
+    return;
+  }
+  const buf = format === 'docx' ? await buildActivityDocx(data) : await buildActivityPptx(data);
+  await audit(pool, req, {
+    chamberId: ca.commission.chamber_id,
+    action: 'report.activity_exported',
+    entity: 'commission',
+    entityId: ca.commission.id,
+    after: { from, to, format },
+  });
+  const name = `activity-${ca.commission.code}-${from}-${to}.${format}`;
+  // Browsers replace the zero-width non-joiner in file names with '_'; use a plain space instead.
+  const fileName = `گزارش دوره ای ${data.commission.name} ${jalaliFileDate(from)} تا ${jalaliFileDate(to)}.${format}`.replace(/\u200c/g, ' ');
+  res.setHeader(
+    'Content-Type',
+    format === 'docx'
+      ? 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+      : 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+  );
+  res.setHeader('Content-Disposition', `attachment; filename="${name}"; filename*=UTF-8''${encodeURIComponent(fileName)}`);
+  res.send(buf);
 });
 
 // ─────────────────────────────── Global search ───────────────────────────────

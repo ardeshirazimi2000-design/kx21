@@ -17,7 +17,10 @@ import { Stack, useLocalSearchParams } from 'expo-router';
 import { useEffect, useRef, useState } from 'react';
 import { Alert, Linking, Modal, Pressable, ScrollView, View } from 'react-native';
 import { Badge, Button, Card, Empty, ErrorText, fa, Input, Loading, Row, Screen, T, type Tone } from '../../components/ui';
-import { api, ApiError, post } from '../../lib/api';
+import * as DocumentPicker from 'expo-document-picker';
+import * as ImagePicker from 'expo-image-picker';
+import { api, ApiError, post, uploadFile } from '../../lib/api';
+import { getApiUrl } from '../../lib/config';
 import { addMeetingToCalendar } from '../../lib/calendar';
 import { useRealtime } from '../../lib/socket';
 import { useTheme } from '../../lib/theme';
@@ -304,25 +307,7 @@ export default function MeetingRoomScreen() {
         </Card>
       )}
 
-      {m.documents.length > 0 && (
-        <Card title="مستندات جلسه">
-          {m.documents.map((d: any) => (
-            <Pressable
-              key={d.id}
-              onPress={async () => {
-                try {
-                  const { url } = await post(`/documents/${d.id}/link`);
-                  await Linking.openURL(url);
-                } catch (e) {
-                  setActionError(e as Error);
-                }
-              }}
-            >
-              <T color={t.primary}>📄 {d.title ?? d.file_name}</T>
-            </Pressable>
-          ))}
-        </Card>
-      )}
+      {(m.documents.length > 0 || can('meeting.manage')) && <MeetingDocuments m={m} canUpload={can('meeting.manage')} onChanged={reload} />}
 
       {m.minutes && (
         <Card title="صورتجلسه">
@@ -639,6 +624,111 @@ function DelegateCard({ m, onChanged }: { m: any; onChanged: () => Promise<void>
         }}
       />
       <Button title="انصراف" variant="ghost" onPress={() => setOpen(false)} />
+    </Card>
+  );
+}
+
+// ─────────────────────────────── Documents, slides and photos ───────────────────────────────
+
+const KIND_ICON: Record<string, string> = { presentation: '📊', photo: '🖼️', letter: '✉️', report: '📑' };
+const VIEWABLE = ['application/pdf', 'image/png', 'image/jpeg', 'image/webp'];
+const DOC_TYPES = [
+  'application/pdf',
+  'application/vnd.ms-powerpoint',
+  'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+  'application/vnd.openxmlformats-officedocument.presentationml.slideshow',
+  'application/msword',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  'application/vnd.ms-excel',
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  'image/*',
+];
+
+function MeetingDocuments({ m, canUpload, onChanged }: { m: any; canUpload: boolean; onChanged: () => Promise<void> | void }) {
+  const t = useTheme();
+  const [busy, setBusy] = useState<string | null>(null);
+  const [error, setError] = useState<Error | null>(null);
+
+  const send = async (files: { uri: string; name: string; type: string }[]) => {
+    setError(null);
+    const failed: string[] = [];
+    for (const [i, f] of files.entries()) {
+      setBusy(files.length > 1 ? `${fa(i + 1)} از ${fa(files.length)}` : '');
+      try {
+        await uploadFile({ meetingId: m.id }, f);
+      } catch (e) {
+        failed.push(`${f.name}: ${(e as Error).message}`);
+      }
+    }
+    setBusy(null);
+    if (failed.length) setError(new Error(failed.join('\n')));
+    await onChanged();
+  };
+
+  const fromImages = (assets: ImagePicker.ImagePickerAsset[]) =>
+    assets.map((a, i) => {
+      const type = a.mimeType ?? 'image/jpeg';
+      const ext = type === 'image/png' ? 'png' : type.includes('hei') ? 'heic' : 'jpg';
+      const name = a.fileName ?? `جلسه-${m.number}-${Date.now()}-${i + 1}`;
+      return { uri: a.uri, type, name: /\.\w{3,4}$/.test(name) ? name : `${name}.${ext}` };
+    });
+
+  const camera = async () => {
+    const perm = await ImagePicker.requestCameraPermissionsAsync();
+    if (!perm.granted) return setError(new Error('اجازه دسترسی به دوربین داده نشد'));
+    const r = await ImagePicker.launchCameraAsync({ mediaTypes: ['images'], quality: 0.7 });
+    if (!r.canceled) await send(fromImages(r.assets));
+  };
+  const gallery = async () => {
+    const r = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], quality: 0.7, allowsMultipleSelection: true, selectionLimit: 10 });
+    if (!r.canceled) await send(fromImages(r.assets));
+  };
+  const file = async () => {
+    const r = await DocumentPicker.getDocumentAsync({ type: DOC_TYPES, multiple: true, copyToCacheDirectory: true });
+    if (!r.canceled) await send(r.assets.map((a) => ({ uri: a.uri, name: a.name, type: a.mimeType ?? 'application/octet-stream' })));
+  };
+
+  const open = async (d: any) => {
+    try {
+      const { url } = await post(`/documents/${d.id}/link${VIEWABLE.includes(d.mime_type) ? '?inline=1' : ''}`);
+      // Use the server address configured in the app; a reverse proxy may report a different host/port.
+      await Linking.openURL(`${getApiUrl()}${String(url).replace(/^https?:\/\/[^/]+/, '')}`);
+    } catch (e) {
+      setError(e as Error);
+    }
+  };
+
+  return (
+    <Card title="مستندات، ارائه‌ها و عکس‌ها" right={m.documents.length ? <T muted size={12}>{fa(m.documents.length)} فایل</T> : undefined}>
+      {m.documents.map((d: any) => (
+        <Pressable key={d.id} onPress={() => void open(d)} style={{ paddingVertical: 6 }}>
+          <T color={t.primary}>
+            {KIND_ICON[d.kind] ?? '📄'} {d.title ?? d.file_name}
+          </T>
+        </Pressable>
+      ))}
+      {m.documents.length === 0 && <T muted>هنوز فایلی پیوست نشده است.</T>}
+      {canUpload && (
+        <View style={{ gap: 8, marginTop: 8 }}>
+          {busy !== null ? (
+            <T muted>در حال ارسال {busy}…</T>
+          ) : (
+            <>
+              <Row style={{ gap: 8 }}>
+                <View style={{ flex: 1 }}>
+                  <Button title="📷 عکس" variant="secondary" onPress={() => void camera()} />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Button title="🖼️ از گالری" variant="secondary" onPress={() => void gallery()} />
+                </View>
+              </Row>
+              <Button title="📎 فایل PDF / پاورپوینت" variant="secondary" onPress={() => void file()} />
+            </>
+          )}
+          <ErrorText error={error} />
+          <T muted size={12}>فایل‌ها در آرشیو اسناد کمیسیون هم ذخیره می‌شوند.</T>
+        </View>
+      )}
     </Card>
   );
 }

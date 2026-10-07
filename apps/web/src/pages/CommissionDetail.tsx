@@ -6,11 +6,12 @@ import { Badge, Button, Card, dateFa, dateTimeFa, Empty, ErrorBox, Field, fa, Ja
 import { patch, post } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { useApi, useRoles } from '../lib/hooks';
+import { ActivityReport, CommissionArchive } from './CommissionArchive';
 import { CommissionDashboard } from './Home';
 import { NewMeetingModal } from './Meetings';
 import { PersonModal } from './Structure';
 
-type Tab = 'overview' | 'members' | 'meetings' | 'issues' | 'settings';
+type Tab = 'overview' | 'members' | 'meetings' | 'archive' | 'report' | 'issues' | 'settings';
 
 export function CommissionDetailPage() {
   const { id } = useParams();
@@ -24,6 +25,8 @@ export function CommissionDetailPage() {
     { id: 'members', label: 'اعضا و سمت‌ها' },
     { id: 'meetings', label: 'جلسات' },
   ];
+  if (caps.includes('commission.browse')) tabs.push({ id: 'archive', label: 'آرشیو اسناد' });
+  if (caps.includes('report.commission')) tabs.push({ id: 'report', label: 'گزارش دوره‌ای' });
   if (c.myPosition !== 'expert') tabs.push({ id: 'issues', label: 'مسائل و کارشناسی' });
   tabs.push({ id: 'settings', label: 'تنظیمات نصاب و رأی' });
   return (
@@ -46,6 +49,8 @@ export function CommissionDetailPage() {
       {tab === 'overview' && (caps.includes('report.commission') ? <CommissionDashboard commissionId={c.id} /> : <Empty>دسترسی به داشبورد ندارید.</Empty>)}
       {tab === 'members' && <Members commission={c} />}
       {tab === 'meetings' && <Meetings commission={c} />}
+      {tab === 'archive' && <CommissionArchive commission={c} />}
+      {tab === 'report' && <ActivityReport commission={c} />}
       {tab === 'issues' && <Issues commission={c} />}
       {tab === 'settings' && <Settings commission={c} onSaved={reload} />}
     </>

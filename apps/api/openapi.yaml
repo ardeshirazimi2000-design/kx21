@@ -3585,7 +3585,9 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
-      description: Type/extension/magic-byte validated, size limited, malware scan hook.
+      description: 'Fields: file, target id, optional kind (attachment|presentation|photo|letter|report|evidence; detected from the file when
+        omitted), optional title. Accepts PDF, PowerPoint (ppt/pptx/ppsx), Word, Excel, images (png/jpg/webp/heic) and text; extension + magic-byte
+        validated, size limited (MAX_UPLOAD_MB, default 50), malware scan hook.'
       requestBody:
         required: true
         content:
@@ -3663,7 +3665,7 @@ paths:
     post:
       tags:
       - Documents
-      summary: لینک امضاشده کوتاه‌مدت برای موبایل
+      summary: لینک امضاشده کوتاه‌مدت (?inline=1 برای نمایش PDF و عکس در مرورگر)
       responses:
         '200':
           description: OK
@@ -3690,6 +3692,33 @@ paths:
         in: path
         required: true
         schema: *id004
+  /api/documents/archive:
+    get:
+      tags:
+      - Documents
+      summary: آرشیو اسناد کمیسیون (?commissionId&q&kind&meetingId&page) — ارائه‌ها، عکس‌ها و پیوست‌های همه جلسات
+      responses:
+        '200':
+          description: OK
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Forbidden
+        '404':
+          description: Not found or not visible
+        '409':
+          description: Conflict (state machine / business rule)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      description: Requires commission.browse. Returns Paged items plus per-kind counts.
   /api/files/{id}:
     get:
       tags:
@@ -3936,6 +3965,34 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
+  /api/reports/commission-activity:
+    get:
+      tags:
+      - Reports
+      summary: گزارش دوره‌ای فعالیت کمیسیون (?commissionId&from&to&format=json|docx|pptx)
+      responses:
+        '200':
+          description: OK
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Forbidden
+        '404':
+          description: Not found or not visible
+        '409':
+          description: Conflict (state machine / business rule)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      description: Requires report.commission. docx = full Word report, pptx = presentation deck with charts; period defaults to term start →
+        today. Exports are audited.
   /api/search:
     get:
       tags:
