@@ -1,22 +1,112 @@
 import { toPersianDigits } from '@kx/shared';
-import type { ReactNode } from 'react';
-import { ActivityIndicator, Pressable, RefreshControl, ScrollView, StyleSheet, Text, TextInput, View, type TextInputProps, type ViewStyle } from 'react-native';
+import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
+import {
+  ActivityIndicator,
+  Keyboard,
+  Platform,
+  Pressable,
+  RefreshControl,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+  type NativeScrollEvent,
+  type NativeSyntheticEvent,
+  type TextInputProps,
+  type ViewStyle,
+} from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useTheme, type Theme } from '../lib/theme';
 
 export const fa = (v: string | number | null | undefined) => (v === null || v === undefined ? '—' : toPersianDigits(v));
+
+// ───────── Keyboard handling ─────────
+// Android 15+ draws apps edge-to-edge, so the window is no longer resized when the keyboard opens.
+// Forms therefore pad their bottom by the keyboard height and scroll the focused field above it.
+
+/** Top edge (screen Y) and height of the on-screen keyboard; 0 when hidden. */
+export function useKeyboard() {
+  const [kb, setKb] = useState({ height: 0, top: 0 });
+  useEffect(() => {
+    const showEvt = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
+    const hideEvt = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
+    const show = Keyboard.addListener(showEvt, (e) => setKb({ height: e.endCoordinates.height, top: e.endCoordinates.screenY }));
+    const hide = Keyboard.addListener(hideEvt, () => setKb({ height: 0, top: 0 }));
+    return () => {
+      show.remove();
+      hide.remove();
+    };
+  }, []);
+  return kb;
+}
+
+const RevealContext = createContext<(() => void) | null>(null);
+
+/** Props for a ScrollView that keeps the focused input visible above the keyboard. */
+export function useKeyboardAwareScroll() {
+  const ref = useRef<ScrollView>(null);
+  const offset = useRef(0);
+  const kb = useKeyboard();
+  const kbTop = useRef(0);
+  kbTop.current = kb.height ? kb.top : 0;
+  const reveal = useCallback(() => {
+    setTimeout(() => {
+      const input = TextInput.State.currentlyFocusedInput?.() as any;
+      if (!input || !kbTop.current || !input.measureInWindow) return;
+      input.measureInWindow((_x: number, y: number, _w: number, h: number) => {
+        const overlap = y + h + 24 - kbTop.current;
+        if (overlap > 0) ref.current?.scrollTo({ y: offset.current + overlap, animated: true });
+      });
+    }, 120);
+  }, []);
+  useEffect(() => {
+    if (kb.height) reveal();
+  }, [kb.height, reveal]);
+  return {
+    kbHeight: kb.height,
+    reveal,
+    scrollProps: {
+      ref,
+      keyboardShouldPersistTaps: 'handled' as const,
+      scrollEventThrottle: 16,
+      onScroll: (e: NativeSyntheticEvent<NativeScrollEvent>) => {
+        offset.current = e.nativeEvent.contentOffset.y;
+      },
+    },
+  };
+}
+
+/** Scrollable form area for screens and full-screen modals. */
+export function KeyboardScroll({ children, contentContainerStyle, refreshControl }: { children: ReactNode; contentContainerStyle?: ViewStyle; refreshControl?: any }) {
+  const { kbHeight, reveal, scrollProps } = useKeyboardAwareScroll();
+  const base = (contentContainerStyle?.paddingBottom as number | undefined) ?? 16;
+  return (
+    <RevealContext.Provider value={reveal}>
+      <ScrollView {...scrollProps} refreshControl={refreshControl} contentContainerStyle={[contentContainerStyle, { paddingBottom: base + kbHeight }]}>
+        {children}
+      </ScrollView>
+    </RevealContext.Provider>
+  );
+}
+
+/** Bottom padding equal to the keyboard height (for bottom sheets and fixed footers). */
+export function KeyboardSpacer() {
+  const { height } = useKeyboard();
+  return height ? <View style={{ height }} /> : null;
+}
 
 export function Screen({ children, refreshing, onRefresh, scroll = true }: { children: ReactNode; refreshing?: boolean; onRefresh?: () => void; scroll?: boolean }) {
   const t = useTheme();
   if (!scroll) return <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['bottom']}>{children}</SafeAreaView>;
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['bottom']}>
-      <ScrollView
+      <KeyboardScroll
         contentContainerStyle={{ padding: 16, gap: 12, paddingBottom: 40 }}
         refreshControl={onRefresh ? <RefreshControl refreshing={!!refreshing} onRefresh={onRefresh} /> : undefined}
       >
         {children}
-      </ScrollView>
+      </KeyboardScroll>
     </SafeAreaView>
   );
 }
@@ -103,12 +193,17 @@ export function Badge({ label, tone = 'neutral' }: { label: string; tone?: Tone 
 
 export function Input(props: TextInputProps & { label?: string }) {
   const t = useTheme();
+  const reveal = useContext(RevealContext);
   return (
     <View style={{ gap: 4 }}>
       {props.label && <T muted size={13}>{props.label}</T>}
       <TextInput
         placeholderTextColor={t.muted}
         {...props}
+        onFocus={(e) => {
+          reveal?.();
+          props.onFocus?.(e);
+        }}
         style={[{ borderWidth: 1, borderColor: t.border, borderRadius: 10, padding: 12, color: t.text, backgroundColor: t.surface, textAlign: 'right', fontSize: 15 }, props.style]}
       />
     </View>

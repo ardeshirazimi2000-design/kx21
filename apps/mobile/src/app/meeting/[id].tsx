@@ -16,7 +16,7 @@ import {
 import { Stack, useLocalSearchParams } from 'expo-router';
 import { useEffect, useRef, useState } from 'react';
 import { Alert, Linking, Modal, Pressable, ScrollView, View } from 'react-native';
-import { Badge, Button, Card, Empty, ErrorText, fa, Input, Loading, Row, Screen, T, type Tone } from '../../components/ui';
+import { Badge, Button, Card, Empty, ErrorText, fa, Input, KeyboardScroll, KeyboardSpacer, Loading, Row, Screen, T, useKeyboard, type Tone } from '../../components/ui';
 import * as DocumentPicker from 'expo-document-picker';
 import * as ImagePicker from 'expo-image-picker';
 import { api, ApiError, post, uploadFile } from '../../lib/api';
@@ -451,6 +451,7 @@ function AttendanceEditor({ person, allowProxy, onClose, onSave }: { person: any
           <Input label="دلیل (الزامی؛ در رویدادنگاری ثبت می‌شود)" value={reason} onChangeText={setReason} />
           <Button title="ثبت" disabled={reason.trim().length < 2} onPress={() => onSave({ status, reason, proxyName: status === 'proxy' ? proxyName : undefined })} />
           <Button title="انصراف" variant="ghost" onPress={onClose} />
+          <KeyboardSpacer />
         </View>
       </View>
     </Modal>
@@ -463,6 +464,7 @@ function CommentsModal({ item, canPost, onClose }: { item: any; canPost: boolean
   const [text, setText] = useState('');
   const [err, setErr] = useState<Error | null>(null);
   useRealtime({ 'comment.created': (c) => c.agenda_item_id === item.id && setData((d) => (d && !d.some((x) => x.id === c.id) ? [...d, c] : d)) });
+  const kb = useKeyboard();
   return (
     <Modal animationType="slide" onRequestClose={onClose}>
       <View style={{ flex: 1, backgroundColor: t.bg, paddingTop: 48 }}>
@@ -483,7 +485,7 @@ function CommentsModal({ item, canPost, onClose }: { item: any; canPost: boolean
           ))}
         </ScrollView>
         {canPost && (
-          <View style={{ padding: 16, gap: 8 }}>
+          <View style={{ padding: 16, gap: 8, paddingBottom: 16 + kb.height }}>
             <Input placeholder="نظر شما…" value={text} onChangeText={setText} multiline />
             <Button
               title="ثبت نظر"
@@ -528,7 +530,7 @@ function MinutesModal({ meetingId, onClose }: { meetingId: string; onClose: () =
           </Row>
           <ErrorText error={error ?? err} />
         </View>
-        <ScrollView contentContainerStyle={{ padding: 16, gap: 8 }}>
+        <KeyboardScroll contentContainerStyle={{ padding: 16, gap: 8 }}>
           {!data ? (
             <Loading />
           ) : (
@@ -545,7 +547,7 @@ function MinutesModal({ meetingId, onClose }: { meetingId: string; onClose: () =
               )}
             </>
           )}
-        </ScrollView>
+        </KeyboardScroll>
       </View>
     </Modal>
   );

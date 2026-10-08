@@ -1,7 +1,7 @@
 import { router } from 'expo-router';
 import { useState } from 'react';
-import { Image, KeyboardAvoidingView, Platform, View } from 'react-native';
-import { Button, Card, ErrorText, Input, T } from '../components/ui';
+import { Image, View } from 'react-native';
+import { Button, Card, ErrorText, Input, KeyboardScroll, T } from '../components/ui';
 import { useAuth } from '../lib/auth';
 import { getApiUrl, normalizeServerUrl, setApiUrl } from '../lib/config';
 import { useTheme } from '../lib/theme';
@@ -42,7 +42,8 @@ export default function LoginScreen() {
     }
   };
   return (
-    <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1, backgroundColor: t.primary, justifyContent: 'center', padding: 20 }}>
+    <View style={{ flex: 1, backgroundColor: t.primary }}>
+      <KeyboardScroll contentContainerStyle={{ flexGrow: 1, justifyContent: 'center', padding: 20, paddingTop: 48, paddingBottom: 32 }}>
       <View style={{ alignItems: 'center', marginBottom: 24, gap: 8 }}>
         <Image source={require('../../assets/iran-chamber-logo.png')} style={{ width: 96, height: 96 }} accessibilityLabel="لوگوی اتاق ایران" />
         <T bold size={18} color="#fff" style={{ textAlign: 'center' }}>
@@ -74,6 +75,7 @@ export default function LoginScreen() {
         )}
         <Button title={mfaToken ? 'تأیید' : 'ورود'} onPress={submit} busy={busy} big />
       </Card>
-    </KeyboardAvoidingView>
+      </KeyboardScroll>
+    </View>
   );
 }
