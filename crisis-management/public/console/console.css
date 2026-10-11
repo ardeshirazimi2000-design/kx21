@@ -1,0 +1,19 @@
+.layout { display: grid; grid-template-columns: 230px 1fr; min-height: 100vh; }
+.side { background: var(--surface); border-left: 1px solid var(--border); padding: 16px 12px; }
+.side nav { margin-top: 18px; display: grid; gap: 2px; }
+.side nav button { text-align: right; background: none; border: 0; padding: 8px 10px; border-radius: 8px; cursor: pointer; }
+.side nav button.on { background: var(--chip); font-weight: 700; }
+.side .who { margin-top: 24px; border-top: 1px solid var(--border); padding-top: 12px; }
+.main { padding: 20px; min-width: 0; }
+.main h1 { font-size: 19px; margin: 0 0 14px; }
+.main h2 { font-size: 15px; margin: 0 0 10px; }
+.dialog { position: fixed; inset: 0; background: rgba(0,0,0,.4); display: grid; place-items: center; padding: 16px; z-index: 10; }
+.dialog .card { width: min(720px, 100%); max-height: 90vh; overflow: auto; margin: 0; }
+.checks { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 4px 12px; }
+.checks label { display: flex; gap: 6px; align-items: center; margin: 0; color: var(--text); }
+.checks input { width: auto; }
+@media (max-width: 760px) {
+  .layout { grid-template-columns: 1fr; }
+  .side { border-left: 0; border-bottom: 1px solid var(--border); }
+  .side nav { grid-auto-flow: column; overflow-x: auto; }
+}

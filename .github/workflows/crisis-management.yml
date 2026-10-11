@@ -1,0 +1,39 @@
+name: crisis-management
+
+on:
+  push:
+    paths: ['crisis-management/**', '.github/workflows/crisis-management.yml']
+  pull_request:
+    paths: ['crisis-management/**', '.github/workflows/crisis-management.yml']
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: crisis-management
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: crisis
+          POSTGRES_PASSWORD: crisis
+          POSTGRES_DB: crisis_test
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U crisis" --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      TEST_DATABASE_URL: postgres://crisis:crisis@localhost:5432/crisis_test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: crisis-management/package-lock.json
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
+      - name: Check browser scripts parse
+        run: for f in public/*/*.js; do node --check --input-type=module < "$f"; done
