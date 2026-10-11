@@ -67,7 +67,11 @@ const schema = z.object({
   /** api.ir gateway (Shahkar + SMS OTP). mock = offline simulator for development/tests only. */
   APIIR_MODE: z.enum(['live', 'mock']).default('mock'),
   APIIR_BASE_URL: z.string().url().default('https://s.api.ir'),
-  APIIR_TOKEN: z.string().default(''),
+  /** Key from the api.ir panel ("کلیدهای API"). A pasted "Bearer " prefix, quotes or spaces are ignored. */
+  APIIR_TOKEN: z
+    .string()
+    .default('')
+    .transform((t) => t.trim().replace(/^["']|["']$/g, '').replace(/^Bearer\s+/i, '').trim()),
   APIIR_SHAHKAR_ENDPOINT: z.enum(['Shahkar', 'ShahkarPro', 'ShahkarLite']).default('ShahkarPro'),
   /** SmsOTP template: 0 کد, 1 کد ورود, 2 کد تایید, 3 رمز, 4 رمز ورود */
   APIIR_OTP_TEMPLATE: z.coerce.number().int().min(0).max(4).default(1),
