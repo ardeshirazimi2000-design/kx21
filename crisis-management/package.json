@@ -13,6 +13,8 @@
     "build": "tsc -p tsconfig.json && mkdir -p dist/db/migrations && cp src/db/migrations/*.sql dist/db/migrations/",
     "start": "node dist/server.js",
     "migrate": "tsx src/db/migrate.ts",
+    "upgrade": "tsx src/db/upgrade.ts",
+    "upgrade:prod": "node dist/db/upgrade.js",
     "seed": "tsx src/db/seed.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run"

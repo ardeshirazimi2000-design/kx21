@@ -152,6 +152,8 @@ export interface ChainVerification {
   ok: boolean;
   checked: number;
   firstBrokenId: string | null;
+  /** Records written before the chain existed (upgrade from an earlier version); not covered by the chain. */
+  legacy?: number;
 }
 
 /** Recomputes the HMAC chain over the whole trail (FAU_STG.1.2, FDP_SDI.2.1). */
@@ -159,6 +161,18 @@ export async function verifyAuditChain(): Promise<ChainVerification> {
   const archive = await one<{ last_hash: string; last_id: string }>('SELECT last_hash, last_id FROM audit_archives ORDER BY id DESC LIMIT 1');
   let prevHash: string | null = archive?.last_hash ?? null;
   let lastId = archive ? Number(archive.last_id) : 0;
+  let legacy = 0;
+  if (!archive) {
+    // Rows from before the upgrade carry no hash; the chain starts at the first hashed row, whose prev_hash must be
+    // empty — so un-hashing chained rows to pass them off as legacy is still detected.
+    const first = await one<{ id: string; legacy: string }>(
+      `SELECT min(id) FILTER (WHERE hash IS NOT NULL) AS id, count(*) FILTER (WHERE hash IS NULL AND id < COALESCE((SELECT min(id) FROM audit_log WHERE hash IS NOT NULL), 0)) AS legacy FROM audit_log`,
+    );
+    if (first?.id) {
+      legacy = Number(first.legacy);
+      lastId = Number(first.id) - 1;
+    }
+  }
   let checked = 0;
   const batch = 2000;
   for (;;) {
@@ -169,10 +183,10 @@ export async function verifyAuditChain(): Promise<ChainVerification> {
     if (rows.length === 0) break;
     for (const r of rows) {
       checked++;
-      if (r.prev_hash !== prevHash || r.hash !== chainHash(prevHash, canonical(r))) return { ok: false, checked, firstBrokenId: r.id };
+      if (r.prev_hash !== prevHash || r.hash !== chainHash(prevHash, canonical(r))) return { ok: false, checked, firstBrokenId: r.id, legacy };
       prevHash = r.hash;
       lastId = Number(r.id);
     }
   }
-  return { ok: true, checked, firstBrokenId: null };
+  return { ok: true, checked, firstBrokenId: null, legacy };
 }
