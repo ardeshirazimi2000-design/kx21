@@ -70,12 +70,18 @@ export function apiClient({ base, refreshPath, store }) {
   };
 }
 
-export function storage(kind, prefix) {
+/** `keep`: keys that survive clear() (e.g. the app's enrolled-device secret). */
+export function storage(kind, prefix, keep = []) {
   const s = kind === 'local' ? window.localStorage : window.sessionStorage;
   return {
     get: (k) => { try { return s.getItem(prefix + k); } catch { return null; } },
     set: (k, v) => { try { s.setItem(prefix + k, v); } catch { /* ignore */ } },
-    clear: () => { try { ['accessToken', 'refreshToken'].forEach((k) => s.removeItem(prefix + k)); } catch { /* ignore */ } },
+    // FDP_RIP.2: on sign-out remove everything this page stored, except the keys named in `keep`.
+    clear: () => {
+      try {
+        for (const k of Object.keys(s)) if (k.startsWith(prefix) && !keep.includes(k.slice(prefix.length))) s.removeItem(k);
+      } catch { /* ignore */ }
+    },
   };
 }
 

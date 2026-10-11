@@ -5,6 +5,7 @@ import { hmac, randomDigits, safeEqualHex } from '../lib/crypto.js';
 import { HttpError, tooMany, upstream } from '../lib/errors.js';
 import { maskMobile } from '../lib/identity.js';
 import type { Channel } from '../security/roles.js';
+import { getSettings } from '../security/settings.js';
 
 export type OtpPurpose = 'console_login' | 'app_enroll' | 'app_login' | 'app_signup';
 
@@ -46,11 +47,12 @@ export async function issueOtp(o: IssueOtp): Promise<OtpChallenge> {
   // Supersede any earlier pending challenge for this mobile.
   await pool.query('UPDATE auth_challenges SET consumed_at = now() WHERE mobile = $1 AND consumed_at IS NULL', [o.mobile]);
 
+  const st = await getSettings();
   const code = randomDigits(config.OTP_LENGTH);
   const row = await one<{ id: string }>(
     `INSERT INTO auth_challenges (user_id, channel, purpose, mobile, national_code, pending_profile, code_hash, ip, device_id, expires_at)
      VALUES ($1,$2,$3,$4,$5,$6,'pending',$7,$8, now() + make_interval(secs => $9)) RETURNING id`,
-    [o.userId ?? null, o.channel, o.purpose, o.mobile, o.nationalCode ?? null, o.pendingProfile ?? null, o.ip ?? null, o.deviceId ?? null, config.OTP_TTL_SEC],
+    [o.userId ?? null, o.channel, o.purpose, o.mobile, o.nationalCode ?? null, o.pendingProfile ?? null, o.ip ?? null, o.deviceId ?? null, st['otp.ttlSec']],
   );
   await pool.query('UPDATE auth_challenges SET code_hash = $2 WHERE id = $1', [row!.id, codeHash(row!.id, code)]);
 
@@ -59,7 +61,7 @@ export async function issueOtp(o: IssueOtp): Promise<OtpChallenge> {
     await pool.query('UPDATE auth_challenges SET consumed_at = now() WHERE id = $1', [row!.id]);
     throw upstream('ارسال پیامک کد تأیید ناموفق بود؛ لطفاً دوباره تلاش کنید');
   }
-  return { challengeId: row!.id, mobileMasked: maskMobile(o.mobile), expiresIn: config.OTP_TTL_SEC, resendAfter: config.OTP_RESEND_COOLDOWN_SEC };
+  return { challengeId: row!.id, mobileMasked: maskMobile(o.mobile), expiresIn: st['otp.ttlSec'], resendAfter: config.OTP_RESEND_COOLDOWN_SEC };
 }
 
 export interface VerifiedChallenge {
@@ -79,6 +81,7 @@ export interface VerifiedChallenge {
  */
 export async function verifyOtp(challengeId: string, code: string, channel: Channel, consume = true): Promise<VerifiedChallenge> {
   const invalid = () => new HttpError(400, 'کد تأیید نادرست یا منقضی است', 'otp_invalid');
+  const maxAttempts = (await getSettings())['otp.maxAttempts'];
   if (!/^[0-9a-f-]{36}$/.test(challengeId)) throw invalid();
   const c = await one<{
     id: string; user_id: string | null; channel: Channel; purpose: OtpPurpose; mobile: string; national_code: string | null;
@@ -89,11 +92,12 @@ export async function verifyOtp(challengeId: string, code: string, channel: Chan
        FROM auth_challenges WHERE id = $1`,
     [challengeId],
   );
-  if (!c || c.channel !== channel || c.consumed_at || c.expired || c.attempts >= config.OTP_MAX_ATTEMPTS) throw invalid();
+  if (!c || c.channel !== channel || c.consumed_at || c.expired || c.attempts >= maxAttempts) throw invalid();
   if (!/^\d+$/.test(code) || !safeEqualHex(codeHash(c.id, code), c.code_hash)) {
     const r = await query<{ attempts: number }>('UPDATE auth_challenges SET attempts = attempts + 1 WHERE id = $1 RETURNING attempts', [c.id]);
-    const left = config.OTP_MAX_ATTEMPTS - (r[0]?.attempts ?? config.OTP_MAX_ATTEMPTS);
-    throw new HttpError(400, left > 0 ? `کد تأیید نادرست است (${left} تلاش باقی‌مانده)` : 'تعداد تلاش‌ها تمام شد؛ کد جدید دریافت کنید', 'otp_invalid');
+    const left = maxAttempts - (r[0]?.attempts ?? maxAttempts);
+    // userId is kept server-side (not serialised) so callers can count the failure against the account (FIA_AFL.1).
+    throw Object.assign(new HttpError(400, left > 0 ? `کد تأیید نادرست است (${left} تلاش باقی‌مانده)` : 'تعداد تلاش‌ها تمام شد؛ کد جدید دریافت کنید', 'otp_invalid'), { userId: c.user_id });
   }
   if (consume) {
     const r = await query('UPDATE auth_challenges SET consumed_at = now() WHERE id = $1 AND consumed_at IS NULL RETURNING id', [c.id]);

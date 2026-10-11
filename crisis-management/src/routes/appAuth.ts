@@ -1,13 +1,13 @@
 /**
  * Mobile app sign-in.
- *  - Initial sign-in (not yet enrolled, new device, changed mobile, or Shahkar match older than SHAHKAR_REVERIFY_DAYS):
- *      national code + mobile → Shahkar match (api.ir) → SMS OTP → session.
- *  - Later sign-ins: SMS OTP only (no Shahkar call).
- *  - Citizens without an account can self-enrol the same way (when APP_CITIZEN_SIGNUP is on).
+ *  - Initial sign-in (not yet enrolled, new/unproven device, changed mobile, or Shahkar match older than the re-verification period):
+ *      national code + mobile → Shahkar match (api.ir) → SMS OTP → session + device token.
+ *  - Later sign-ins: SMS OTP only, from a device that proves possession of its server-issued device token
+ *    (two factors: enrolled device + SIM — PP FIA_UAU.5.2).
+ *  - Citizens without an account can self-enrol the same way (when enabled).
  */
 import { Router } from 'express';
 import { z } from 'zod';
-import { config } from '../config.js';
 import { one, pool, tx } from '../db/pool.js';
 import { audit, auditReq } from '../lib/audit.js';
 import { forbidden, HttpError, unauthorized } from '../lib/errors.js';
@@ -15,7 +15,10 @@ import { isValidNationalCode, normalizeMobile, normalizeNationalCode } from '../
 import { parse } from '../lib/validate.js';
 import { authenticate, currentUser } from '../security/middleware.js';
 import { loadAccess } from '../security/roles.js';
-import { createSession, revokeSession, rotateRefresh } from '../security/sessions.js';
+import { createSession, recordSuccessfulLogin, revokeSession, rotateRefresh } from '../security/sessions.js';
+import { getSettings } from '../security/settings.js';
+import { lockedMinutesLeft, recordAuthFailure } from '../services/loginGuard.js';
+import { hmac, randomToken } from '../lib/crypto.js';
 import { issueOtp, verifyOtp, type OtpPurpose } from '../services/otp.js';
 import { requireShahkarMatch, shahkarIsStale } from '../services/shahkar.js';
 import { loginLimiter, otpLimiter } from './limiters.js';
@@ -35,20 +38,25 @@ const identityInput = z.object({
     return n;
   }),
   deviceId,
+  /** Secret issued at the previous successful sign-in on this device. */
+  deviceToken: z.string().max(100).optional(),
 });
 
 const MISMATCH = 'کد ملی یا شماره موبایل با اطلاعات ثبت‌شده مطابقت ندارد';
 
 appAuthRouter.post('/start', loginLimiter, async (req, res) => {
   const body = parse(identityInput, req.body);
+  const st = await getSettings();
   const user = await one<{
     id: string; kind: string; mobile: string; status: string; app_access: boolean; app_enrolled_at: string | null;
-    shahkar_verified_at: string | null; device_known: boolean;
+    shahkar_verified_at: string | null; device_known: boolean; locked: boolean;
   }>(
     `SELECT u.id, u.kind, u.mobile, u.status, u.app_access, u.app_enrolled_at, u.shahkar_verified_at,
-            EXISTS (SELECT 1 FROM user_devices d WHERE d.user_id = u.id AND d.device_id = $2 AND d.revoked_at IS NULL) AS device_known
+            (u.locked_until IS NOT NULL AND u.locked_until > now()) AS locked,
+            EXISTS (SELECT 1 FROM user_devices d WHERE d.user_id = u.id AND d.device_id = $2 AND d.revoked_at IS NULL
+                      AND d.secret_hash IS NOT NULL AND d.secret_hash = $3) AS device_known
        FROM users u WHERE u.national_code = $1`,
-    [body.nationalCode, body.deviceId],
+    [body.nationalCode, body.deviceId, body.deviceToken ? hmac(body.deviceToken) : null],
   );
   const deny = async (reason: string, err: HttpError) => {
     await audit({ action: 'app.login.start', actorId: user?.id ?? null, outcome: 'failure', ip: req.ip, channel: 'app', details: { reason } });
@@ -63,14 +71,15 @@ appAuthRouter.post('/start', loginLimiter, async (req, res) => {
       if (user.kind !== 'citizen') return deny('mobile_mismatch', new HttpError(400, MISMATCH, 'identity_mismatch'));
       mobileChange = true;
     }
+    if (user.locked) return deny('locked', new HttpError(423, `حساب به‌طور موقت قفل شده است؛ ${await lockedMinutesLeft(user.id)} دقیقه دیگر تلاش کنید`, 'locked'));
     if (user.status !== 'active' || !user.app_access) return deny('inactive', forbidden('حساب کاربری شما برای اپلیکیشن فعال نیست'));
     const access = await loadAccess(user.id, 'app');
     if (!access.permissions.has('app.access')) return deny('no_app_role', forbidden('نقشی با دسترسی اپلیکیشن برای شما تعریف نشده است'));
     const initial =
-      !user.app_enrolled_at || mobileChange || shahkarIsStale(user.shahkar_verified_at) || (config.SHAHKAR_ON_NEW_DEVICE && !user.device_known);
+      !user.app_enrolled_at || mobileChange || shahkarIsStale(user.shahkar_verified_at, st['shahkar.reverifyDays']) || (st['shahkar.onNewDevice'] && !user.device_known);
     purpose = initial ? 'app_enroll' : 'app_login';
   } else {
-    if (!config.APP_CITIZEN_SIGNUP) return deny('unknown_user', forbidden('حساب کاربری یافت نشد؛ با مدیر سامانه تماس بگیرید'));
+    if (!st['app.citizenSignup']) return deny('unknown_user', forbidden('حساب کاربری یافت نشد؛ با مدیر سامانه تماس بگیرید'));
     purpose = 'app_signup';
   }
 
@@ -111,7 +120,9 @@ appAuthRouter.post('/verify', otpLimiter, async (req, res) => {
   const needsProfile = !(body.firstName && body.lastName);
   // Peek first: a new citizen must also supply a name, without burning the code.
   const peek = await verifyOtp(body.challengeId, body.code, 'app', false).catch(async (e) => {
-    await audit({ action: 'app.login.otp', outcome: 'failure', ip: req.ip, channel: 'app' });
+    const userId = (e as { userId?: string | null }).userId ?? null;
+    if (userId) await recordAuthFailure(userId, req.ip ?? null, 'app', 'otp');
+    await audit({ action: 'app.login.otp', actorId: userId, outcome: 'failure', ip: req.ip, channel: 'app', userAgent: req.get('user-agent') });
     throw e;
   });
   if (peek.deviceId !== body.deviceId) throw unauthorized('کد برای این دستگاه صادر نشده است');
@@ -144,26 +155,30 @@ appAuthRouter.post('/verify', otpLimiter, async (req, res) => {
     } else if (c.purpose !== 'app_login') {
       throw unauthorized();
     }
-    const u = await one<{ status: string; app_access: boolean }>('SELECT status, app_access FROM users WHERE id = $1', [userId], db);
-    if (!u || u.status !== 'active' || !u.app_access) throw unauthorized('حساب کاربری غیرفعال است');
+    const u = await one<{ status: string; app_access: boolean; locked: boolean }>(
+      'SELECT status, app_access, (locked_until IS NOT NULL AND locked_until > now()) AS locked FROM users WHERE id = $1', [userId], db);
+    if (!u || u.status !== 'active' || !u.app_access || u.locked) throw unauthorized('حساب کاربری غیرفعال یا قفل است');
 
+    // A fresh device secret on every successful sign-in; it alone lets this device skip Shahkar next time.
+    const deviceToken = randomToken();
     await db.query(
-      `INSERT INTO user_devices (user_id, device_id, device_name) VALUES ($1,$2,$3)
-       ON CONFLICT (user_id, device_id) DO UPDATE SET last_seen_at = now(), device_name = COALESCE(EXCLUDED.device_name, user_devices.device_name), revoked_at = NULL`,
-      [userId, body.deviceId, body.deviceName ?? null],
+      `INSERT INTO user_devices (user_id, device_id, device_name, secret_hash) VALUES ($1,$2,$3,$4)
+       ON CONFLICT (user_id, device_id) DO UPDATE SET last_seen_at = now(), device_name = COALESCE(EXCLUDED.device_name, user_devices.device_name),
+         revoked_at = NULL, secret_hash = EXCLUDED.secret_hash`,
+      [userId, body.deviceId, body.deviceName ?? null, hmac(deviceToken)],
     );
-    await db.query('UPDATE users SET last_login_at = now() WHERE id = $1', [userId]);
-    const tokens = await createSession(db, userId!, 'app', { ip: req.ip, userAgent: req.get('user-agent'), deviceId: body.deviceId, deviceName: body.deviceName });
-    return { userId: userId!, tokens };
+    const history = await recordSuccessfulLogin(db, userId!, req.ip ?? null);
+    const tokens = await createSession(db, userId!, 'app', { ip: req.ip, userAgent: req.get('user-agent'), deviceId: body.deviceId, deviceName: body.deviceName }, history);
+    return { userId: userId!, tokens, deviceToken, history };
   });
 
-  await audit({ action: c.purpose === 'app_signup' ? 'app.signup' : 'app.login', actorId: result.userId, ip: req.ip, channel: 'app', details: { purpose: c.purpose, deviceId: body.deviceId } });
-  res.json({ ...result.tokens, firstLogin: c.purpose !== 'app_login' });
+  await audit({ action: c.purpose === 'app_signup' ? 'app.signup' : 'app.login', actorId: result.userId, ip: req.ip, channel: 'app', userAgent: req.get('user-agent'), details: { purpose: c.purpose, deviceId: body.deviceId } });
+  res.json({ ...result.tokens, deviceToken: result.deviceToken, accessHistory: result.history, firstLogin: c.purpose !== 'app_login' });
 });
 
 appAuthRouter.post('/refresh', async (req, res) => {
   const body = parse(z.object({ refreshToken: z.string().min(10).max(200) }), req.body);
-  res.json(await rotateRefresh(body.refreshToken, 'app', req.ip ?? null));
+  res.json(await rotateRefresh(body.refreshToken, 'app', req.ip ?? null, req.get('user-agent') ?? null));
 });
 
 appAuthRouter.post('/logout', authenticate('app'), async (req, res) => {

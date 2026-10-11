@@ -17,3 +17,5 @@
   .side { border-left: 0; border-bottom: 1px solid var(--border); }
   .side nav { grid-auto-flow: column; overflow-x: auto; }
 }
+.warnbox { border-color: var(--warn); }
+.dangerbox { border-color: var(--danger); background: color-mix(in srgb, var(--danger) 8%, var(--surface)); }

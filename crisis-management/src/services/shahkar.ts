@@ -1,4 +1,3 @@
-import { config } from '../config.js';
 import { pool, type Db } from '../db/pool.js';
 import { apiIr, type ShahkarResult } from '../integrations/apiir.js';
 import { HttpError, upstream } from '../lib/errors.js';
@@ -34,7 +33,7 @@ export async function requireShahkarMatch(c: ShahkarCheck, db: Db = pool): Promi
   }
 }
 
-export function shahkarIsStale(verifiedAt: Date | string | null): boolean {
+export function shahkarIsStale(verifiedAt: Date | string | null, reverifyDays: number): boolean {
   if (!verifiedAt) return true;
-  return Date.now() - new Date(verifiedAt).getTime() > config.SHAHKAR_REVERIFY_DAYS * 86400_000;
+  return Date.now() - new Date(verifiedAt).getTime() > reverifyDays * 86400_000;
 }

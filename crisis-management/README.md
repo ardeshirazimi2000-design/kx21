@@ -3,9 +3,15 @@
 API، کنسول مدیریت و اپلیکیشن (وب‌اپ موبایل) با احراز هویت **شاهکار + OTP** و کنترل دسترسی مبتنی بر نقش.
 
 - **کنسول** (`/console/`): نام کاربری + رمز + OTP پیامکی. تعریف کاربران با استعلام شاهکار، نقش‌ها و ماتریس دسترسی، استعلام و سوابق شاهکار، لاگ ممیزی، مدیریت حوادث و مأموریت‌ها.
-- **اپ** (`/app/`): ورود اولیه با استعلام شاهکار (کد ملی ↔ موبایل) و سپس OTP؛ ورودهای بعدی فقط با OTP. مأموریت‌ها، گزارش حادثه، هشدارها.
+- **اپ** (`/app/`): ورود اولیه با استعلام شاهکار (کد ملی ↔ موبایل) و سپس OTP؛ ورودهای بعدی از همان دستگاه (توکن دستگاه) فقط با OTP. مأموریت‌ها، گزارش حادثه، هشدارها.
+- **انطباق با پروفایل حفاظتی افتا** (برنامه‌های کاربردی تحت شبکه، نسخه ۱.۱): ممیزی زنجیره‌ای غیرقابل تغییر، پایش صحت داده، تنظیمات امنیتی قابل مدیریت، قفل تدریجی، محدودیت و مقیدسازی نشست، محدودیت شبکه/زمان ورود، سوابق ورود، یک نقش برای هر کاربر، خروجی کنترل‌شده، TLS 1.2.
 
-پروفایل امنیتی کامل، فهرست نقش‌ها و ماتریس دسترسی: [`docs/security-profile.md`](docs/security-profile.md)
+| سند | محتوا |
+|---|---|
+| [`docs/security-profile.md`](docs/security-profile.md) | پروفایل امنیتی، نقش‌ها و ماتریس دسترسی |
+| [`docs/afta-pp-compliance.md`](docs/afta-pp-compliance.md) | انطباق بند به بند با پروفایل حفاظتی افتا «برنامه‌های کاربردی تحت شبکه» نسخه ۱.۱ (۶۲ الزام + پیوست‌ها) |
+| [`docs/guide-operational.md`](docs/guide-operational.md) | راهنمای کاربری (AGD_OPE) |
+| [`docs/guide-preparative.md`](docs/guide-preparative.md) | راهنمای آماده‌سازی و استقرار امن (AGD_PRE) |
 
 ## راه‌اندازی
 
@@ -51,14 +57,17 @@ TEST_DATABASE_URL=postgres://crisis:crisis@localhost:5432/crisis_test npm test
 
 | مسیر | توضیح |
 |---|---|
-| `POST /api/app/auth/start` | `{nationalCode, mobile, deviceId}` → شاهکار (در ورود اولیه) + ارسال OTP |
-| `POST /api/app/auth/verify` | `{challengeId, code, deviceId, firstName?, lastName?}` → توکن‌ها |
+| `POST /api/app/auth/start` | `{nationalCode, mobile, deviceId, deviceToken?}` → شاهکار (در ورود اولیه / دستگاه بدون توکن معتبر) + ارسال OTP |
+| `POST /api/app/auth/verify` | `{challengeId, code, deviceId, firstName?, lastName?}` → توکن‌ها + `deviceToken` + سوابق ورود |
 | `POST /api/console/auth/login` | `{username, password}` → ارسال OTP |
 | `POST /api/console/auth/verify` | `{challengeId, code}` → توکن‌ها |
 | `POST /api/{console,app}/auth/refresh` · `logout` | چرخش توکن / خروج |
 | `POST /api/console/auth/change-password` | تغییر رمز |
-| `/api/console/users` | فهرست، تعریف (با شاهکار)، ویرایش، `/:id/roles`، `/:id/status`، `/:id/unlock`، `/:id/reset-password`، `/:id/shahkar`، `/:id/sessions` |
+| `GET /api/console/auth/help` | راهنمای ورود (تنها اقدام پیش از احراز هویت) |
+| `/api/console/users` | فهرست، تعریف (با شاهکار)، ویرایش، `/:id/role` (یک نقش)، `/:id/status`، `/:id/unlock`، `/:id/reset-password`، `/:id/shahkar`، `/:id/sessions` |
 | `/api/console/roles` | نقش‌ها، کاتالوگ مجوزها، تعریف/ویرایش/حذف نقش سفارشی |
-| `/api/console/security` | `shahkar/inquiry`، `shahkar/inquiries`، `audit`، `settings`، `districts` |
+| `/api/console/security` | `shahkar/inquiry`، `shahkar/inquiries`، `audit` (فیلتر و مرتب‌سازی)، `audit/export`، `audit/archive`، `integrity/check`، `settings` و `settings/:key`، `notifications`، `districts` |
+| `GET /api/console/export/incidents?format=csv\|json` | خروجی کنترل‌شده با فراداده امنیتی |
+| `GET /api/public/alerts` | هشدارهای عمومی بدون احراز هویت |
 | `/api/{console,app}/incidents`، `tasks`، `alerts`، `responders`، `reports/summary` | عملیات (فیلترشده بر اساس دامنه نقش) |
 | `/api/{console,app}/me` | پروفایل، نقش‌ها، مجوزها و نشست‌های کاربر |

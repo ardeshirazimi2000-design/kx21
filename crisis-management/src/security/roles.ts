@@ -1,12 +1,6 @@
 import { pool, query, type Db } from '../db/pool.js';
 import { badRequest, conflict, forbidden } from '../lib/errors.js';
-import {
-  BUILTIN_ROLES,
-  MUTUALLY_EXCLUSIVE_ROLES,
-  PERMISSIONS,
-  SCOPE_RANK,
-  type Scope,
-} from './catalog.js';
+import { BUILTIN_ROLES, PERMISSIONS, SCOPE_RANK, type Scope } from './catalog.js';
 
 export type Channel = 'console' | 'app';
 
@@ -72,48 +66,37 @@ export interface RoleGrant {
 }
 
 /**
- * Replaces the roles of `targetId`, enforcing:
- *  - nobody changes their own roles;
- *  - roles exist, and staff-only roles go to staff accounts;
- *  - separation of duties (mutually exclusive roles);
- *  - at least one active security administrator always remains.
+ * Sets the (single) role of `targetId` — PP FMT_SMR.1.2, application note 19: one role per account.
+ * Enforces: nobody changes their own role; the role exists; staff-only roles go to staff accounts;
+ * at least one active security administrator remains. A change ends the user's sessions (FIA_USB.1.3:
+ * security attributes never change during an active session; the user signs in again).
  */
-export async function setUserRoles(
+export async function setUserRole(
   db: Db,
   actorId: string,
   target: { id: string; kind: string },
-  grants: RoleGrant[],
-): Promise<{ added: string[]; removed: string[] }> {
-  if (actorId === target.id) throw forbidden('تغییر نقش‌های خودتان مجاز نیست');
-  const keys = [...new Set(grants.map((g) => g.key))];
-  const defs = await query<{ key: string; staff_only: boolean }>('SELECT key, staff_only FROM roles WHERE key = ANY($1)', [keys], db);
-  const missing = keys.filter((k) => !defs.find((d) => d.key === k));
-  if (missing.length) throw badRequest(`نقش تعریف نشده: ${missing.join('، ')}`);
-  if (target.kind !== 'staff') {
-    const staffOnly = defs.filter((d) => d.staff_only).map((d) => d.key);
-    if (staffOnly.length) throw badRequest(`این نقش‌ها فقط به کارکنان قابل تخصیص است: ${staffOnly.join('، ')}`);
+  grant: RoleGrant | null,
+): Promise<{ before: string | null; after: string | null }> {
+  if (actorId === target.id) throw forbidden('تغییر نقش خودتان مجاز نیست');
+  if (grant) {
+    const def = await query<{ key: string; staff_only: boolean }>('SELECT key, staff_only FROM roles WHERE key = $1', [grant.key], db);
+    if (def.length === 0) throw badRequest(`نقش تعریف نشده: ${grant.key}`);
+    if (target.kind !== 'staff' && def[0].staff_only) throw badRequest(`نقش «${grant.key}» فقط به کارکنان قابل تخصیص است`);
+    if (grant.expiresAt && new Date(grant.expiresAt).getTime() <= Date.now()) throw badRequest('تاریخ انقضای نقش باید در آینده باشد');
   }
-  for (const [a, b] of MUTUALLY_EXCLUSIVE_ROLES) {
-    if (keys.includes(a) && keys.includes(b)) throw conflict(`تفکیک وظایف: نقش‌های «${a}» و «${b}» همزمان قابل تخصیص نیستند`);
-  }
-  for (const g of grants) {
-    if (g.expiresAt && new Date(g.expiresAt).getTime() <= Date.now()) throw badRequest('تاریخ انقضای نقش باید در آینده باشد');
-  }
-
-  const current = (await query<{ role_key: string }>('SELECT role_key FROM user_roles WHERE user_id = $1', [target.id], db)).map((r) => r.role_key);
-  const removed = current.filter((k) => !keys.includes(k));
-  const added = keys.filter((k) => !current.includes(k));
-
-  if (removed.includes('security_admin')) await assertAnotherSecurityAdmin(db, target.id);
+  const current = (await query<{ role_key: string; expires_at: string | null }>('SELECT role_key, expires_at FROM user_roles WHERE user_id = $1', [target.id], db))[0];
+  const before = current?.role_key ?? null;
+  const after = grant?.key ?? null;
+  if (before === 'security_admin' && after !== 'security_admin') await assertAnotherSecurityAdmin(db, target.id);
 
   await db.query('DELETE FROM user_roles WHERE user_id = $1', [target.id]);
-  for (const g of grants) {
-    await db.query(
-      `INSERT INTO user_roles (user_id, role_key, granted_by, expires_at) VALUES ($1,$2,$3,$4) ON CONFLICT DO NOTHING`,
-      [target.id, g.key, actorId, g.expiresAt ?? null],
-    );
+  if (grant) {
+    await db.query('INSERT INTO user_roles (user_id, role_key, granted_by, expires_at) VALUES ($1,$2,$3,$4)', [target.id, grant.key, actorId, grant.expiresAt ?? null]);
   }
-  return { added, removed };
+  if (before !== after || (current?.expires_at ?? null) !== (grant?.expiresAt ?? null)) {
+    await db.query(`UPDATE sessions SET revoked_at = now(), revoked_reason = 'role_changed' WHERE user_id = $1 AND revoked_at IS NULL`, [target.id]);
+  }
+  return { before, after };
 }
 
 /** Throws unless an active security administrator other than `exceptUserId` exists. */

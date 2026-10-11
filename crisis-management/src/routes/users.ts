@@ -8,7 +8,8 @@ import { isValidNationalCode, maskMobile, maskNationalCode, normalizeMobile, nor
 import { parse } from '../lib/validate.js';
 import { currentUser, requirePermission } from '../security/middleware.js';
 import { setPassword, temporaryPassword } from '../security/password.js';
-import { assertAnotherSecurityAdmin, setUserRoles } from '../security/roles.js';
+import { assertAnotherSecurityAdmin, setUserRole } from '../security/roles.js';
+import { SETTING_SCHEMAS } from '../security/settings.js';
 import { revokeSession, revokeUserSessions } from '../security/sessions.js';
 import { inquireShahkar, requireShahkarMatch } from '../services/shahkar.js';
 
@@ -24,12 +25,16 @@ const mobile = z.string().transform((m, ctx) => {
   return n;
 });
 const username = z.string().trim().toLowerCase().regex(/^[a-z][a-z0-9._-]{3,31}$/, 'نام کاربری باید با حرف لاتین شروع شود (۴ تا ۳۲ کاراکتر)');
-const roleGrants = z.array(z.object({ key: z.string().max(64), expiresAt: z.iso.datetime({ offset: true }).nullish() })).max(20);
+/** One role per account (PP FMT_SMR.1.2, application note 19). */
+const roleGrant = z.object({ key: z.string().max(64), expiresAt: z.iso.datetime({ offset: true }).nullish() });
+const allowedCidrs = SETTING_SCHEMAS['access.consoleCidrs'];
 
 const USER_COLUMNS = `u.id, u.national_code, u.mobile, u.first_name, u.last_name, u.kind, u.organization, u.position_title,
   u.district_id, d.name AS district_name, u.username, u.console_access, u.app_access, u.status, u.must_change_password,
   u.failed_logins, (u.locked_until IS NOT NULL AND u.locked_until > now()) AS locked, u.shahkar_verified_at,
-  u.app_enrolled_at, u.last_login_at, u.created_at,
+  u.app_enrolled_at, u.last_login_at, u.last_login_ip, u.last_failed_login_at, u.failed_since_success, u.allowed_cidrs, u.created_at,
+  array_remove(ARRAY[CASE WHEN u.console_access THEN 'console: password + sms-otp' END,
+                     CASE WHEN u.app_access THEN 'app: shahkar + sms-otp (initial), device + sms-otp (later)' END], NULL) AS auth_methods,
   COALESCE((SELECT json_agg(json_build_object('key', r.key, 'title', r.title, 'expiresAt', ur.expires_at) ORDER BY r.title)
               FROM user_roles ur JOIN roles r ON r.key = ur.role_key WHERE ur.user_id = u.id), '[]') AS roles`;
 
@@ -90,14 +95,15 @@ const createInput = z.object({
   consoleAccess: z.boolean().default(false),
   appAccess: z.boolean().default(true),
   username: username.optional(),
-  roles: roleGrants.default([]),
+  allowedCidrs: allowedCidrs.optional(),
+  role: roleGrant.nullish(),
 });
 
 usersRouter.post('/', requirePermission('users.create'), async (req, res) => {
   const actor = currentUser(req);
   const body = parse(createInput, req.body);
   if (body.consoleAccess && !body.username) throw badRequest('برای دسترسی کنسول نام کاربری لازم است');
-  if (body.roles.length && !actor.access.permissions.has('users.assign_roles')) throw forbidden('مجوز تخصیص نقش ندارید');
+  if (body.role && !actor.access.permissions.has('users.assign_roles')) throw forbidden('مجوز تخصیص نقش ندارید');
   if (await one('SELECT 1 FROM users WHERE national_code = $1', [body.nationalCode])) throw conflict('کاربری با این کد ملی قبلاً تعریف شده است');
   if (body.username && (await one('SELECT 1 FROM users WHERE username = $1', [body.username]))) throw conflict('نام کاربری تکراری است');
   if (body.districtId && !(await one('SELECT 1 FROM districts WHERE id = $1', [body.districtId]))) throw badRequest('منطقه نامعتبر است');
@@ -113,15 +119,15 @@ usersRouter.post('/', requirePermission('users.create'), async (req, res) => {
   const user = await tx(async (db) => {
     const u = await one<{ id: string }>(
       `INSERT INTO users (national_code, mobile, first_name, last_name, kind, organization, position_title, district_id,
-                          username, console_access, app_access, shahkar_verified_at, created_by)
-       VALUES ($1,$2,$3,$4,'staff',$5,$6,$7,$8,$9,$10,now(),$11) RETURNING id`,
+                          username, console_access, app_access, shahkar_verified_at, created_by, allowed_cidrs)
+       VALUES ($1,$2,$3,$4,'staff',$5,$6,$7,$8,$9,$10,now(),$11,$12) RETURNING id`,
       [body.nationalCode, body.mobile, body.firstName, body.lastName, body.organization ?? null, body.positionTitle ?? null,
-        body.districtId ?? null, body.username ?? null, body.consoleAccess, body.appAccess, actor.id],
+        body.districtId ?? null, body.username ?? null, body.consoleAccess, body.appAccess, actor.id, body.allowedCidrs ?? []],
       db,
     );
     if (tempPassword) await setPassword(db, u!.id, tempPassword, true);
-    if (body.roles.length) await setUserRoles(db, actor.id, { id: u!.id, kind: 'staff' }, body.roles);
-    await auditReq(req, { action: 'user.create', targetType: 'user', targetId: u!.id, details: { roles: body.roles.map((r) => r.key), consoleAccess: body.consoleAccess, shahkar: 'matched' } }, db);
+    if (body.role) await setUserRole(db, actor.id, { id: u!.id, kind: 'staff' }, body.role);
+    await auditReq(req, { action: 'user.create', targetType: 'user', targetId: u!.id, details: { role: body.role?.key ?? null, consoleAccess: body.consoleAccess, shahkar: 'matched' } }, db);
     return u!;
   });
   res.status(201).json({ user: await loadUser(user.id), temporaryPassword: tempPassword });
@@ -137,6 +143,7 @@ const updateInput = z.object({
   consoleAccess: z.boolean().optional(),
   appAccess: z.boolean().optional(),
   username: username.optional(),
+  allowedCidrs: allowedCidrs.optional(),
 });
 
 usersRouter.patch('/:id', requirePermission('users.update'), async (req, res) => {
@@ -163,6 +170,7 @@ usersRouter.patch('/:id', requirePermission('users.update'), async (req, res) =>
          district_id = CASE WHEN $9 THEN $10::int ELSE district_id END,
          console_access = COALESCE($11, console_access), app_access = COALESCE($12, app_access),
          username = COALESCE($13, username),
+         allowed_cidrs = COALESCE($15, allowed_cidrs),
          shahkar_verified_at = CASE WHEN $14 THEN now() ELSE shahkar_verified_at END,
          app_enrolled_at = CASE WHEN $14 THEN NULL ELSE app_enrolled_at END,
          updated_at = now()
@@ -170,8 +178,12 @@ usersRouter.patch('/:id', requirePermission('users.update'), async (req, res) =>
       [target.id, body.mobile ?? null, body.firstName ?? null, body.lastName ?? null,
         body.organization !== undefined, body.organization ?? null, body.positionTitle !== undefined, body.positionTitle ?? null,
         body.districtId !== undefined, body.districtId ?? null, body.consoleAccess ?? null, body.appAccess ?? null,
-        body.username ?? null, !!mobileChanged],
+        body.username ?? null, !!mobileChanged, body.allowedCidrs ?? null],
     );
+    // FIA_USB.1.3: changing the account's security attributes ends its sessions (sign in again).
+    const cidrsChanged = body.allowedCidrs !== undefined && JSON.stringify(body.allowedCidrs) !== JSON.stringify(target.allowed_cidrs ?? []);
+    const districtChanged = body.districtId !== undefined && (body.districtId ?? null) !== (target.district_id ?? null);
+    if (cidrsChanged || districtChanged) await revokeUserSessions(db, target.id, 'attributes_changed');
     if (mobileChanged) {
       // App must go through Shahkar + OTP again on the new SIM.
       await revokeUserSessions(db, target.id, 'mobile_change');
@@ -188,13 +200,13 @@ usersRouter.patch('/:id', requirePermission('users.update'), async (req, res) =>
   res.json({ user: await loadUser(target.id), temporaryPassword: tempPassword });
 });
 
-usersRouter.put('/:id/roles', requirePermission('users.assign_roles'), async (req, res) => {
+usersRouter.put('/:id/role', requirePermission('users.assign_roles'), async (req, res) => {
   const actor = currentUser(req);
   const target = await loadUser(req.params.id as string);
-  const body = parse(z.object({ roles: roleGrants }), req.body);
+  const body = parse(z.object({ role: roleGrant.nullable() }), req.body);
   const changes = await tx(async (db) => {
-    const r = await setUserRoles(db, actor.id, { id: target.id, kind: target.kind }, body.roles);
-    await auditReq(req, { action: 'user.roles', targetType: 'user', targetId: target.id, details: r }, db);
+    const r = await setUserRole(db, actor.id, { id: target.id, kind: target.kind }, body.role);
+    await auditReq(req, { action: 'user.roles', targetType: 'user', targetId: target.id, details: { ...r, expiresAt: body.role?.expiresAt ?? null } }, db);
     return r;
   });
   res.json({ user: await loadUser(target.id), ...changes });

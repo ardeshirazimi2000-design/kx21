@@ -8,6 +8,8 @@ const schema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
   PORT: z.coerce.number().int().default(4000),
   DATABASE_URL: z.string().default('postgres://crisis:crisis@localhost:5432/crisis'),
+  /** Run migrations at start-up. In production run `npm run migrate` with the schema owner and serve with a DML-only role. */
+  MIGRATE_ON_START: bool.default(true),
   /** Comma-separated list of allowed browser origins (empty = same-origin only). */
   CORS_ORIGINS: z.string().default(''),
   TRUST_PROXY: bool.default(false),
@@ -15,6 +17,26 @@ const schema = z.object({
   /** Secrets: at least 32 chars each. Must be set in production. */
   JWT_SECRET: z.string().min(32).default('dev-only-jwt-secret-change-me-0123456789'),
   OTP_PEPPER: z.string().min(32).default('dev-only-otp-pepper-change-me-0123456789'),
+  /** HMAC keys for the audit hash chain and record integrity seals (FCS_COP.1(1)). */
+  AUDIT_KEY: z.string().min(32).default('dev-only-audit-key-change-me-0123456789'),
+  INTEGRITY_KEY: z.string().min(32).default('dev-only-integrity-key-change-me-012345'),
+  /** Local append-only file used when the audit database is unreachable (FRU_FLT.1). */
+  AUDIT_FALLBACK_FILE: z.string().default(''),
+  /** Time zone used for console access windows (FTA_TSE.1). */
+  TIME_ZONE: z.string().default('Asia/Tehran'),
+
+  /** Trusted path (FTP_TRP.1): refuse plain HTTP (behind a TLS proxy, set TRUST_PROXY=true). */
+  REQUIRE_HTTPS: bool.default(false),
+  /** Built-in HTTPS server (FCS_TLSS_EXT): PEM files. When unset the app expects a TLS-terminating proxy. */
+  TLS_CERT_FILE: z.string().default(''),
+  TLS_KEY_FILE: z.string().default(''),
+  /** Optional mutual TLS for the console (FCS_TLSS_EXT.2): CA bundle and CRL for client certificates. */
+  TLS_CLIENT_CA_FILE: z.string().default(''),
+  TLS_CLIENT_CRL_FILE: z.string().default(''),
+  TLS_REQUIRE_CLIENT_CERT_CONSOLE: bool.default(false),
+  /** Database connection over TLS (FPT_ITT.1): disable | require | verify-full */
+  DATABASE_SSL: z.enum(['disable', 'require', 'verify-full']).default('disable'),
+  DATABASE_SSL_CA_FILE: z.string().default(''),
 
   ACCESS_TOKEN_TTL_SEC: z.coerce.number().int().default(15 * 60),
   /** Console sessions are shorter than app sessions (privileged channel). */
@@ -60,6 +82,9 @@ function load(): Config {
     const problems: string[] = [];
     if (cfg.JWT_SECRET.startsWith('dev-only')) problems.push('JWT_SECRET');
     if (cfg.OTP_PEPPER.startsWith('dev-only')) problems.push('OTP_PEPPER');
+    if (cfg.AUDIT_KEY.startsWith('dev-only')) problems.push('AUDIT_KEY');
+    if (cfg.INTEGRITY_KEY.startsWith('dev-only')) problems.push('INTEGRITY_KEY');
+    if (!cfg.REQUIRE_HTTPS) problems.push('REQUIRE_HTTPS must be true');
     if (cfg.APIIR_MODE !== 'live') problems.push('APIIR_MODE must be live');
     if (!cfg.APIIR_TOKEN) problems.push('APIIR_TOKEN');
     if (problems.length) throw new Error(`Insecure production configuration: ${problems.join(', ')}`);

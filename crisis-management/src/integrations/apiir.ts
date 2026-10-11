@@ -36,6 +36,8 @@ export interface SmsResult {
 export interface ApiIrClient {
   shahkar(nationalCode: string, mobile: string, isCompany?: boolean): Promise<ShahkarResult>;
   sendOtp(mobile: string, code: string): Promise<SmsResult>;
+  /** Service SMS (SendSms) — used for security notifications to administrators. */
+  sendSms(mobiles: string[], message: string): Promise<SmsResult>;
 }
 
 async function post(path: string, body: unknown): Promise<ResultDataOfBoolean> {
@@ -83,6 +85,16 @@ export const liveClient: ApiIrClient = {
       return { ok: false, message: (err as Error).message };
     }
   },
+
+  async sendSms(mobiles, message) {
+    try {
+      const r = await post('/api/sw1/SendSms', { message, mobiles });
+      return { ok: r.success === true, code: r.code === undefined ? undefined : String(r.code), message: r.message ?? null };
+    } catch (err) {
+      logger.warn({ err }, 'send sms call failed');
+      return { ok: false, message: (err as Error).message };
+    }
+  },
 };
 
 /**
@@ -96,7 +108,9 @@ export const mockState = {
   smsDown: false,
   shahkarCalls: 0,
   sent: new Map<string, string>(),
+  serviceSms: [] as { mobiles: string[]; message: string }[],
   reset() {
+    this.serviceSms = [];
     this.mismatches.clear();
     this.shahkarDown = false;
     this.smsDown = false;
@@ -116,6 +130,10 @@ export const mockClient: ApiIrClient = {
     if (mockState.smsDown) return { ok: false, message: 'simulated outage' };
     mockState.sent.set(mobile, code);
     if (config.NODE_ENV === 'development') logger.info({ mobile }, `[mock SMS] OTP for ${mobile}: ${code}`);
+    return { ok: true };
+  },
+  async sendSms(mobiles, message) {
+    mockState.serviceSms.push({ mobiles, message });
     return { ok: true };
   },
 };

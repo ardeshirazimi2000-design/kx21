@@ -25,6 +25,7 @@ meRouter.get('/', async (req, res) => {
     ...row,
     national_code: maskNationalCode(row!.national_code),
     passwordChangeRequired: u.passwordChangeRequired,
+    accessHistory: u.accessHistory,
     roles: u.access.roles,
     permissions: [...u.access.permissions].sort(),
     scopes: Object.fromEntries(u.access.scopes),

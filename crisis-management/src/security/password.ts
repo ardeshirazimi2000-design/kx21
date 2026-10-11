@@ -5,12 +5,10 @@ import { randomInt } from 'node:crypto';
 import { randomToken } from '../lib/crypto.js';
 import { badRequest } from '../lib/errors.js';
 
-const HISTORY = 5;
-
 /** Returns a list of policy violations (empty = acceptable). */
-export function passwordProblems(pw: string, ctx: { username?: string | null; nationalCode?: string; mobile?: string } = {}): string[] {
+export function passwordProblems(pw: string, minLength: number, ctx: { username?: string | null; nationalCode?: string; mobile?: string } = {}): string[] {
   const p: string[] = [];
-  if (pw.length < config.PASSWORD_MIN_LENGTH) p.push(`حداقل ${config.PASSWORD_MIN_LENGTH} کاراکتر`);
+  if (pw.length < minLength) p.push(`حداقل ${minLength} کاراکتر`);
   if (pw.length > 128) p.push('حداکثر ۱۲۸ کاراکتر');
   if (!/[a-z]/.test(pw) || !/[A-Z]/.test(pw)) p.push('حروف کوچک و بزرگ لاتین');
   if (!/\d/.test(pw)) p.push('حداقل یک رقم');
@@ -38,13 +36,14 @@ export function temporaryPassword(): string {
   return `Tmp-${randomToken(9)}#${randomInt(10, 100)}`;
 }
 
-export async function assertNotReused(db: Db, userId: string, pw: string): Promise<void> {
+export async function assertNotReused(db: Db, userId: string, pw: string, history: number): Promise<void> {
+  if (history <= 0) return;
   const prev = await query<{ password_hash: string }>(
     'SELECT password_hash FROM password_history WHERE user_id = $1 ORDER BY created_at DESC LIMIT $2',
-    [userId, HISTORY],
+    [userId, history],
     db,
   );
-  for (const h of prev) if (await bcrypt.compare(pw, h.password_hash)) throw badRequest(`رمز عبور نباید با ${HISTORY} رمز قبلی یکسان باشد`);
+  for (const h of prev) if (await bcrypt.compare(pw, h.password_hash)) throw badRequest(`رمز عبور نباید با ${history} رمز قبلی یکسان باشد`);
 }
 
 export async function setPassword(db: Db, userId: string, pw: string, mustChange: boolean): Promise<void> {

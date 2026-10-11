@@ -37,3 +37,5 @@ jobs:
       - run: npm run build
       - name: Check browser scripts parse
         run: for f in public/*/*.js; do node --check --input-type=module < "$f"; done
+      - name: Check release verification script
+        run: bash -n scripts/verify-release.sh

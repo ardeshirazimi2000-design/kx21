@@ -1,7 +1,12 @@
 /** Operations: incidents, field tasks, public alerts and dashboard. Data is filtered by the role scope (city / district / own). */
+import { createHash } from 'node:crypto';
 import { Router } from 'express';
 import { z } from 'zod';
+import { config } from '../config.js';
 import { one, query, tx } from '../db/pool.js';
+import { hmac } from '../lib/crypto.js';
+import { getSettings } from '../security/settings.js';
+import { sealIncident } from '../services/integrity.js';
 import { auditReq } from '../lib/audit.js';
 import { badRequest, conflict, forbidden, notFound } from '../lib/errors.js';
 import { parse } from '../lib/validate.js';
@@ -81,8 +86,57 @@ operationsRouter.get('/incidents/:id', requirePermission('incidents.read'), asyn
         AND ($2 OR t.assignee_id = $3) ORDER BY t.created_at`,
     [inc.id, scopeOf(user, 'tasks.read') !== 'own', user.id],
   );
+  await auditReq(req, { action: 'incident.view', targetType: 'incident', targetId: inc.id });
   res.json({ ...full, tasks: can(user, 'tasks.read') ? tasks : [] });
 });
+
+/**
+ * FDP_ETC.2: controlled export. Only holders of data.export, only within their scope, only while the administrator
+ * allows exports, capped in size; the file carries its security attributes (who, when, scope, classification,
+ * digest and HMAC signature) and every export is audited.
+ */
+operationsRouter.get('/export/incidents', requirePermission('data.export'), async (req, res) => {
+  const user = currentUser(req);
+  const st = await getSettings();
+  if (!st['export.enabled']) throw forbidden('خروجی گرفتن از داده‌ها توسط مدیر سامانه غیرفعال شده است');
+  const q = parse(z.object({ format: z.enum(['json', 'csv']).default('json'), status: z.string().max(20).optional() }), req.query);
+  const params: unknown[] = [];
+  const where = [incidentScope(user, 'data.export', params)];
+  if (q.status) where.push(`i.status = $${params.push(q.status)}`);
+  params.push(st['export.maxRows']);
+  const rows = await query<Record<string, unknown>>(
+    `SELECT i.id, i.title, i.type, i.severity, i.status, i.source, d.name AS district, i.address, i.lat, i.lng, i.created_at, i.declared_at, i.closed_at, i.integrity_ok
+       FROM incidents i LEFT JOIN districts d ON d.id = i.district_id WHERE ${where.join(' AND ')} ORDER BY i.created_at DESC LIMIT $${params.length}`,
+    params,
+  );
+  const body = q.format === 'csv' ? toCsv(rows) : JSON.stringify(rows);
+  const sha256 = createHash('sha256').update(body).digest('hex');
+  const meta = {
+    system: 'crisis-management', type: 'incidents', exportedBy: user.fullName, exportedAt: new Date().toISOString(),
+    scope: scopeOf(user, 'data.export'), rows: rows.length, truncated: rows.length >= st['export.maxRows'], classification: 'محرمانه',
+    sha256, signature: hmac(sha256, config.INTEGRITY_KEY),
+  };
+  await auditReq(req, { action: 'data.export', targetType: 'incidents', details: { rows: rows.length, format: q.format, sha256, status: q.status ?? null } });
+  if (q.format === 'csv') {
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="incidents-${meta.exportedAt.slice(0, 10)}.csv"`);
+    for (const [k, v] of Object.entries(meta)) res.setHeader(`X-Export-${k.replace(/[A-Z]/g, (c) => `-${c.toLowerCase()}`)}`, encodeURIComponent(String(v)));
+    return void res.send(body);
+  }
+  res.json({ meta, records: rows });
+});
+
+function toCsv(rows: Record<string, unknown>[]): string {
+  if (rows.length === 0) return '';
+  const cols = Object.keys(rows[0]);
+  const cell = (v: unknown) => {
+    let s = v instanceof Date ? v.toISOString() : v === null || v === undefined ? '' : String(v);
+    // Neutralise spreadsheet formula injection.
+    if (/^[=+\-@\t\r]/.test(s)) s = `'${s}`;
+    return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+  };
+  return '\uFEFF' + [cols.join(','), ...rows.map((r) => cols.map((c) => cell(r[c])).join(','))].join('\r\n');
+}
 
 const incidentInput = z.object({
   title: z.string().trim().min(3).max(150),
@@ -108,12 +162,17 @@ operationsRouter.post('/incidents', requirePermission('incidents.create', 'incid
   }
   if (districtId !== null && !(await one('SELECT 1 FROM districts WHERE id = $1', [districtId]))) throw badRequest('منطقه نامعتبر است');
   const source = asOperator ? 'operator' : user.kind === 'citizen' ? 'citizen' : 'responder';
-  const row = await one<{ id: string }>(
-    `INSERT INTO incidents (title, type, severity, description, district_id, address, lat, lng, source, reported_by, status)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING id`,
-    [body.title, body.type, asOperator ? body.severity : Math.min(body.severity, 2), body.description ?? null, districtId, body.address ?? null,
-      body.lat ?? null, body.lng ?? null, source, user.id, asOperator ? 'verified' : 'reported'],
-  );
+  const row = await tx(async (db) => {
+    const r = await one<{ id: string }>(
+      `INSERT INTO incidents (title, type, severity, description, district_id, address, lat, lng, source, reported_by, status)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING id`,
+      [body.title, body.type, asOperator ? body.severity : Math.min(body.severity, 2), body.description ?? null, districtId, body.address ?? null,
+        body.lat ?? null, body.lng ?? null, source, user.id, asOperator ? 'verified' : 'reported'],
+      db,
+    );
+    await sealIncident(r!.id, db);
+    return r;
+  });
   await auditReq(req, { action: 'incident.create', targetType: 'incident', targetId: row!.id, details: { source } });
   res.status(201).json(await one('SELECT * FROM incidents WHERE id = $1', [row!.id]));
 });
@@ -129,13 +188,16 @@ operationsRouter.patch('/incidents/:id', requirePermission('incidents.update'), 
   if (body.status && inc.status !== 'reported' && inc.status !== 'verified') throw conflict('تغییر وضعیت از این مرحله با «اعلام» یا «خاتمه» انجام می‌شود');
   if (body.severity && body.severity >= 3 && !can(user, 'incidents.declare')) throw forbidden('تعیین سطح ۳ و ۴ نیازمند مجوز اعلام وضعیت بحران است');
   if (body.districtId !== undefined && scopeOf(user, 'incidents.update') === 'district' && body.districtId !== user.districtId) throw forbidden('انتقال حادثه به منطقه دیگر مجاز نیست');
-  await query(
-    `UPDATE incidents SET title = COALESCE($2, title), type = COALESCE($3, type), severity = COALESCE($4, severity),
-            description = COALESCE($5, description), district_id = CASE WHEN $6 THEN $7::int ELSE district_id END,
-            address = COALESCE($8, address), status = COALESCE($9, status), updated_at = now()
-      WHERE id = $1`,
-    [inc.id, body.title ?? null, body.type ?? null, body.severity ?? null, body.description ?? null, body.districtId !== undefined, body.districtId ?? null, body.address ?? null, body.status ?? null],
-  );
+  await tx(async (db) => {
+    await db.query(
+      `UPDATE incidents SET title = COALESCE($2, title), type = COALESCE($3, type), severity = COALESCE($4, severity),
+              description = COALESCE($5, description), district_id = CASE WHEN $6 THEN $7::int ELSE district_id END,
+              address = COALESCE($8, address), status = COALESCE($9, status), updated_at = now()
+        WHERE id = $1`,
+      [inc.id, body.title ?? null, body.type ?? null, body.severity ?? null, body.description ?? null, body.districtId !== undefined, body.districtId ?? null, body.address ?? null, body.status ?? null],
+    );
+    await sealIncident(inc.id, db);
+  });
   await auditReq(req, { action: 'incident.update', targetType: 'incident', targetId: inc.id, details: { fields: Object.keys(body) } });
   res.json(await one('SELECT * FROM incidents WHERE id = $1', [inc.id]));
 });
@@ -145,7 +207,10 @@ operationsRouter.post('/incidents/:id/declare', requirePermission('incidents.dec
   const inc = await incidentInScope(user, 'incidents.declare', req.params.id as string);
   const body = parse(z.object({ severity: z.number().int().min(1).max(4) }), req.body);
   if (!['reported', 'verified', 'active'].includes(inc.status)) throw conflict('این حادثه قابل اعلام نیست');
-  await query(`UPDATE incidents SET status = 'active', severity = $2, declared_by = $3, declared_at = now(), updated_at = now() WHERE id = $1`, [inc.id, body.severity, user.id]);
+  await tx(async (db) => {
+    await db.query(`UPDATE incidents SET status = 'active', severity = $2, declared_by = $3, declared_at = now(), updated_at = now() WHERE id = $1`, [inc.id, body.severity, user.id]);
+    await sealIncident(inc.id, db);
+  });
   await auditReq(req, { action: 'incident.declare', targetType: 'incident', targetId: inc.id, details: { severity: body.severity } });
   res.json(await one('SELECT * FROM incidents WHERE id = $1', [inc.id]));
 });
@@ -161,6 +226,7 @@ operationsRouter.post('/incidents/:id/close', requirePermission('incidents.close
               closed_at = CASE WHEN $2 = 'closed' THEN now() ELSE closed_at END, updated_at = now() WHERE id = $1`,
       [inc.id, body.status, user.id],
     );
+    await sealIncident(inc.id, db);
     if (body.status === 'closed') await db.query(`UPDATE tasks SET status = 'cancelled', updated_at = now() WHERE incident_id = $1 AND status NOT IN ('done', 'cancelled')`, [inc.id]);
     await auditReq(req, { action: `incident.${body.status}`, targetType: 'incident', targetId: inc.id, details: { note: body.note } }, db);
   });

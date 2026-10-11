@@ -1,6 +1,8 @@
 import { apiClient, clear, faDate, formData, h, LABELS, storage } from '/shared/dom.js';
 
-const store = storage('local', 'cm.app.');
+// The enrolled-device secret and the identity typed last survive sign-out; tokens and cached data do not.
+const store = storage('local', 'cm.app.', ['deviceId', 'deviceToken', 'nationalCode', 'mobile']);
+const clearSession = () => store.clear();
 const api = apiClient({ base: '/api/app', refreshPath: '/api/app/auth/refresh', store });
 const root = document.getElementById('root');
 
@@ -49,7 +51,7 @@ function startView() {
     btn.disabled = true;
     try {
       const d = formData(form);
-      const r = await post('/api/app/auth/start', { ...d, deviceId: deviceId() });
+      const r = await post('/api/app/auth/start', { ...d, deviceId: deviceId(), deviceToken: store.get('deviceToken') || undefined });
       store.set('nationalCode', d.nationalCode);
       store.set('mobile', d.mobile);
       otpView(r);
@@ -80,6 +82,8 @@ function otpView(ch, needProfile = false) {
       const t = await post('/api/app/auth/verify', { challengeId: ch.challengeId, deviceId: deviceId(), deviceName: navigator.userAgent.slice(0, 90), ...d });
       store.set('accessToken', t.accessToken);
       store.set('refreshToken', t.refreshToken);
+      if (t.deviceToken) store.set('deviceToken', t.deviceToken);
+      store.set('historyShown', '');
       home();
     } catch (e) {
       if (e.code === 'profile_required') {
@@ -102,7 +106,7 @@ async function home() {
   try {
     me = await api.get('/me');
   } catch {
-    store.clear();
+    clearSession();
     return startView();
   }
   render();
@@ -122,12 +126,30 @@ function render() {
   clear(root, header(me.fullName, h('button', { onclick: logout }, 'خروج')), page,
     h('nav', { class: 'tabs' }, tabs.map(([k, label]) => h('button', { class: k === tab ? 'on' : '', onclick: () => { tab = k; render(); } }, label))));
   const views = { alerts: alertsView, tasks: tasksView, report: reportView, incidents: incidentsView, profile: profileView };
-  views[tab](page).catch((e) => clear(page, h('p', { class: 'error' }, errorText(e))));
+  views[tab](page).then(() => historyBanner(page)).catch((e) => {
+    if (e.status === 401) {
+      clearSession();
+      return startView();
+    }
+    clear(page, h('p', { class: 'error' }, errorText(e)));
+  });
+}
+
+/** FTA_TAH.1: once after sign-in, show the previous sign-in and failed attempts. */
+function historyBanner(page) {
+  const hist = me.accessHistory;
+  if (!hist || store.get('historyShown')) return;
+  store.set('historyShown', '1');
+  const el = h('div', { class: 'card', role: 'status' },
+    h('div', { class: 'small' }, `ورود قبلی: ${hist.lastSuccessAt ? faDate(hist.lastSuccessAt) : 'اولین ورود'}`),
+    h('div', { class: hist.failuresSinceLastSuccess ? 'small error' : 'small' }, `تلاش ناموفق از آخرین ورود: ${hist.failuresSinceLastSuccess.toLocaleString('fa-IR')} (آخرین: ${faDate(hist.lastFailureAt)})`),
+    h('button', { class: 'btn link', onclick: () => el.remove() }, 'متوجه شدم'));
+  page.prepend(el);
 }
 
 async function logout() {
   try { await fetch('/api/app/auth/logout', { method: 'POST', headers: { Authorization: `Bearer ${store.get('accessToken')}` } }); } catch { /* ignore */ }
-  store.clear();
+  clearSession();
   startView();
 }
 
@@ -198,7 +220,8 @@ async function profileView(page) {
   clear(page,
     h('div', { class: 'card' }, h('h2', {}, me.fullName), h('p', {}, me.roles.map((r) => h('span', { class: 'chip' }, r.title))),
       h('p', { class: 'muted small' }, `کد ملی: ${me.national_code} — موبایل: ${me.mobile}`),
-      h('p', { class: 'muted small' }, `آخرین احراز شاهکار: ${faDate(me.shahkar_verified_at)}`)),
+      h('p', { class: 'muted small' }, `آخرین احراز شاهکار: ${faDate(me.shahkar_verified_at)}`),
+      me.accessHistory ? h('p', { class: 'muted small' }, `ورود قبلی: ${faDate(me.accessHistory.lastSuccessAt)} — تلاش ناموفق: ${me.accessHistory.failuresSinceLastSuccess}`) : null),
     h('div', { class: 'card' }, h('h2', {}, 'دستگاه‌ها و نشست‌ها'), sessions.map((s) => h('div', { class: 'row' },
       h('span', { class: 'grow small' }, `${s.channel === 'app' ? 'اپ' : 'کنسول'} — ${faDate(s.last_seen_at)}`),
       s.current ? h('span', { class: 'chip ok' }, 'این دستگاه') : h('button', { class: 'btn link', onclick: async () => { await api.del(`/me/sessions/${s.id}`); render(); } }, 'خروج از این نشست')))));

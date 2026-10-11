@@ -4,6 +4,8 @@ import { migrate } from '../src/db/migrate.js';
 import { pool } from '../src/db/pool.js';
 import { createStaff, seedDistricts } from '../src/db/seed.js';
 import { mockState } from '../src/integrations/apiir.js';
+import { invalidateSettings } from '../src/security/settings.js';
+import { checkAuditCapacity } from '../src/services/auditStorage.js';
 
 export const app = createApp();
 export const api = () => request(app);
@@ -14,7 +16,13 @@ export async function resetDb() {
   await migrate();
   await seedDistricts(5);
   mockState.reset();
+  invalidateSettings();
+  await checkAuditCapacity();
+  deviceTokens.clear();
 }
+
+/** Device tokens issued to (national code, device) — what the app keeps in storage. */
+export const deviceTokens = new Map<string, string>();
 
 let seq = 100;
 /** Valid-checksum national code. */
@@ -47,9 +55,11 @@ export async function consoleLogin(username: string, password = PASSWORD): Promi
 }
 
 export async function appLogin(nc: string, m: string, deviceId = 'device-0001', extra: Record<string, string> = {}) {
-  const r1 = await api().post('/api/app/auth/start').send({ nationalCode: nc, mobile: m, deviceId });
+  const deviceToken = deviceTokens.get(`${nc}:${deviceId}`);
+  const r1 = await api().post('/api/app/auth/start').send({ nationalCode: nc, mobile: m, deviceId, deviceToken });
   if (r1.status !== 200) return { start: r1 } as const;
   const r2 = await api().post('/api/app/auth/verify').send({ challengeId: r1.body.challengeId, code: mockState.sent.get(m), deviceId, ...extra });
+  if (r2.body.deviceToken) deviceTokens.set(`${nc}:${deviceId}`, r2.body.deviceToken);
   return { start: r1, verify: r2 } as const;
 }
 

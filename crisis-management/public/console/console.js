@@ -27,8 +27,13 @@ async function guarded(errEl, fn) {
 
 // ───────── Sign-in: password → OTP → (password change) ─────────
 
-function loginView() {
+function loginView(notice = '') {
   const err = errorBox();
+  const help = h('div', { class: 'muted small' });
+  const showHelp = async () => {
+    const r = await fetch('/api/console/auth/help').then((x) => x.json()).catch(() => ({ steps: [] }));
+    clear(help, h('ol', {}, r.steps.map((t) => h('li', {}, t))));
+  };
   const form = h('form', {},
     h('label', { for: 'u' }, 'نام کاربری'), h('input', { id: 'u', name: 'username', autocomplete: 'username', class: 'ltr', required: true }),
     h('label', { for: 'p' }, 'رمز عبور'), h('input', { id: 'p', name: 'password', type: 'password', autocomplete: 'current-password', class: 'ltr', required: true }),
@@ -40,7 +45,10 @@ function loginView() {
       otpView(r);
     });
   });
-  clear(root, h('div', { class: 'center' }, h('div', { class: 'card' }, brand(), h('p', { class: 'muted small' }, 'ورود دومرحله‌ای: رمز عبور + کد یکبارمصرف پیامکی به موبایل احراز‌شده با شاهکار'), form)));
+  clear(root, h('div', { class: 'center' }, h('div', { class: 'card' }, brand(),
+    notice ? h('p', { class: 'chip warn', role: 'status' }, notice) : null,
+    h('p', { class: 'muted small' }, 'ورود دومرحله‌ای: رمز عبور + کد یکبارمصرف پیامکی به موبایل احراز‌شده با شاهکار'), form,
+    h('button', { class: 'btn link', type: 'button', onclick: showHelp }, 'راهنمای ورود'), help)));
 }
 
 async function fetchJson(url, body) {
@@ -62,6 +70,7 @@ function otpView(ch) {
       const t = await fetchJson('/api/console/auth/verify', { challengeId: ch.challengeId, code: formData(form).code });
       store.set('accessToken', t.accessToken);
       store.set('refreshToken', t.refreshToken);
+      store.set('historyShown', '');
       await boot();
     });
   });
@@ -75,7 +84,7 @@ function changePasswordForm(onDone, forced) {
     forced ? h('p', { class: 'chip warn' }, 'رمز عبور شما موقت یا منقضی است و باید تغییر کند.') : null,
     h('label', {}, 'رمز فعلی'), h('input', { name: 'currentPassword', type: 'password', class: 'ltr', autocomplete: 'current-password', required: true }),
     h('label', {}, 'رمز جدید'), h('input', { name: 'newPassword', type: 'password', class: 'ltr', autocomplete: 'new-password', required: true }),
-    h('p', { class: 'muted small' }, 'حداقل ۱۲ کاراکتر شامل حروف بزرگ و کوچک لاتین، رقم و نماد؛ متفاوت با ۵ رمز قبلی.'),
+    h('p', { class: 'muted small' }, 'رمز باید حروف بزرگ و کوچک لاتین، رقم و نماد داشته باشد، به حداقل طول تعیین‌شده توسط مدیر امنیت برسد و با رمزهای قبلی تکراری نباشد.'),
     h('button', { class: 'btn primary', type: 'submit' }, 'تغییر رمز'), err);
   form.addEventListener('submit', (ev) => {
     ev.preventDefault();
@@ -113,7 +122,7 @@ const PAGES = [
   { key: 'roles', title: 'نقش‌ها و دسترسی‌ها', perm: 'roles.read', render: rolesPage },
   { key: 'shahkar', title: 'شاهکار', perm: ['shahkar.inquire', 'shahkar.log.read'], render: shahkarPage },
   { key: 'audit', title: 'رخدادهای امنیتی', perm: 'audit.read', render: auditPage },
-  { key: 'policy', title: 'خط‌مشی امنیتی', perm: 'settings.read', render: policyPage },
+  { key: 'policy', title: 'تنظیمات امنیتی', perm: 'settings.read', render: settingsPage },
   { key: 'account', title: 'حساب من', perm: null, render: accountPage },
 ];
 
@@ -138,16 +147,49 @@ function go(key) {
   current = page.key;
   shell();
   clear(main, h('p', { class: 'muted' }, 'در حال بارگذاری…'));
-  page.render().catch((e) => clear(main, h('div', { class: 'error' }, e.message)));
+  page.render().then(banners).catch((e) => {
+    if (e.status === 401) {
+      store.clear();
+      return loginView(e.message);
+    }
+    clear(main, h('div', { class: 'error' }, e.message));
+  });
+}
+
+/** Security notices (FAU_STG.3, FDP_SDI.2.2) and, once per session, the sign-in history (FTA_TAH.1). */
+async function banners() {
+  const box = h('div');
+  main.prepend(box);
+  const hist = me.accessHistory;
+  if (hist && !store.get('historyShown')) {
+    store.set('historyShown', '1');
+    const close = h('button', { class: 'btn link', onclick: () => item.remove() }, 'متوجه شدم');
+    const item = h('div', { class: `card ${hist.failuresSinceLastSuccess ? 'warnbox' : ''}`, role: 'status' },
+      h('strong', {}, 'سوابق ورود شما: '),
+      `آخرین ورود موفق: ${hist.lastSuccessAt ? `${faDate(hist.lastSuccessAt)} از ${hist.lastSuccessIp ?? '—'}` : 'اولین ورود'} — `,
+      `آخرین تلاش ناموفق: ${faDate(hist.lastFailureAt)} — تعداد تلاش ناموفق از آخرین ورود: ${hist.failuresSinceLastSuccess.toLocaleString('fa-IR')} `,
+      hist.failuresSinceLastSuccess ? h('div', { class: 'small' }, 'اگر این تلاش‌ها از طرف شما نبوده، به مدیر امنیت اطلاع دهید.') : null, close);
+    box.append(item);
+  }
+  if (can('settings.manage') || can('audit.read')) {
+    const notes = await api.get('/security/notifications').catch(() => []);
+    for (const n of notes) {
+      const el = h('div', { class: `card ${n.severity === 'critical' ? 'dangerbox' : 'warnbox'}`, role: 'alert' },
+        h('strong', {}, n.severity === 'critical' ? 'هشدار بحرانی امنیتی: ' : 'هشدار امنیتی: '), n.message, ' ',
+        h('span', { class: 'muted small' }, faDate(n.at)), ' ',
+        h('button', { class: 'btn link', onclick: async () => { await api.post(`/security/notifications/${n.id}/ack`); el.remove(); } }, 'بررسی شد'));
+      box.append(el);
+    }
+  }
 }
 
 async function boot() {
   if (!store.get('accessToken')) return loginView();
   try {
     me = await api.get('/me');
-  } catch {
+  } catch (e) {
     store.clear();
-    return loginView();
+    return loginView(e.status === 401 && e.code !== 'unauthorized' ? e.message : '');
   }
   if (me.passwordChangeRequired) {
     return clear(root, h('div', { class: 'center' }, h('div', { class: 'card' }, brand(), h('h2', {}, 'تغییر رمز عبور'), changePasswordForm(boot, true))));
@@ -188,13 +230,36 @@ async function incidentsPage() {
   const rows = await api.get('/incidents');
   const err = errorBox();
   const createBtn = can('incidents.create') ? h('button', { class: 'btn primary', onclick: () => incidentForm() }, 'ثبت حادثه') : null;
-  clear(main, h('div', { class: 'row' }, h('h1', { class: 'grow' }, 'حوادث'), createBtn), err,
+  const exportBtn = can('data.export') ? h('button', { class: 'btn', onclick: () => guarded(err, () => download('/export/incidents?format=csv', 'incidents.csv')) }, 'خروجی CSV') : null;
+  clear(main, h('div', { class: 'row' }, h('h1', { class: 'grow' }, 'حوادث'), exportBtn, createBtn), err,
     h('div', { class: 'card tablewrap' }, h('table', {},
       h('thead', {}, h('tr', {}, ['عنوان', 'نوع', 'سطح', 'وضعیت', 'منطقه', 'مأموریت', 'زمان', ''].map((t) => h('th', {}, t)))),
       h('tbody', {}, rows.map((i) => h('tr', {},
-        h('td', {}, i.title), h('td', {}, LABELS.type[i.type] ?? i.type), h('td', {}, h('span', { class: `chip ${i.severity >= 3 ? 'danger' : ''}` }, i.severity)),
+        h('td', {}, i.title, i.integrity_ok === false ? h('span', { class: 'chip danger', title: 'این رکورد خارج از سامانه تغییر کرده است' }, 'نقض صحت') : null), h('td', {}, LABELS.type[i.type] ?? i.type), h('td', {}, h('span', { class: `chip ${i.severity >= 3 ? 'danger' : ''}` }, i.severity)),
         h('td', {}, LABELS.status[i.status]), h('td', {}, i.district_name ?? '—'), h('td', {}, i.task_count), h('td', { class: 'small' }, faDate(i.created_at)),
         h('td', {}, h('button', { class: 'btn link', onclick: () => incidentDetail(i.id) }, 'جزئیات'))))))));
+}
+
+/** Authenticated file download (exports are audited and signed on the server). */
+async function download(path, filename) {
+  const r = await fetch(`/api/console${path}`, { headers: { Authorization: `Bearer ${store.get('accessToken')}` } });
+  if (!r.ok) {
+    const d = await r.json().catch(() => ({}));
+    throw new Error(d?.error?.message || 'خطا در دریافت خروجی');
+  }
+  const blob = await r.blob();
+  const a = h('a', { href: URL.createObjectURL(blob), download: filename });
+  document.body.append(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+}
+
+function saveJson(obj, filename) {
+  const a = h('a', { href: URL.createObjectURL(new Blob([JSON.stringify(obj, null, 1)], { type: 'application/json' })), download: filename });
+  document.body.append(a);
+  a.click();
+  a.remove();
 }
 
 function incidentForm() {
@@ -291,7 +356,7 @@ async function usersPage(q = '') {
   clear(main, h('div', { class: 'row' }, h('h1', { class: 'grow' }, 'کاربران'), can('users.create') ? h('button', { class: 'btn primary', onclick: userCreateForm }, 'تعریف کاربر جدید') : null),
     h('div', { class: 'card' }, h('div', { class: 'row' }, search, h('button', { class: 'btn', onclick: () => usersPage(search.value.trim()) }, 'جستجو'))),
     h('div', { class: 'card tablewrap' }, h('table', {},
-      h('thead', {}, h('tr', {}, ['نام', 'کد ملی', 'موبایل', 'نوع', 'نقش‌ها', 'وضعیت', 'شاهکار', ''].map((t) => h('th', {}, t)))),
+      h('thead', {}, h('tr', {}, ['نام', 'کد ملی', 'موبایل', 'نوع', 'نقش', 'وضعیت', 'شاهکار', ''].map((t) => h('th', {}, t)))),
       h('tbody', {}, rows.map((u) => h('tr', {},
         h('td', {}, `${u.first_name} ${u.last_name}`, u.username ? h('div', { class: 'muted small ltr' }, u.username) : null),
         h('td', { class: 'ltr' }, u.national_code), h('td', { class: 'ltr' }, u.mobile), h('td', {}, u.kind === 'staff' ? 'کارمند' : 'شهروند'),
@@ -301,9 +366,26 @@ async function usersPage(q = '') {
         h('td', {}, h('button', { class: 'btn link', onclick: () => userDetail(u.id) }, 'مدیریت'))))))));
 }
 
-function roleChecks(all, selected, kind) {
-  return h('div', { class: 'checks' }, all.roles.filter((r) => kind === 'staff' || !r.staff_only).map((r) =>
-    h('label', {}, h('input', { type: 'checkbox', name: 'role', value: r.key, checked: selected.includes(r.key) }), r.title, r.locked ? h('span', { class: 'chip warn' }, 'امنیتی') : null)));
+/** One role per account (PP FMT_SMR.1.2) with an optional expiry for temporary grants. */
+function roleFields(all, selected, kind, expiresAt) {
+  return h('div', { class: 'grid2' },
+    h('div', {}, h('label', {}, 'نقش (هر کاربر فقط یک نقش)'),
+      h('select', { name: 'role' }, h('option', { value: '' }, '— بدون نقش —'),
+        all.roles.filter((r) => kind === 'staff' || !r.staff_only).map((r) => h('option', { value: r.key, selected: r.key === selected }, r.title + (r.locked ? ' (امنیتی)' : ''))))),
+    h('div', {}, h('label', {}, 'انقضای نقش (اختیاری)'), h('input', { name: 'roleExpiresAt', type: 'datetime-local', value: expiresAt ? toLocalInput(expiresAt) : '' })));
+}
+
+function toLocalInput(iso) {
+  const d = new Date(iso);
+  return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+}
+
+function roleFromForm(d) {
+  return d.role ? { key: d.role, expiresAt: d.roleExpiresAt ? new Date(d.roleExpiresAt).toISOString() : null } : null;
+}
+
+function cidrList(v) {
+  return String(v || '').split(/[\s,،]+/).map((x) => x.trim()).filter(Boolean);
 }
 
 async function userCreateForm() {
@@ -320,11 +402,12 @@ async function userCreateForm() {
       h('div', {}, h('label', {}, 'دستگاه / سازمان'), h('input', { name: 'organization' })),
       h('div', {}, h('label', {}, 'سمت'), h('input', { name: 'positionTitle' })),
       h('div', {}, h('label', {}, 'منطقه'), districtSelect('districtId')),
-      h('div', {}, h('label', {}, 'نام کاربری کنسول'), h('input', { name: 'username', class: 'ltr', autocomplete: 'off' }))),
+      h('div', {}, h('label', {}, 'نام کاربری کنسول'), h('input', { name: 'username', class: 'ltr', autocomplete: 'off' })),
+      h('div', {}, h('label', {}, 'شبکه‌های مجاز ورود به کنسول (اختیاری)'), h('input', { name: 'allowedCidrs', class: 'ltr', placeholder: '10.20.0.0/16, 192.168.1.5' }))),
     h('div', { class: 'checks' },
       h('label', {}, consoleBox, 'دسترسی کنسول (رمز + OTP)'),
       h('label', {}, h('input', { type: 'checkbox', name: 'appAccess', checked: true }), 'دسترسی اپلیکیشن (شاهکار + OTP)')),
-    can('users.assign_roles') ? h('div', {}, h('h2', {}, 'نقش‌ها'), roleChecks(all, [], 'staff')) : null,
+    can('users.assign_roles') ? h('div', {}, h('h2', {}, 'نقش'), roleFields(all, '', 'staff', null)) : null,
     h('div', { class: 'row' }, h('button', { class: 'btn primary', type: 'submit' }, 'استعلام شاهکار و ثبت')), err);
   const close = modal('تعریف کاربر', form);
   form.addEventListener('submit', (ev) => {
@@ -336,7 +419,8 @@ async function userCreateForm() {
         organization: d.organization || undefined, positionTitle: d.positionTitle || undefined,
         districtId: d.districtId ? Number(d.districtId) : null, username: d.username || undefined,
         consoleAccess: !!d.consoleAccess, appAccess: !!d.appAccess,
-        roles: [...form.querySelectorAll('input[name=role]:checked')].map((c) => ({ key: c.value })),
+        allowedCidrs: cidrList(d.allowedCidrs),
+        role: roleFromForm(d),
       };
       const r = await api.post('/users', body);
       close();
@@ -357,13 +441,20 @@ async function userDetail(id) {
   sections.push(h('p', {},
     h('span', { class: 'chip' }, u.kind === 'staff' ? 'کارمند' : 'شهروند'), h('span', { class: 'chip ltr' }, u.national_code), h('span', { class: 'chip ltr' }, u.mobile),
     h('span', { class: `chip ${u.status === 'active' ? 'ok' : 'danger'}` }, LABELS.userStatus[u.status]),
-    h('span', { class: 'chip' }, `شاهکار: ${faDate(u.shahkar_verified_at)}`), h('span', { class: 'chip' }, `ثبت در اپ: ${faDate(u.app_enrolled_at)}`), h('span', { class: 'chip' }, `آخرین ورود: ${faDate(u.last_login_at)}`)));
+    u.locked ? h('span', { class: 'chip warn' }, 'قفل') : null,
+    h('span', { class: 'chip' }, `شاهکار: ${faDate(u.shahkar_verified_at)}`), h('span', { class: 'chip' }, `ثبت در اپ: ${faDate(u.app_enrolled_at)}`),
+    h('span', { class: 'chip' }, `آخرین ورود: ${faDate(u.last_login_at)} ${u.last_login_ip ?? ''}`),
+    h('span', { class: 'chip' }, `تلاش ناموفق از آخرین ورود: ${u.failed_since_success ?? 0}`)),
+    h('p', { class: 'small muted' }, 'روش‌های احراز هویت: ', (u.auth_methods ?? []).join(' | ') || '—'),
+    u.allowed_cidrs?.length ? h('p', { class: 'small muted' }, 'شبکه‌های مجاز کنسول: ', h('span', { class: 'ltr' }, u.allowed_cidrs.join(', '))) : null);
 
   if (can('users.assign_roles') && u.id !== me.id) {
-    const rf = h('form', {}, h('h2', {}, 'نقش‌ها'), roleChecks(all, u.roles.map((r) => r.key), u.kind), h('button', { class: 'btn primary', type: 'submit' }, 'ذخیره نقش‌ها'));
+    const rf = h('form', {}, h('h2', {}, 'نقش'), roleFields(all, u.roles[0]?.key ?? '', u.kind, u.roles[0]?.expiresAt),
+      h('p', { class: 'muted small' }, 'تغییر نقش، نشست‌های فعال کاربر را خاتمه می‌دهد و کاربر باید دوباره وارد شود.'),
+      h('button', { class: 'btn primary', type: 'submit' }, 'ذخیره نقش'));
     rf.addEventListener('submit', (ev) => {
       ev.preventDefault();
-      act(() => api.put(`/users/${id}/roles`, { roles: [...rf.querySelectorAll('input[name=role]:checked')].map((c) => ({ key: c.value })) }));
+      act(() => api.put(`/users/${id}/role`, { role: roleFromForm(formData(rf)) }));
     });
     sections.push(rf);
   }
@@ -373,7 +464,8 @@ async function userDetail(id) {
         h('div', {}, h('label', {}, 'موبایل (تغییر = استعلام مجدد شاهکار)'), h('input', { name: 'mobile', class: 'ltr', value: u.mobile })),
         h('div', {}, h('label', {}, 'سمت'), h('input', { name: 'positionTitle', value: u.position_title ?? '' })),
         h('div', {}, h('label', {}, 'منطقه'), districtSelect('districtId', u.district_id)),
-        h('div', {}, h('label', {}, 'نام کاربری'), h('input', { name: 'username', class: 'ltr', value: u.username ?? '' }))),
+        h('div', {}, h('label', {}, 'نام کاربری'), h('input', { name: 'username', class: 'ltr', value: u.username ?? '' })),
+        h('div', {}, h('label', {}, 'شبکه‌های مجاز ورود به کنسول'), h('input', { name: 'allowedCidrs', class: 'ltr', value: (u.allowed_cidrs ?? []).join(', ') }))),
       h('div', { class: 'checks' },
         h('label', {}, h('input', { type: 'checkbox', name: 'consoleAccess', checked: u.console_access }), 'دسترسی کنسول'),
         h('label', {}, h('input', { type: 'checkbox', name: 'appAccess', checked: u.app_access }), 'دسترسی اپلیکیشن')),
@@ -385,7 +477,7 @@ async function userDetail(id) {
         const r = await api.patch(`/users/${id}`, {
           mobile: d.mobile !== u.mobile ? d.mobile : undefined, positionTitle: d.positionTitle || null,
           districtId: d.districtId ? Number(d.districtId) : null, username: d.username || undefined,
-          consoleAccess: !!d.consoleAccess, appAccess: !!d.appAccess,
+          consoleAccess: !!d.consoleAccess, appAccess: !!d.appAccess, allowedCidrs: cidrList(d.allowedCidrs),
         });
         if (r.temporaryPassword) showTempPassword(r.temporaryPassword, 'دسترسی کنسول فعال شد.');
       });
@@ -511,35 +603,104 @@ async function shahkarPage() {
 
 // ───────── Audit / policy / account ─────────
 
+const SEVERITY = { info: 'اطلاع', low: 'کم', medium: 'متوسط', high: 'زیاد', critical: 'بحرانی' };
+
+/** FAU_SAR.1–3: readable, filterable, sortable review; integrity check, export and archive (FAU_STG, FDP_SDI). */
 async function auditPage(filter = {}) {
   const qs = new URLSearchParams(Object.entries(filter).filter(([, v]) => v)).toString();
   const rows = await api.get(`/security/audit${qs ? `?${qs}` : ''}`);
-  const f = h('form', { class: 'card row' },
-    h('input', { name: 'action', placeholder: 'رویداد (مثلاً user. یا console.login)', class: 'grow ltr', value: filter.action ?? '' }),
-    h('select', { name: 'outcome' }, h('option', { value: '' }, 'همه نتایج'), ['success', 'failure', 'denied'].map((o) => h('option', { value: o, selected: filter.outcome === o }, o))),
-    h('button', { class: 'btn', type: 'submit' }, 'فیلتر'));
-  f.addEventListener('submit', (ev) => { ev.preventDefault(); auditPage(formData(f)); });
-  clear(main, h('h1', {}, 'رخدادهای امنیتی (لاگ ممیزی تغییرناپذیر)'), f,
+  const err = errorBox();
+  const result = h('div');
+  const opt = (name, values, label) => h('select', { name }, h('option', { value: '' }, label),
+    Object.entries(values).map(([k, v]) => h('option', { value: k, selected: filter[name] === k }, v)));
+  const f = h('form', { class: 'card' },
+    h('div', { class: 'grid2' },
+      h('div', {}, h('label', {}, 'رویداد'), h('input', { name: 'action', placeholder: 'user. یا console.login', class: 'ltr', value: filter.action ?? '' })),
+      h('div', {}, h('label', {}, 'کاربر'), h('input', { name: 'actor', value: filter.actor ?? '' })),
+      h('div', {}, h('label', {}, 'آدرس IP'), h('input', { name: 'ip', class: 'ltr', value: filter.ip ?? '' })),
+      h('div', {}, h('label', {}, 'از تاریخ'), h('input', { name: 'from', type: 'datetime-local', value: filter.fromLocal ?? '' })),
+      h('div', {}, h('label', {}, 'تا تاریخ'), h('input', { name: 'to', type: 'datetime-local', value: filter.toLocal ?? '' })),
+      h('div', {}, h('label', {}, 'نتیجه'), opt('outcome', { success: 'موفق', failure: 'ناموفق', denied: 'رد دسترسی' }, 'همه')),
+      h('div', {}, h('label', {}, 'اهمیت'), opt('severity', SEVERITY, 'همه')),
+      h('div', {}, h('label', {}, 'روش اتصال'), opt('channel', { console: 'کنسول', app: 'اپ' }, 'همه')),
+      h('div', {}, h('label', {}, 'مرتب‌سازی'), h('select', { name: 'sort' },
+        [['at_desc', 'جدیدترین'], ['at_asc', 'قدیمی‌ترین'], ['severity_desc', 'بیشترین اهمیت']].map(([k, v]) => h('option', { value: k, selected: filter.sort === k }, v))))),
+    h('button', { class: 'btn', type: 'submit' }, 'اعمال فیلتر'));
+  f.addEventListener('submit', (ev) => {
+    ev.preventDefault();
+    const d = formData(f);
+    auditPage({ ...d, fromLocal: d.from, toLocal: d.to, from: d.from ? new Date(d.from).toISOString() : '', to: d.to ? new Date(d.to).toISOString() : '' });
+  });
+  const tools = h('div', { class: 'row' });
+  if (can('integrity.check')) {
+    tools.append(h('button', { class: 'btn', onclick: () => guarded(err, async () => {
+      const r = await api.post('/security/integrity/check');
+      clear(result, h('p', { class: r.audit.ok && !r.incidents.violations.length ? 'okmsg' : 'error' },
+        `زنجیره ممیزی: ${r.audit.ok ? `سالم (${r.audit.checked.toLocaleString('fa-IR')} رکورد)` : `شکسته از رکورد ${r.audit.firstBrokenId}`} — ` +
+        `صحت حوادث: ${r.incidents.violations.length ? `${r.incidents.violations.length} رکورد دستکاری‌شده` : `سالم (${r.incidents.checked} رکورد)`}`));
+    }) }, 'بررسی صحت ممیزی و داده‌ها'));
+  }
+  if (can('audit.configure')) {
+    tools.append(h('button', { class: 'btn', onclick: () => guarded(err, async () => {
+      const r = await api.post('/security/audit/export', { limit: 10000 });
+      saveJson(r, `audit-${r.meta.fromId}-${r.meta.toId}.json`);
+      clear(result, h('div', {},
+        h('p', { class: 'okmsg' }, `خروجی ${r.meta.rows.toLocaleString('fa-IR')} رکورد ذخیره شد. چکیده SHA-256: `, h('span', { class: 'ltr small' }, r.meta.sha256)),
+        h('p', { class: 'small muted' }, 'پس از نگهداری امن فایل، می‌توانید همین رکوردها را بایگانی کنید تا ظرفیت ممیزی آزاد شود.'),
+        h('button', { class: 'btn', onclick: () => guarded(err, async () => {
+          if (!confirm('رکوردهای این خروجی از پایگاه داده حذف و بایگانی می‌شوند. ادامه می‌دهید؟')) return;
+          const a = await api.post('/security/audit/archive', { exportId: r.exportId, sha256: r.meta.sha256 });
+          clear(result, h('p', { class: 'okmsg' }, `${a.archived.toLocaleString('fa-IR')} رکورد بایگانی شد.`));
+        }) }, 'بایگانی این رکوردها')));
+    }) }, 'خروجی ممیزی (قدیمی‌ترین‌ها)'));
+  }
+  clear(main, h('h1', {}, 'رخدادهای امنیتی (لاگ ممیزی زنجیره‌ای و تغییرناپذیر)'), f, tools, result, err,
     h('div', { class: 'card tablewrap' }, h('table', {},
-      h('thead', {}, h('tr', {}, ['زمان', 'کاربر', 'رویداد', 'نتیجه', 'هدف', 'IP', 'کانال', 'جزئیات'].map((t) => h('th', {}, t)))),
+      h('thead', {}, h('tr', {}, ['زمان', 'کاربر', 'رویداد', 'نتیجه', 'اهمیت', 'هدف', 'IP', 'کانال', 'جزئیات'].map((t) => h('th', {}, t)))),
       h('tbody', {}, rows.map((a) => h('tr', {},
         h('td', { class: 'small' }, faDate(a.at)), h('td', {}, a.actor_name ?? '—'), h('td', { class: 'ltr' }, a.action),
-        h('td', {}, h('span', { class: `chip ${a.outcome === 'success' ? 'ok' : 'danger'}` }, a.outcome)),
+        h('td', {}, h('span', { class: `chip ${a.outcome === 'success' ? 'ok' : 'danger'}` }, a.outcome === 'success' ? 'موفق' : a.outcome === 'denied' ? 'رد' : 'ناموفق')),
+        h('td', {}, h('span', { class: `chip ${['high', 'critical'].includes(a.severity) ? 'danger' : a.severity === 'medium' ? 'warn' : ''}` }, SEVERITY[a.severity] ?? a.severity)),
         h('td', { class: 'small ltr' }, a.target_type ? `${a.target_type}:${String(a.target_id).slice(0, 8)}` : ''), h('td', { class: 'small ltr' }, a.ip ?? ''), h('td', {}, a.channel ?? ''),
         h('td', { class: 'small ltr' }, JSON.stringify(a.details))))))));
 }
 
-async function policyPage() {
+/** FMT_SMF.1 / FMT_MOF.1: settings, each editable only by its owner role (security admin or auditor). */
+async function settingsPage() {
   const s = await api.get('/security/settings');
-  const row = (k, v) => h('tr', {}, h('td', {}, k), h('td', { class: 'ltr' }, String(v)));
-  clear(main, h('h1', {}, 'خط‌مشی امنیتی اعمال‌شده'),
-    h('div', { class: 'card' }, h('table', {}, h('tbody', {},
-      row('حداقل طول رمز', s.password.minLength), row('عمر رمز (روز)', s.password.maxAgeDays), row('تاریخچه رمز', s.password.history), row('پیچیدگی', s.password.complexity),
-      row('قفل پس از تلاش ناموفق', s.lockout.maxFailures), row('مدت قفل (دقیقه)', s.lockout.minutes),
-      row('طول OTP', s.otp.length), row('اعتبار OTP (ثانیه)', s.otp.ttlSec), row('حداکثر تلاش OTP', s.otp.maxAttempts), row('فاصله ارسال مجدد (ثانیه)', s.otp.resendCooldownSec), row('سقف ارسال در ساعت', s.otp.maxPerHour),
-      row('عمر توکن دسترسی (ثانیه)', s.sessions.accessTtlSec), row('عمر نشست کنسول (ثانیه)', s.sessions.consoleRefreshTtlSec), row('خروج خودکار کنسول در عدم فعالیت (ثانیه)', s.sessions.consoleIdleTimeoutSec), row('عمر نشست اپ (ثانیه)', s.sessions.appRefreshTtlSec),
-      row('درگاه شاهکار', `${s.shahkar.mode} / ${s.shahkar.endpoint}`), row('استعلام مجدد شاهکار (روز)', s.shahkar.reverifyDays), row('شاهکار در دستگاه جدید', s.shahkar.onNewDevice ? 'بله' : 'خیر'),
-      row('ثبت‌نام شهروند از اپ', s.app.citizenSignup ? 'فعال' : 'غیرفعال')))));
+  const err = errorBox();
+  const rowFor = (item) => {
+    const editable = can(item.managedBy);
+    const v = item.value;
+    let input;
+    if (typeof v === 'boolean') input = h('select', { name: 'v', disabled: !editable }, h('option', { value: 'true', selected: v }, 'بله'), h('option', { value: 'false', selected: !v }, 'خیر'));
+    else if (typeof v === 'number') input = h('input', { name: 'v', type: 'number', value: v, disabled: !editable, class: 'ltr' });
+    else if (typeof v === 'string') input = h('input', { name: 'v', value: v, disabled: !editable, class: 'ltr' });
+    else input = h('input', { name: 'v', value: JSON.stringify(v), disabled: !editable, class: 'ltr', title: 'JSON' });
+    const save = editable ? h('button', { class: 'btn', type: 'submit' }, 'ذخیره') : h('span', { class: 'muted small' }, item.managedBy === 'audit.configure' ? 'ممیز امنیتی' : 'مدیر امنیت');
+    const f = h('form', { class: 'row' }, h('div', { class: 'grow' }, h('div', {}, item.title), h('div', { class: 'muted small ltr' }, item.key)), h('div', {}, input), save);
+    f.addEventListener('submit', (ev) => {
+      ev.preventDefault();
+      const raw = input.value;
+      const value = typeof v === 'boolean' ? raw === 'true' : typeof v === 'number' ? Number(raw) : typeof v === 'string' ? raw : (() => { try { return JSON.parse(raw); } catch { return raw; } })();
+      guarded(err, async () => { await api.put(`/security/settings/${item.key}`, { value }); settingsPage(); });
+    });
+    return h('div', { class: 'card' }, f);
+  };
+  const fx = s.fixed;
+  clear(main, h('h1', {}, 'تنظیمات امنیتی'),
+    h('p', { class: 'muted small' }, 'تنظیمات ممیزی فقط توسط «ممیز امنیتی» و سایر تنظیمات فقط توسط «مدیر امنیت» قابل تغییرند؛ هر تغییر با مقدار قبل و بعد ممیزی می‌شود.'),
+    h('div', { class: 'card' }, h('h2', {}, 'وضعیت ممیزی'),
+      h('p', {}, `تعداد رکورد: ${s.audit.rows.toLocaleString('fa-IR')} — `, s.audit.full ? h('span', { class: 'chip danger' }, 'ظرفیت تکمیل') : s.audit.warn ? h('span', { class: 'chip warn' }, 'نزدیک ظرفیت') : h('span', { class: 'chip ok' }, 'عادی'))),
+    err, s.settings.map(rowFor),
+    h('div', { class: 'card' }, h('h2', {}, 'مقادیر ثابت سامانه (پیکربندی استقرار)'),
+      h('table', {}, h('tbody', {},
+        [['طول کد یکبارمصرف', fx.otp.length], ['فاصله ارسال مجدد کد (ثانیه)', fx.otp.resendCooldownSec], ['سقف ارسال کد در ساعت', fx.otp.maxPerHour],
+          ['عمر توکن دسترسی (ثانیه)', fx.tokens.accessTtlSec], ['عمر نشست کنسول (ثانیه)', fx.tokens.consoleRefreshTtlSec], ['عمر نشست اپ (ثانیه)', fx.tokens.appRefreshTtlSec],
+          ['درگاه شاهکار', `${fx.shahkar.mode} / ${fx.shahkar.endpoint}`], ['الگوریتم‌ها', Object.entries(fx.crypto).map(([k, v]) => `${k}: ${v}`).join(' · ')],
+          ['ارتباطات', `HTTPS اجباری: ${fx.transport.requireHttps ? 'بله' : 'خیر'} · TLS داخلی: ${fx.transport.builtInTls ? 'بله' : 'خیر'} · گواهی کاربر کنسول: ${fx.transport.mutualTlsConsole ? 'بله' : 'خیر'} · TLS پایگاه داده: ${fx.transport.databaseTls}`],
+          ['رویدادهای قابل انتخاب ممیزی', fx.selectableAuditEvents.join(', ')], ['زمان سرور', `${faDate(fx.serverTime)} (${fx.timeZone})`], ['نسخه', fx.version]]
+          .map(([k, v]) => h('tr', {}, h('td', {}, k), h('td', { class: 'ltr small' }, String(v))))))));
 }
 
 async function accountPage() {
@@ -548,7 +709,8 @@ async function accountPage() {
   clear(main, h('h1', {}, 'حساب من'),
     h('div', { class: 'card' }, h('p', {}, me.fullName, ' — ', h('span', { class: 'ltr' }, me.username ?? '')),
       h('p', {}, me.roles.map((r) => h('span', { class: 'chip' }, `${r.title} (${LABELS.scope[r.scope]})`))),
-      h('p', { class: 'muted small' }, 'مجوزها: ', me.permissions.join(' · '))),
+      h('p', { class: 'muted small' }, 'مجوزها: ', me.permissions.join(' · ')),
+      me.accessHistory ? h('p', { class: 'small' }, `ورود قبلی: ${faDate(me.accessHistory.lastSuccessAt)} از ${me.accessHistory.lastSuccessIp ?? '—'} — آخرین تلاش ناموفق: ${faDate(me.accessHistory.lastFailureAt)} (${me.accessHistory.failuresSinceLastSuccess} بار)`) : null),
     h('div', { class: 'card' }, h('h2', {}, 'تغییر رمز عبور'), changePasswordForm(() => { store.clear(); loginView(); }, false)),
     h('div', { class: 'card' }, h('h2', {}, 'نشست‌های فعال'), err, h('table', {}, h('tbody', {}, sessions.map((s) => h('tr', {},
       h('td', {}, s.channel === 'console' ? 'کنسول' : 'اپ'), h('td', { class: 'small' }, s.device_name ?? ''), h('td', { class: 'ltr small' }, s.ip ?? ''), h('td', { class: 'small' }, faDate(s.last_seen_at)),

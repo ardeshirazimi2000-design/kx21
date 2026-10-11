@@ -32,7 +32,10 @@ export const PERMISSIONS: PermissionDef[] = [
 
   { key: 'shahkar.log.read', title: 'مشاهده سوابق استعلام شاهکار', group: 'security', reserved: true },
   { key: 'audit.read', title: 'مشاهده رخدادهای امنیتی (لاگ ممیزی)', group: 'security', reserved: true },
+  { key: 'audit.configure', title: 'پیکربندی، خروجی و بایگانی ممیزی', group: 'security', reserved: true },
   { key: 'settings.read', title: 'مشاهده پیکربندی امنیتی', group: 'security' },
+  { key: 'settings.manage', title: 'تغییر تنظیمات امنیتی (رمز، قفل، نشست، دسترسی شبکه)', group: 'security', reserved: true },
+  { key: 'integrity.check', title: 'بررسی صحت داده‌ها و زنجیره ممیزی', group: 'security', reserved: true },
 
   { key: 'incidents.read', title: 'مشاهده حوادث', group: 'operations' },
   { key: 'incidents.report', title: 'ثبت گزارش مردمی / میدانی حادثه', group: 'operations' },
@@ -46,6 +49,7 @@ export const PERMISSIONS: PermissionDef[] = [
   { key: 'alerts.read', title: 'مشاهده هشدارها', group: 'operations' },
   { key: 'alerts.publish', title: 'انتشار هشدار عمومی', group: 'operations' },
   { key: 'reports.read', title: 'داشبورد و گزارش‌ها', group: 'operations' },
+  { key: 'data.export', title: 'خروجی گرفتن از داده‌های حوادث', group: 'operations' },
 ];
 
 export const PERMISSION_KEYS = PERMISSIONS.map((p) => p.key);
@@ -73,17 +77,17 @@ export const BUILTIN_ROLES: RoleDef[] = [
     staffOnly: true,
     permissions: [
       'console.access', 'users.read', 'users.create', 'users.update', 'users.status', 'users.assign_roles',
-      'roles.read', 'roles.manage', 'sessions.manage', 'shahkar.inquire', 'shahkar.log.read', 'settings.read',
+      'roles.read', 'roles.manage', 'sessions.manage', 'shahkar.inquire', 'shahkar.log.read', 'settings.read', 'settings.manage',
     ],
   },
   {
     key: 'security_auditor',
     title: 'ممیز امنیتی',
-    description: 'دسترسی فقط‌خواندنی به لاگ ممیزی، سوابق شاهکار، کاربران و نقش‌ها. با «مدیر امنیت» قابل جمع نیست.',
+    description: 'خواندن، پیکربندی، خروجی و بایگانی ممیزی؛ بررسی صحت داده‌ها؛ مشاهده سوابق شاهکار، کاربران و نقش‌ها.',
     scope: 'city',
     locked: true,
     staffOnly: true,
-    permissions: ['console.access', 'audit.read', 'shahkar.log.read', 'users.read', 'roles.read', 'settings.read'],
+    permissions: ['console.access', 'audit.read', 'audit.configure', 'integrity.check', 'shahkar.log.read', 'users.read', 'roles.read', 'settings.read'],
   },
   {
     key: 'system_admin',
@@ -103,7 +107,7 @@ export const BUILTIN_ROLES: RoleDef[] = [
     staffOnly: true,
     permissions: [
       'console.access', 'app.access', ...OPS_READ, 'incidents.create', 'incidents.update',
-      'incidents.declare', 'incidents.close', 'tasks.assign', 'alerts.publish',
+      'incidents.declare', 'incidents.close', 'tasks.assign', 'alerts.publish', 'data.export',
     ],
   },
   {
@@ -115,7 +119,7 @@ export const BUILTIN_ROLES: RoleDef[] = [
     staffOnly: true,
     permissions: [
       'console.access', 'app.access', ...OPS_READ, 'incidents.create', 'incidents.update',
-      'incidents.close', 'tasks.assign', 'alerts.publish',
+      'incidents.close', 'tasks.assign', 'alerts.publish', 'data.export',
     ],
   },
   {
@@ -165,7 +169,10 @@ export const BUILTIN_ROLES: RoleDef[] = [
   },
 ];
 
-/** Separation of duties: these role pairs may never be held by the same user. */
+/**
+ * Separation of duties. Each account holds exactly one role (PP FMT_SMR.1.2, application note 19), so these pairs
+ * are already exclusive; the list is kept for custom role design and documentation.
+ */
 export const MUTUALLY_EXCLUSIVE_ROLES: [string, string][] = [
   ['security_admin', 'security_auditor'],
   ['security_admin', 'crisis_director'],

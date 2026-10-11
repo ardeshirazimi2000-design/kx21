@@ -54,12 +54,12 @@ describe('user administration with Shahkar', () => {
     const m = mobile();
 
     mockState.mismatches.add(`${nc}:${m}`);
-    const mismatch = await api().post('/api/console/users').set(bearer(t)).send({ nationalCode: nc, mobile: m, firstName: 'پرویز', lastName: 'نادری', consoleAccess: true, username: 'pnaderi', roles: [{ key: 'operator' }] });
+    const mismatch = await api().post('/api/console/users').set(bearer(t)).send({ nationalCode: nc, mobile: m, firstName: 'پرویز', lastName: 'نادری', consoleAccess: true, username: 'pnaderi', role: { key: 'operator' } });
     expect(mismatch.status).toBe(422);
     expect((await pool.query('SELECT count(*)::int AS n FROM users WHERE national_code = $1', [nc])).rows[0].n).toBe(0);
 
     mockState.mismatches.clear();
-    const ok = await api().post('/api/console/users').set(bearer(t)).send({ nationalCode: nc, mobile: m, firstName: 'پرویز', lastName: 'نادری', consoleAccess: true, username: 'pnaderi', roles: [{ key: 'operator' }] });
+    const ok = await api().post('/api/console/users').set(bearer(t)).send({ nationalCode: nc, mobile: m, firstName: 'پرویز', lastName: 'نادری', consoleAccess: true, username: 'pnaderi', role: { key: 'operator' } });
     expect(ok.status).toBe(201);
     expect(ok.body.temporaryPassword).toBeTruthy();
     expect(ok.body.user.shahkar_verified_at).toBeTruthy();
@@ -99,24 +99,29 @@ describe('user administration with Shahkar', () => {
     expect(a.rows[0].details.required).toEqual(['users.read']);
   });
 
-  it('enforces separation of duties, forbids self-assignment, and applies role changes immediately', async () => {
+  it('keeps exactly one role per user, forbids self-assignment, and ends sessions on a role change', async () => {
     const admin = await staff(['security_admin']);
     const t = await consoleLogin(admin.username!);
     const other = await staff(['operator']);
+    const ot = await consoleLogin(other.username!);
 
-    const self = await api().put(`/api/console/users/${admin.id}/roles`).set(bearer(t)).send({ roles: [] });
-    expect(self.status).toBe(403);
+    expect((await api().put(`/api/console/users/${admin.id}/role`).set(bearer(t)).send({ role: null })).status).toBe(403);
+    // Arrays of roles are not accepted any more.
+    expect((await api().put(`/api/console/users/${other.id}/role`).set(bearer(t)).send({ role: [{ key: 'operator' }, { key: 'observer' }] })).status).toBe(400);
 
-    const sod = await api().put(`/api/console/users/${other.id}/roles`).set(bearer(t)).send({ roles: [{ key: 'security_admin' }, { key: 'security_auditor' }] });
-    expect(sod.status).toBe(409);
+    const r = await api().put(`/api/console/users/${other.id}/role`).set(bearer(t)).send({ role: { key: 'observer' } });
+    expect(r.status).toBe(200);
+    expect(r.body).toMatchObject({ before: 'operator', after: 'observer' });
+    expect(r.body.user.roles.map((x: { key: string }) => x.key)).toEqual(['observer']);
+    // FIA_USB.1.3: no attribute change inside a live session — the user must sign in again.
+    expect((await api().get('/api/console/incidents').set(bearer(ot))).status).toBe(401);
 
-    // A second administrator demotes the first one.
-    await api().put(`/api/console/users/${other.id}/roles`).set(bearer(t)).send({ roles: [{ key: 'security_admin' }] }).expect(200);
+    // Demoting the only other security administrator is fine while one remains; demoting the last is refused.
+    await api().put(`/api/console/users/${other.id}/role`).set(bearer(t)).send({ role: { key: 'security_admin' } }).expect(200);
     const t2 = await consoleLogin(other.username!);
-    await api().put(`/api/console/users/${admin.id}/roles`).set(bearer(t2)).send({ roles: [{ key: 'operator' }] }).expect(200);
-    const last = await api().post(`/api/console/users/${other.id}/status`).set(bearer(t)).send({ status: 'suspended', reason: 'آزمون' });
-    // The demoted administrator's live session lost users.status at once.
-    expect(last.status).toBe(403);
+    await api().put(`/api/console/users/${admin.id}/role`).set(bearer(t2)).send({ role: { key: 'operator' } }).expect(200);
+    const lastAdmin = await pool.query(`SELECT count(*)::int AS n FROM user_roles WHERE role_key = 'security_admin'`);
+    expect(lastAdmin.rows[0].n).toBe(1);
   });
 
   it('does not let staff-only roles be granted to citizens', async () => {
@@ -126,7 +131,7 @@ describe('user administration with Shahkar', () => {
     const m = mobile();
     await appLogin(nc, m, 'device-0001', { firstName: 'نسرین', lastName: 'یزدانی' });
     const citizen = (await pool.query('SELECT id FROM users WHERE national_code = $1', [nc])).rows[0];
-    const res = await api().put(`/api/console/users/${citizen.id}/roles`).set(bearer(t)).send({ roles: [{ key: 'operator' }] });
+    const res = await api().put(`/api/console/users/${citizen.id}/role`).set(bearer(t)).send({ role: { key: 'operator' } });
     expect(res.status).toBe(400);
   });
 

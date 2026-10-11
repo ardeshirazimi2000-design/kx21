@@ -1,7 +1,18 @@
+import { readFileSync } from 'node:fs';
 import pg from 'pg';
 import { config } from '../config.js';
 
-export const pool = new pg.Pool({ connectionString: config.DATABASE_URL, max: 10 });
+/** FPT_ITT.1: the connection to a separate database server is protected with TLS when configured. */
+function ssl(): pg.PoolConfig['ssl'] {
+  if (config.DATABASE_SSL === 'disable') return undefined;
+  return {
+    rejectUnauthorized: config.DATABASE_SSL === 'verify-full',
+    ca: config.DATABASE_SSL_CA_FILE ? readFileSync(config.DATABASE_SSL_CA_FILE, 'utf8') : undefined,
+    minVersion: 'TLSv1.2',
+  };
+}
+
+export const pool = new pg.Pool({ connectionString: config.DATABASE_URL, max: 10, ssl: ssl() });
 
 export type Db = pg.Pool | pg.PoolClient;
 
