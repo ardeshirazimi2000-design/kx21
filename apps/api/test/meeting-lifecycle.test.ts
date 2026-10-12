@@ -388,6 +388,53 @@ describe('meeting creation and cancellation', () => {
   });
 });
 
+describe('built-in webinar', () => {
+  it('gives invitees a signed room link, officers moderator rights, and records online attendance', async () => {
+    const jwt = (await import('jsonwebtoken')).default;
+    const exp = (await as('secretary').get('/api/commissions')).body.items.find((c: any) => c.code === 'EXP');
+    const r = await as('secretary').post('/api/meetings', {
+      commissionId: exp.id,
+      title: 'جلسه وبیناری',
+      scheduledAt: new Date(Date.now() + 10 * 60000).toISOString(),
+      type: 'hybrid',
+      schedule: true,
+      agenda: [{ title: 'گزارش' }],
+    });
+    const id = r.body.id;
+    await as('secretary').post(`/api/meetings/${id}/invite`);
+    expect((await as('m1').get(`/api/meetings/${id}`)).body.webinar.state).toBe('not_yet');
+    expect((await as('m1').post(`/api/meetings/${id}/webinar/join`)).body.error.code).toBe('webinar_not_open');
+    // officers may open the room shortly before the start
+    const sec = await as('secretary').post(`/api/meetings/${id}/webinar/join`);
+    expect(sec.status).toBe(200);
+    expect(sec.body.url).toMatch(/^https:\/\/webinar\.test\/kx-15-[0-9a-f]{12}\?jwt=/);
+    const secToken: any = jwt.verify(sec.body.url.split('jwt=')[1].split('#')[0], 'test-webinar-secret');
+    expect(secToken.context.user.moderator).toBe(true);
+    expect(secToken.room).toBe(sec.body.room);
+    expect(secToken.iss).toBe('kx-commissions');
+
+    await as('secretary').post(`/api/meetings/${id}/checkin/open`);
+    const m1 = await as('m1').post(`/api/meetings/${id}/webinar/join`);
+    expect(m1.status).toBe(200);
+    const memberToken: any = jwt.verify(m1.body.url.split('jwt=')[1].split('#')[0], 'test-webinar-secret');
+    expect(memberToken.context.user.moderator).toBe(false);
+    expect(memberToken.context.user.affiliation).toBe('member');
+    expect(m1.body.attendance.status).toBe('online');
+    // someone already checked in on site keeps «present» when they also open the webinar
+    await as('m2').post(`/api/meetings/${id}/check-in`, { method: 'app' });
+    expect((await as('m2').post(`/api/meetings/${id}/webinar/join`)).body.attendance).toBeNull();
+    const att = (await as('secretary').get(`/api/meetings/${id}/attendance`)).body;
+    const list = att.attendance;
+    expect(list.find((a: any) => a.full_name === 'زهرا محمدی').status).toBe('online');
+    // not invited → refused; in-person meetings have no room
+    expect([403, 404]).toContain((await as('expert').post(`/api/meetings/${id}/webinar/join`)).status);
+    const inPerson = await as('secretary').post('/api/meetings', { commissionId: exp.id, title: 'حضوری', scheduledAt: new Date().toISOString(), type: 'in_person', schedule: true });
+    expect((await as('secretary').post(`/api/meetings/${inPerson.body.id}/webinar/join`)).body.error.code).toBe('webinar_in_person');
+    await as('secretary').post(`/api/meetings/${id}/cancel`, { reason: 'پایان آزمون وبینار' });
+    await as('secretary').post(`/api/meetings/${inPerson.body.id}/cancel`, { reason: 'پایان آزمون وبینار' });
+  });
+});
+
 describe('structure', () => {
   it('keeps membership history when positions change', async () => {
     const commissions = await as('admin').get('/api/commissions');

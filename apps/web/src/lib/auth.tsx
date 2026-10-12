@@ -22,6 +22,8 @@ export interface Me {
   mfa_enabled: boolean;
   adminChambers: string[];
   memberships: Membership[];
+  /** Optional server features (e.g. the built-in webinar). */
+  features?: { webinar?: boolean };
 }
 
 interface AuthState {

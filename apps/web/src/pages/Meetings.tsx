@@ -111,6 +111,7 @@ export function MeetingsPage() {
 
 export function NewMeetingModal({ commissionId, onClose, onSaved }: { commissionId?: string; onClose: () => void; onSaved: (id: string) => void }) {
   const { me } = useAuth();
+  const webinar = !!me?.features?.webinar;
   const commissions = useApi(commissionId ? null : '/commissions?pageSize=100');
   const options = (commissions.data?.items ?? []).filter(
     (c: any) => ['chair', 'vice_chair', 'secretary'].includes(c.my_position),
@@ -186,7 +187,10 @@ export function NewMeetingModal({ commissionId, onClose, onSaved }: { commission
           </Field>
         )}
         {form.type !== 'in_person' && (
-          <Field label="لینک جلسه آنلاین">
+          <Field
+            label={webinar ? 'لینک پلتفرم دیگر (اختیاری)' : 'لینک جلسه آنلاین'}
+            hint={webinar ? 'وبینار داخلی سامانه برای این جلسه خودکار آماده می‌شود؛ فقط اگر از پلتفرم دیگری (مثل اسکای‌روم) استفاده می‌کنید لینک آن را وارد کنید.' : undefined}
+          >
             <input className="input ltr" value={form.onlineLink} onChange={(e) => setForm({ ...form, onlineLink: e.target.value })} />
           </Field>
         )}

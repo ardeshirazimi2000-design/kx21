@@ -32,7 +32,13 @@ export function createApp() {
     helmet({
       // On a plain-HTTP trial install (e.g. http://server:8000) these would break loading.
       hsts: config.publicHttps,
-      contentSecurityPolicy: { directives: { upgradeInsecureRequests: config.publicHttps ? [] : null } },
+      contentSecurityPolicy: {
+        directives: {
+          upgradeInsecureRequests: config.publicHttps ? [] : null,
+          // The built-in webinar room is embedded in the meeting page.
+          frameSrc: ["'self'", ...(config.webinar.url ? [config.webinar.url] : [])],
+        },
+      },
     }),
   );
   app.use(cors({ origin: config.corsOrigins, credentials: true }));

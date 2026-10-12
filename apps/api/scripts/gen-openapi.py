@@ -158,6 +158,7 @@ E = [
     ("post", "/api/referrals", "Issues", "ارجاع کارشناسی", S(commissionId=uuid, issueId=uuid, expertId=uuid, request=str_, dueDate=date), None),
     ("get", "/api/referrals", "Issues", "ارجاعات (کارشناس: ارجاعات خود؛ ?commissionId برای دبیر)", None, None),
     ("post", "/api/referrals/{id}/answer", "Issues", "پاسخ کارشناس", S(response=str_), None),
+    ("post", "/api/meetings/{id}/webinar/join", "Meetings", "ورود به وبینار داخلی جلسه (لینک شخصی امضاشده؛ ثبت حضور آنلاین در زمان اعلام حضور)", None, "Requires WEBINAR_URL and WEBINAR_APP_SECRET. Invitees, delegates and officers only; officers join as moderators and may open the room WEBINAR_EARLY_MINUTES before the start. 409 codes: webinar_disabled, webinar_in_person, webinar_not_open, webinar_closed."),
     ("post", "/api/documents", "Documents", "بارگذاری سند (multipart: file + meetingId|agendaItemId|resolutionId|issueId|commissionId)", None, "Fields: file, target id, optional kind (attachment|presentation|photo|letter|report|evidence; detected from the file when omitted), optional title. Accepts PDF, PowerPoint (ppt/pptx/ppsx), Word, Excel, images (png/jpg/webp/heic) and text; extension + magic-byte validated, size limited (MAX_UPLOAD_MB, default 50), malware scan hook."),
     ("get", "/api/documents", "Documents", "فهرست اسناد", None, None),
     ("get", "/api/documents/{id}/download", "Documents", "دریافت سند", None, None),

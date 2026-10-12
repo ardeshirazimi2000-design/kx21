@@ -39,6 +39,17 @@ export const config = {
   webDistDir: process.env.WEB_DIST_DIR,
   /** Set to true once the site is served over HTTPS (enables HSTS and upgrade-insecure-requests). */
   publicHttps: process.env.PUBLIC_HTTPS === 'true',
+  /**
+   * Built-in webinar (self-hosted Jitsi Meet with JWT authentication, see deploy/webinar).
+   * Enabled when both the public URL and the shared secret are set.
+   */
+  webinar: {
+    url: (process.env.WEBINAR_URL ?? '').replace(/\/+$/, ''),
+    appId: process.env.WEBINAR_APP_ID ?? 'kx-commissions',
+    secret: process.env.WEBINAR_APP_SECRET ?? '',
+    /** Officers may open the room this many minutes before the scheduled start. */
+    earlyMinutes: Number(process.env.WEBINAR_EARLY_MINUTES ?? '30'),
+  },
 };
 
 if (isProd && config.jwtSecret.length < 32) {

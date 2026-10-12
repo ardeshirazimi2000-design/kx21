@@ -8,10 +8,10 @@ import {
   MEETING_TYPES,
   type AttendanceStatus,
 } from '@kx/shared';
-import { Router } from 'express';
+import { Router, type Request } from 'express';
 import { z } from 'zod';
-import { currentUser } from '../auth/middleware.js';
-import { one, query, tx } from '../db/pool.js';
+import { currentUser, type AuthUser } from '../auth/middleware.js';
+import { one, pool, query, tx } from '../db/pool.js';
 import { audit } from '../lib/audit.js';
 import { badRequest, conflict, forbidden, notFound } from '../lib/errors.js';
 import { body, listParam, paged, pageParams, param, uuid } from '../lib/validate.js';
@@ -31,6 +31,7 @@ import { generateMinutesDraft } from '../services/minutes.js';
 import { listDelegates } from './delegates.js';
 import { adminBrowsableChambers, assertRole, browsableCommissionIds, defaultHasVote } from '../services/roles.js';
 import { notify } from '../services/notifications.js';
+import { webinarEnabled, webinarJoinUrl, webinarRoom, webinarState, webinarToken } from '../services/webinar.js';
 
 export const meetingsRouter = Router();
 
@@ -193,6 +194,7 @@ export async function meetingDetail(a: MeetingAccess, userId: string) {
     capabilities: [...a.caps],
     availableActions: a.can('meeting.manage') || a.can('meeting.control') ? availableActions(m.status) : [],
     checkinOpen: isCheckinWindow(m.status) && !m.checkin_closed_at,
+    webinar: webinarEnabled() && m.type !== 'in_person' ? { state: webinarState(m, a.can('meeting.control') || a.can('meeting.manage')) } : null,
     my: { role: a.inviteeRole, hasVote: a.hasVote, attendance: me, delegateFor: a.delegateFor },
     // Members see the invited list; the live status of each person is for officers.
     invitees: a.can('attendance.view_all')
@@ -470,21 +472,19 @@ meetingsRouter.post('/meetings/:id/archive', async (req, res) => {
 
 // ─────────────────────────────── Attendance (اعلام حضور) ───────────────────────────────
 
-meetingsRouter.post('/meetings/:id/check-in', async (req, res) => {
-  const u = currentUser(req);
-  const id = param(req, 'id');
-  const b = body(req, z.object({ method: z.enum(['app', 'web', 'online']).default('app'), proxyName: z.string().min(3).optional() }));
-  const { row, settings, created } = await tx(async (c) => {
+/** Records the caller's own check-in (or their principal's, for a representative). Idempotent. */
+async function recordCheckIn(u: AuthUser, id: string, req: Request, method: 'app' | 'web' | 'online', proxyNameIn?: string) {
+  return tx(async (c) => {
     const a = await meetingAccess(u, id, c, { forUpdate: true });
     a.require('attendance.self');
     if (!isCheckinWindow(a.meeting.status)) throw conflict('اعلام حضور برای این جلسه باز نیست', 'checkin_closed');
     if (a.meeting.checkin_closed_at) throw conflict('مهلت اعلام حضور به پایان رسیده است؛ با دبیر هماهنگ کنید', 'checkin_closed');
-    if (b.proxyName && !a.settings.allowProxy) throw forbidden('حضور نماینده در این کمیسیون مجاز نیست');
+    if (proxyNameIn && !a.settings.allowProxy) throw forbidden('حضور نماینده در این کمیسیون مجاز نیست');
     // A representative checks in on the invitee's attendance row (status «proxy»).
     const forUser = a.delegateFor?.principalId ?? u.id;
-    const proxyName = a.delegateFor ? u.fullName : (b.proxyName ?? null);
+    const proxyName = a.delegateFor ? u.fullName : (proxyNameIn ?? null);
     const existing = await one('SELECT * FROM attendance WHERE meeting_id = $1 AND user_id = $2 FOR UPDATE', [id, forUser], c);
-    const status: AttendanceStatus = proxyName ? 'proxy' : b.method === 'online' ? 'online' : 'present';
+    const status: AttendanceStatus = proxyName ? 'proxy' : method === 'online' ? 'online' : 'present';
     // Idempotent: a repeated check-in keeps the original timestamp and creates no new record.
     if (existing && existing.status === status && existing.checked_in_at) return { row: existing, settings: a.settings, created: false };
     const row = await one(
@@ -494,14 +494,53 @@ meetingsRouter.post('/meetings/:id/check-in', async (req, res) => {
          checked_in_at = COALESCE(attendance.checked_in_at, EXCLUDED.checked_in_at), proxy_name = EXCLUDED.proxy_name,
          proxy_user_id = EXCLUDED.proxy_user_id, updated_by = EXCLUDED.updated_by, updated_at = now()
        RETURNING *`,
-      [id, forUser, status, b.method, proxyName, a.delegateFor ? u.id : null, u.id],
+      [id, forUser, status, method, proxyName, a.delegateFor ? u.id : null, u.id],
       c,
     );
     await audit(c, req, { chamberId: a.meeting.chamber_id, action: 'attendance.check_in', entity: 'attendance', entityId: `${id}:${forUser}`, before: existing, after: row });
     return { row, settings: a.settings, created: true };
   });
+}
+
+meetingsRouter.post('/meetings/:id/check-in', async (req, res) => {
+  const u = currentUser(req);
+  const id = param(req, 'id');
+  const b = body(req, z.object({ method: z.enum(['app', 'web', 'online']).default('app'), proxyName: z.string().min(3).optional() }));
+  const { row, settings, created } = await recordCheckIn(u, id, req, b.method, b.proxyName);
   if (created) await broadcastAttendance(id, settings);
   res.status(created ? 201 : 200).json(row);
+});
+
+/**
+ * Join the meeting's built-in webinar room. Returns a personal, signed link; officers enter as
+ * moderators. Joining while check-in is open also records online attendance (unless already present).
+ */
+meetingsRouter.post('/meetings/:id/webinar/join', async (req, res) => {
+  const u = currentUser(req);
+  const id = param(req, 'id');
+  const a = await meetingAccess(u, id);
+  const officer = a.can('meeting.control') || a.can('meeting.manage');
+  if (!a.inviteeRole && !officer) throw forbidden('فقط مدعوین جلسه می‌توانند وارد وبینار شوند');
+  const state = webinarState(a.meeting, officer);
+  if (state === 'disabled') throw conflict('وبینار داخلی روی این سرور راه‌اندازی نشده است', 'webinar_disabled');
+  if (state === 'in_person') throw conflict('این جلسه حضوری است و وبینار ندارد', 'webinar_in_person');
+  if (state === 'not_yet') throw conflict('وبینار هنوز باز نشده است؛ پس از باز شدن اعلام حضور توسط دبیر وارد شوید', 'webinar_not_open');
+  if (state === 'closed') throw conflict('این جلسه به پایان رسیده و وبینار بسته شده است', 'webinar_closed');
+
+  let attendance: any = null;
+  if (a.can('attendance.self') && isCheckinWindow(a.meeting.status) && !a.meeting.checkin_closed_at) {
+    const forUser = a.delegateFor?.principalId ?? u.id;
+    const current = await one<{ status: string }>('SELECT status FROM attendance WHERE meeting_id = $1 AND user_id = $2', [id, forUser]);
+    if (!current || ['pending', 'absent'].includes(current.status)) {
+      const r = await recordCheckIn(u, id, req, 'online');
+      attendance = r.row;
+      if (r.created) await broadcastAttendance(id, r.settings);
+    }
+  }
+  const name = a.delegateFor ? `${u.fullName} (نماینده ${a.delegateFor.fullName})` : u.fullName;
+  const token = webinarToken(a.meeting, { id: u.id, fullName: name }, officer);
+  await audit(pool, req, { chamberId: a.meeting.chamber_id, action: 'webinar.joined', entity: 'meeting', entityId: id, after: { moderator: officer } });
+  res.json({ url: webinarJoinUrl(a.meeting, token), room: webinarRoom(a.meeting), moderator: officer, attendance });
 });
 
 meetingsRouter.get('/meetings/:id/attendance', async (req, res) => {

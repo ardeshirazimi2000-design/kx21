@@ -10,6 +10,7 @@ import { one, query, tx } from '../db/pool.js';
 import { audit } from '../lib/audit.js';
 import { badRequest, unauthorized } from '../lib/errors.js';
 import { body } from '../lib/validate.js';
+import { webinarEnabled } from '../services/webinar.js';
 
 export const authRouter = Router();
 
@@ -92,7 +93,7 @@ authRouter.get('/me', authenticate, async (req, res) => {
       WHERE m.user_id = $1 AND m.status = 'active' ORDER BY c.name`,
     [u.id],
   );
-  res.json({ ...profile, adminChambers: u.adminChambers, memberships });
+  res.json({ ...profile, adminChambers: u.adminChambers, memberships, features: { webinar: webinarEnabled() } });
 });
 
 authRouter.post('/password', authenticate, limiter, async (req, res) => {

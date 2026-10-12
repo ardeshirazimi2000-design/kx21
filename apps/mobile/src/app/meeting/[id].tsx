@@ -159,6 +159,20 @@ export default function MeetingRoomScreen() {
           </View>
         )}
         {m.status === 'cancelled' && <T color={t.danger}>لغو شد: {m.cancel_reason}</T>}
+        {m.webinar && m.webinar.state === 'open' && (
+          <Button
+            title="🎥 ورود به وبینار جلسه"
+            big
+            busy={busy === 'webinar'}
+            onPress={() =>
+              run('webinar', async () => {
+                const r = await post<{ url: string }>(`/meetings/${id}/webinar/join`);
+                await Linking.openURL(r.url);
+              })
+            }
+          />
+        )}
+        {m.webinar && m.webinar.state === 'not_yet' && <T muted size={13}>وبینار این جلسه پس از باز شدن اعلام حضور فعال می‌شود.</T>}
         <Row style={{ justifyContent: 'flex-end' }}>
           {m.online_link && <Button title="ورود به جلسه آنلاین" variant="secondary" onPress={() => Linking.openURL(m.online_link)} />}
           <Button

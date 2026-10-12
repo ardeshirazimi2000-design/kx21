@@ -155,6 +155,7 @@ export function MeetingRoomPage() {
           {m.my.delegateFor.organization ? ` (${m.my.delegateFor.organization})` : ''} در این جلسه حضور دارید. اعلام حضور و رأی شما به نام ایشان ثبت می‌شود.
         </div>
       )}
+      {m.webinar && (m.my.role || can('meeting.manage') || can('meeting.control')) && <WebinarCard m={m} onJoined={reload} />}
       {m.my.role && !m.my.delegateFor && m.settings.allowProxy && OPEN_FOR_DELEGATES.includes(m.status) && <MyDelegate m={m} reload={reload} />}
       <QuorumPanel quorum={m.quorum} detailed={can('attendance.view_all')} />
       <div className="mt" />
@@ -1131,5 +1132,93 @@ function DelegateModal({ m, principal, onClose, onDone }: { m: any; principal?: 
         <input className="input" value={form.note} onChange={(e) => setForm({ ...form, note: e.target.value })} />
       </Field>
     </Modal>
+  );
+}
+
+// ─────────────────────────────── Built-in webinar ───────────────────────────────
+
+/**
+ * Join the meeting's webinar room. On an HTTPS page the room opens inside this page (camera and
+ * microphone work only in a secure context); otherwise it opens in a new tab.
+ */
+function WebinarCard({ m, onJoined }: { m: any; onJoined: () => Promise<void> }) {
+  const [room, setRoom] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<Error | null>(null);
+  const officer = m.capabilities.includes('meeting.manage') || m.capabilities.includes('meeting.control');
+  const canEmbed = window.isSecureContext && window.location.protocol === 'https:';
+  const join = async (embed: boolean) => {
+    setBusy(true);
+    setErr(null);
+    // Open the tab synchronously so the popup blocker allows it.
+    const tab = embed ? null : window.open('about:blank', '_blank');
+    try {
+      const r = await post<{ url: string }>(`/meetings/${m.id}/webinar/join`);
+      if (embed) setRoom(r.url);
+      else if (tab) tab.location.href = r.url;
+      else window.location.href = r.url;
+      void onJoined();
+    } catch (e) {
+      tab?.close();
+      setErr(e as Error);
+    } finally {
+      setBusy(false);
+    }
+  };
+  const state = m.webinar.state as 'open' | 'not_yet' | 'closed';
+  return (
+    <Card
+      className="mb"
+      title={
+        <span className="row gap-sm" style={{ alignItems: 'center' }}>
+          🎥 وبینار جلسه {state === 'open' && <Badge tone="success">باز</Badge>}
+          {officer && state === 'open' && <span className="muted small">(شما مدیر جلسه وبینار هستید)</span>}
+        </span>
+      }
+      actions={
+        state === 'open' &&
+        (room ? (
+          <>
+            <Button size="sm" variant="secondary" onClick={() => window.open(room, '_blank')}>
+              پنجره جدید
+            </Button>
+            <Button size="sm" variant="danger" onClick={() => setRoom(null)}>
+              خروج از وبینار
+            </Button>
+          </>
+        ) : (
+          <>
+            {canEmbed && (
+              <Button busy={busy} onClick={() => join(true)}>
+                ورود به وبینار در همین صفحه
+              </Button>
+            )}
+            <Button busy={busy} variant={canEmbed ? 'secondary' : 'primary'} onClick={() => join(false)}>
+              {canEmbed ? 'ورود در پنجره جدید' : 'ورود به وبینار'}
+            </Button>
+          </>
+        ))
+      }
+    >
+      <ErrorBox error={err} />
+      {room ? (
+        <iframe
+          title="وبینار جلسه"
+          src={room}
+          allow="camera; microphone; display-capture; autoplay; clipboard-write; fullscreen"
+          style={{ width: '100%', height: '70vh', minHeight: 420, border: 0, borderRadius: 12, background: '#111' }}
+        />
+      ) : (
+        <p className="muted small" style={{ margin: 0 }}>
+          {state === 'open'
+            ? `${m.status === 'checkin_open' || m.status === 'in_progress' || m.status === 'agenda_processing' ? 'ورود به وبینار حضور آنلاین شما را هم ثبت می‌کند. ' : ''}برای صدا و تصویر از مرورگر کروم یا فایرفاکس استفاده کنید و اجازه دسترسی به میکروفون و دوربین را بدهید.`
+            : state === 'not_yet'
+              ? officer
+                ? 'رئیس و دبیر از نیم ساعت پیش از شروع جلسه می‌توانند وارد وبینار شوند؛ سایر مدعوین پس از باز شدن اعلام حضور.'
+                : 'وبینار پس از باز شدن اعلام حضور توسط دبیر فعال می‌شود.'
+              : 'جلسه به پایان رسیده و وبینار بسته شده است.'}
+        </p>
+      )}
+    </Card>
   );
 }

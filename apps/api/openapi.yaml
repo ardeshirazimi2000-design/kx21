@@ -3559,6 +3559,39 @@ paths:
         in: path
         required: true
         schema: *id004
+  /api/meetings/{id}/webinar/join:
+    post:
+      tags:
+      - Meetings
+      summary: ورود به وبینار داخلی جلسه (لینک شخصی امضاشده؛ ثبت حضور آنلاین در زمان اعلام حضور)
+      responses:
+        '200':
+          description: OK
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Forbidden
+        '404':
+          description: Not found or not visible
+        '409':
+          description: Conflict (state machine / business rule)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      description: 'Requires WEBINAR_URL and WEBINAR_APP_SECRET. Invitees, delegates and officers only; officers join as moderators and may open
+        the room WEBINAR_EARLY_MINUTES before the start. 409 codes: webinar_disabled, webinar_in_person, webinar_not_open, webinar_closed.'
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: *id004
   /api/documents:
     post:
       tags:

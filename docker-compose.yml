@@ -30,6 +30,9 @@ services:
       IDENTITY_API_URL: ${IDENTITY_API_URL:-https://s.api.ir/api/sw1/PersonInfo}
       IDENTITY_API_TOKEN: ${IDENTITY_API_TOKEN:-}
       IDENTITY_REQUIRED: ${IDENTITY_REQUIRED:-false}
+      WEBINAR_URL: ${WEBINAR_URL:-}
+      WEBINAR_APP_ID: ${WEBINAR_APP_ID:-kx-commissions}
+      WEBINAR_APP_SECRET: ${WEBINAR_APP_SECRET:-}
     volumes:
       - uploads:/data/uploads
     depends_on:
