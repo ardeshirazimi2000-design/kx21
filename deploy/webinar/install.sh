@@ -222,12 +222,18 @@ fi
 
 say "صبر برای صدور گواهی SSL و آماده شدن https://$DOMAIN"
 for _ in $(seq 1 36); do
-  if curl -fs --max-time 5 -o /dev/null "https://$DOMAIN/config.js"; then
+  # Ask this server directly: many servers cannot reach their own public IP (NAT hairpin).
+  # The certificate is still checked against the domain name.
+  if curl -fs --max-time 5 --resolve "$DOMAIN:443:127.0.0.1" -o /dev/null "https://$DOMAIN/config.js"; then
     printf '\n\033[1;32m✓ وبینار آماده است: https://%s\033[0m\n' "$DOMAIN"
     echo "از این پس در جلسات «آنلاین» و «ترکیبی» دکمه «ورود به وبینار» در سامانه و اپ نمایش داده می‌شود."
     exit 0
   fi
   sleep 5
 done
-echo "وبینار هنوز روی https پاسخ نمی‌دهد. وضعیت را ببینید:  cd $DIR && docker compose logs web | tail -50"
+echo "وبینار هنوز روی https پاسخ نمی‌دهد. ابتدا https://$DOMAIN را در مرورگر خودتان باز کنید؛ اگر باز نشد:"
+if [[ -n "$PROXY_CONTAINER" ]]; then
+  echo "  docker logs $PROXY_CONTAINER --since 30m 2>&1 | grep -i $DOMAIN | tail -20"
+fi
+echo "  cd $DIR && docker compose ps && docker compose logs web | tail -50"
 exit 1
