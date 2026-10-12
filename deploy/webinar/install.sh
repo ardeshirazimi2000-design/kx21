@@ -195,11 +195,18 @@ if [[ -n "$PROXY_CONTAINER" ]]; then
     printf '\n%s\n' "$BLOCK" >> "$CADDYFILE"
     echo "به $CADDYFILE اضافه شد (نسخه پشتیبان کنار همان فایل است)."
   fi
-  # The container may see the file through a directory mount; reload validates before applying.
-  if ! docker exec "$PROXY_CONTAINER" caddy reload --config /etc/caddy/Caddyfile --adapter caddyfile; then
+  # A single-file bind mount keeps showing the old file if an editor replaced it on the host;
+  # restarting the container re-binds the current file. Reload validates before applying.
+  if ! docker exec "$PROXY_CONTAINER" grep -q "$DOMAIN" /etc/caddy/Caddyfile; then
+    echo "Caddy نسخه قدیمی Caddyfile را می‌بیند؛ کانتینر $PROXY_CONTAINER دوباره اجرا می‌شود (چند ثانیه)."
+    docker restart "$PROXY_CONTAINER" >/dev/null
+    sleep 3
+  elif ! docker exec "$PROXY_CONTAINER" caddy reload --config /etc/caddy/Caddyfile --adapter caddyfile; then
     echo "reload ناموفق بود؛ Caddy را دوباره اجرا می‌کنم."
     docker restart "$PROXY_CONTAINER" >/dev/null
   fi
+  docker exec "$PROXY_CONTAINER" grep -q "$DOMAIN" /etc/caddy/Caddyfile \
+    || fail "Caddy هنوز دامنه $DOMAIN را در تنظیماتش نمی‌بیند؛ Caddyfile داخل کانتینر $PROXY_CONTAINER را بررسی کنید."
   echo "نکته: اگر کانتینر $PROXY_CONTAINER از نو ساخته شود (docker compose up در پروژه دیگر)، این اسکریپت را دوباره اجرا کنید تا اتصال شبکه برقرار بماند."
 fi
 
