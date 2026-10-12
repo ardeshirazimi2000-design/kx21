@@ -45,12 +45,32 @@ if [[ "$DNS_IP" != "$PUBLIC_IP" ]]; then
 fi
 
 # ── Ports ────────────────────────────────────────────────────────────────────
-for port in 80 443; do
-  if ss -ltnH "sport = :$port" | grep -q . && ! docker ps --format '{{.Names}} {{.Ports}}' | grep -q "kx-webinar.*:$port->"; then
-    ss -ltnpH "sport = :$port" || true
-    fail "پورت $port روی این سرور در اختیار برنامه دیگری است (بالا نمایش داده شد). وبینار برای گواهی SSL به پورت‌های 80 و 443 نیاز دارد."
-  fi
-done
+# If ports 80/443 already belong to a Caddy container (another site on this server), the webinar
+# runs behind it: Caddy keeps 80/443, gets the certificate and forwards the webinar domain.
+PROXY_CONTAINER="${PROXY_CONTAINER:-}"
+port_in_use() {
+  if command -v ss >/dev/null; then ss -ltnH "sport = :$1" | grep -q .; else (exec 3<>"/dev/tcp/127.0.0.1/$1") 2>/dev/null; fi
+}
+if [[ -z "$PROXY_CONTAINER" ]]; then
+  for port in 80 443; do
+    owner="$(docker ps --format '{{.Names}} {{.Image}} {{.Ports}}' | grep -E "(0\.0\.0\.0|\[::\]):$port->" | grep -v '^kx-webinar-' | head -1 || true)"
+    if [[ "$owner" == *caddy* ]]; then
+      PROXY_CONTAINER="${owner%% *}"
+      break
+    fi
+    if [[ -n "$owner" ]] || { port_in_use "$port" && ! docker ps --format '{{.Names}}' | grep -q '^kx-webinar-web'; }; then
+      command -v ss >/dev/null && ss -ltnpH "sport = :$port" || true
+      [[ -n "$owner" ]] && echo "کانتینر: $owner"
+      fail "پورت $port روی این سرور در اختیار برنامه دیگری است (بالا نمایش داده شد). وبینار برای گواهی SSL به پورت‌های 80 و 443 یا یک Caddy موجود نیاز دارد."
+    fi
+  done
+fi
+if [[ -n "$PROXY_CONTAINER" ]]; then
+  say "پورت‌های 80 و 443 در اختیار Caddy ($PROXY_CONTAINER) است؛ وبینار پشت همان Caddy راه‌اندازی می‌شود."
+fi
+if command -v ss >/dev/null && ss -lunH "sport = :10000" | grep -q . && ! docker ps --format '{{.Names}}' | grep -q "^kx-webinar-jvb"; then
+  fail "پورت 10000/udp (صدا و تصویر وبینار) در اختیار برنامه دیگری است."
+fi
 
 # ── Settings (.env); secrets are kept on re-runs ─────────────────────────────
 # Release matching docker-compose.yml (the last one published on Docker Hub).
@@ -60,6 +80,22 @@ rand() { openssl rand -hex "${1:-16}"; }
 JWT_SECRET="$(get JWT_APP_SECRET)"; JWT_SECRET="${JWT_SECRET:-$(rand 32)}"
 JICOFO_PW="$(get JICOFO_AUTH_PASSWORD)"; JICOFO_PW="${JICOFO_PW:-$(rand)}"
 JVB_PW="$(get JVB_AUTH_PASSWORD)"; JVB_PW="${JVB_PW:-$(rand)}"
+
+if [[ -n "$PROXY_CONTAINER" ]]; then
+  # Behind the existing Caddy: HTTPS and the certificate are handled by Caddy.
+  PORT_SETTINGS="HTTP_PORT=127.0.0.1:8800
+HTTPS_PORT=127.0.0.1:8843
+DISABLE_HTTPS=1
+ENABLE_HTTP_REDIRECT=0
+ENABLE_LETSENCRYPT=0"
+else
+  PORT_SETTINGS="HTTP_PORT=80
+HTTPS_PORT=443
+ENABLE_HTTP_REDIRECT=1
+ENABLE_LETSENCRYPT=1
+LETSENCRYPT_DOMAIN=$DOMAIN
+LETSENCRYPT_EMAIL=$EMAIL"
+fi
 
 say "نوشتن تنظیمات وبینار در $DIR/.env"
 umask 077
@@ -73,14 +109,12 @@ CONFIG=$DIR/config
 TZ=Asia/Tehran
 
 PUBLIC_URL=https://$DOMAIN
-HTTP_PORT=80
-HTTPS_PORT=443
-ENABLE_HTTP_REDIRECT=1
-ENABLE_LETSENCRYPT=1
-LETSENCRYPT_DOMAIN=$DOMAIN
-LETSENCRYPT_EMAIL=$EMAIL
+$PORT_SETTINGS
 JVB_ADVERTISE_IPS=$PUBLIC_IP
 JVB_PORT=10000
+# Local-only admin ports, moved off 8080/8888 which other apps often use.
+JVB_COLIBRI_PORT=18080
+JICOFO_REST_PORT=18888
 
 # Only people sent by the commissions platform (signed token) can enter a room.
 ENABLE_AUTH=1
@@ -135,6 +169,40 @@ else
 fi
 docker compose up -d
 
+# ── Route the domain through the existing Caddy ──────────────────────────────
+if [[ -n "$PROXY_CONTAINER" ]]; then
+  say "افزودن $DOMAIN به Caddy ($PROXY_CONTAINER)"
+  NET="kx-webinar_meet.jitsi"
+  if ! docker inspect -f '{{json .NetworkSettings.Networks}}' "$PROXY_CONTAINER" | grep -q "\"$NET\""; then
+    docker network connect "$NET" "$PROXY_CONTAINER"
+  fi
+  CADDYFILE="$(docker inspect -f '{{range .Mounts}}{{if eq .Destination "/etc/caddy/Caddyfile"}}{{.Source}}{{end}}{{end}}' "$PROXY_CONTAINER")"
+  if [[ -z "$CADDYFILE" ]]; then
+    CADDYDIR="$(docker inspect -f '{{range .Mounts}}{{if eq .Destination "/etc/caddy"}}{{.Source}}{{end}}{{end}}' "$PROXY_CONTAINER")"
+    [[ -n "$CADDYDIR" ]] && CADDYFILE="$CADDYDIR/Caddyfile"
+  fi
+  BLOCK="$DOMAIN {
+	# Built-in webinar of the commissions platform (deploy/webinar/install.sh)
+	reverse_proxy kx-webinar-web-1:80
+}"
+  if [[ -z "$CADDYFILE" || ! -f "$CADDYFILE" ]]; then
+    echo "فایل Caddyfile این کانتینر پیدا نشد. این بخش را خودتان به Caddyfile اضافه کنید و Caddy را reload کنید:"
+    echo "$BLOCK"
+  elif grep -qE "^[[:space:]]*$DOMAIN[[:space:]]*\{" "$CADDYFILE"; then
+    echo "دامنه $DOMAIN از قبل در $CADDYFILE تعریف شده است؛ تغییری داده نشد."
+  else
+    cp "$CADDYFILE" "$CADDYFILE.bak.$(date +%Y%m%d%H%M%S)"
+    printf '\n%s\n' "$BLOCK" >> "$CADDYFILE"
+    echo "به $CADDYFILE اضافه شد (نسخه پشتیبان کنار همان فایل است)."
+  fi
+  # The container may see the file through a directory mount; reload validates before applying.
+  if ! docker exec "$PROXY_CONTAINER" caddy reload --config /etc/caddy/Caddyfile --adapter caddyfile; then
+    echo "reload ناموفق بود؛ Caddy را دوباره اجرا می‌کنم."
+    docker restart "$PROXY_CONTAINER" >/dev/null
+  fi
+  echo "نکته: اگر کانتینر $PROXY_CONTAINER از نو ساخته شود (docker compose up در پروژه دیگر)، این اسکریپت را دوباره اجرا کنید تا اتصال شبکه برقرار بماند."
+fi
+
 # ── Connect the platform ─────────────────────────────────────────────────────
 if [[ -f "$ROOT/.env" ]]; then
   say "اتصال سامانه کمیسیون‌ها به وبینار"
@@ -154,7 +222,7 @@ fi
 
 say "صبر برای صدور گواهی SSL و آماده شدن https://$DOMAIN"
 for _ in $(seq 1 36); do
-  if curl -fsS --max-time 5 -o /dev/null "https://$DOMAIN/config.js"; then
+  if curl -fs --max-time 5 -o /dev/null "https://$DOMAIN/config.js"; then
     printf '\n\033[1;32m✓ وبینار آماده است: https://%s\033[0m\n' "$DOMAIN"
     echo "از این پس در جلسات «آنلاین» و «ترکیبی» دکمه «ورود به وبینار» در سامانه و اپ نمایش داده می‌شود."
     exit 0
