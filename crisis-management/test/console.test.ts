@@ -76,6 +76,22 @@ describe('user administration with Shahkar', () => {
     expect((await api().get('/api/console/incidents').set(bearer(ut))).status).toBe(200);
   });
 
+  it('issues a working temporary password on reset, unlocks the account and ends its sessions', async () => {
+    const admin = await staff(['security_admin']);
+    const t = await consoleLogin(admin.username!);
+    const user = await staff(['operator']);
+    const old = await consoleLogin(user.username!);
+    await pool.query(`UPDATE users SET locked_until = now() + interval '1 hour' WHERE id = $1`, [user.id]);
+
+    const r = await api().post(`/api/console/users/${user.id}/reset-password`).set(bearer(t));
+    expect(r.status).toBe(200);
+    expect(r.body.temporaryPassword).toMatch(/^Tmp-[A-HJ-NP-Za-km-np-z2-9]{12}#\d{2}$/);
+    expect((await api().get('/api/console/me').set(bearer(old))).status).toBe(401);
+
+    const ut = await consoleLogin(user.username!, r.body.temporaryPassword);
+    expect((await api().get('/api/console/me').set(bearer(ut))).body.passwordChangeRequired).toBe(true);
+  });
+
   it('re-verifies Shahkar when an administrator changes a mobile, and resets app enrolment', async () => {
     const admin = await staff(['security_admin']);
     const t = await consoleLogin(admin.username!);

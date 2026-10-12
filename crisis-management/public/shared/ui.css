@@ -40,3 +40,4 @@ th { color: var(--muted); font-weight: 600; font-size: 13px; }
 .otp { letter-spacing: 8px; text-align: center; font-size: 22px; direction: ltr; }
 .ltr { direction: ltr; text-align: left; }
 .stat { font-size: 26px; font-weight: 700; }
+.temppw { font-family: ui-monospace, Consolas, monospace; font-size: 20px; letter-spacing: 1px; background: var(--chip); border-radius: 8px; padding: 8px 12px; user-select: all; }

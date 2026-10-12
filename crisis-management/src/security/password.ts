@@ -31,9 +31,13 @@ export function verifyPassword(pw: string, hash: string | null): Promise<boolean
   return bcrypt.compare(pw, hash ?? (dummyHash ??= bcrypt.hashSync(randomToken(), config.BCRYPT_COST)));
 }
 
+/** Characters that cannot be confused when read aloud or typed by hand (no 0/O, 1/l/I, -/_). */
+const TEMP_ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789';
+
 /** One-time password issued by the user administrator; the user must change it on first console sign-in. */
 export function temporaryPassword(): string {
-  return `Tmp-${randomToken(9)}#${randomInt(10, 100)}`;
+  const body = Array.from({ length: 12 }, () => TEMP_ALPHABET[randomInt(TEMP_ALPHABET.length)]).join('');
+  return `Tmp-${body}#${randomInt(10, 100)}`;
 }
 
 export async function assertNotReused(db: Db, userId: string, pw: string, history: number): Promise<void> {

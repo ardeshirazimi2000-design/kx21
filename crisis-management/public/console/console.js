@@ -431,7 +431,12 @@ async function userCreateForm() {
 }
 
 function showTempPassword(pw, msg) {
-  modal('نتیجه', h('div', {}, h('p', { class: 'okmsg' }, msg), pw ? h('div', {}, h('p', {}, 'رمز موقت (فقط یک‌بار نمایش داده می‌شود؛ به‌صورت امن به کاربر تحویل دهید):'), h('p', { class: 'ltr chip' }, pw)) : null));
+  const copied = h('span', { class: 'small muted' });
+  const copy = () => navigator.clipboard?.writeText(pw).then(() => { copied.textContent = 'کپی شد'; }, () => { copied.textContent = 'کپی نشد؛ رمز را دستی یادداشت کنید'; });
+  modal('نتیجه', h('div', {}, h('p', { class: 'okmsg' }, msg), pw ? h('div', {},
+    h('p', {}, 'رمز موقت (فقط یک‌بار نمایش داده می‌شود؛ به‌صورت امن به کاربر تحویل دهید). کاربر در اولین ورود باید آن را تغییر دهد:'),
+    h('p', { class: 'ltr temppw' }, pw),
+    h('div', { class: 'row' }, h('button', { class: 'btn', type: 'button', onclick: copy }, 'کپی رمز'), copied)) : null));
 }
 
 async function userDetail(id) {
@@ -479,7 +484,7 @@ async function userDetail(id) {
           districtId: d.districtId ? Number(d.districtId) : null, username: d.username || undefined,
           consoleAccess: !!d.consoleAccess, appAccess: !!d.appAccess, allowedCidrs: cidrList(d.allowedCidrs),
         });
-        if (r.temporaryPassword) showTempPassword(r.temporaryPassword, 'دسترسی کنسول فعال شد.');
+        if (r.temporaryPassword) return () => showTempPassword(r.temporaryPassword, 'دسترسی کنسول فعال شد.');
       });
     });
     sections.push(ef);
@@ -492,9 +497,14 @@ async function userDetail(id) {
     }
     ops.prepend(reason);
     if (u.locked) ops.append(h('button', { class: 'btn', onclick: () => act(() => api.post(`/users/${id}/unlock`)) }, 'بازگشایی قفل'));
-    if (u.console_access) ops.append(h('button', { class: 'btn', onclick: () => act(async () => showTempPassword((await api.post(`/users/${id}/reset-password`)).temporaryPassword, 'رمز بازنشانی شد.')) }, 'بازنشانی رمز'));
+    if (u.console_access) {
+      ops.append(h('button', { class: 'btn', onclick: () => {
+        if (!confirm('رمز فعلی کاربر باطل و یک رمز موقت جدید صادر می‌شود. ادامه می‌دهید؟')) return;
+        act(async () => { const r = await api.post(`/users/${id}/reset-password`); return () => showTempPassword(r.temporaryPassword, 'رمز بازنشانی شد و نشست‌های کنسول کاربر خاتمه یافت.'); });
+      } }, 'بازنشانی رمز'));
+    }
   }
-  if (can('shahkar.inquire')) ops.append(h('button', { class: 'btn', onclick: () => act(async () => { const r = await api.post(`/users/${id}/shahkar`); showTempPassword(null, r.matched ? 'تطابق شاهکار تأیید شد.' : 'عدم تطابق شاهکار — حساب تعلیق شد.'); }) }, 'استعلام مجدد شاهکار'));
+  if (can('shahkar.inquire')) ops.append(h('button', { class: 'btn', onclick: () => act(async () => { const r = await api.post(`/users/${id}/shahkar`); return () => showTempPassword(null, r.matched ? 'تطابق شاهکار تأیید شد.' : 'عدم تطابق شاهکار — حساب تعلیق شد.'); }) }, 'استعلام مجدد شاهکار'));
   sections.push(h('div', {}, h('h2', {}, 'عملیات'), ops));
 
   if (can('sessions.manage')) {
@@ -506,8 +516,15 @@ async function userDetail(id) {
         h('td', {}, s.revoked_at ? h('span', { class: 'chip' }, `باطل: ${s.revoked_reason}`) : h('button', { class: 'btn link', onclick: () => act(() => api.del(`/users/${id}/sessions/${s.id}`)) }, 'ابطال')))))))));
   }
   const close = modal(`${u.first_name} ${u.last_name}`, h('div', {}, ...sections, err));
+  /** Runs an action, then reopens the refreshed details; a returned callback (e.g. a result dialog) runs last so it stays on top. */
   function act(fn) {
-    guarded(err, async () => { await fn(); close(); usersPage(); userDetail(id); });
+    guarded(err, async () => {
+      const after = await fn();
+      close();
+      usersPage();
+      await userDetail(id);
+      if (typeof after === 'function') after();
+    });
   }
 }
 
