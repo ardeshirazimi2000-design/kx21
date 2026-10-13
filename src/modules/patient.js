@@ -152,6 +152,17 @@ export function register(router, { db, keys, platform, domain }) {
     requireUser(ctx, 'patient');
     const b = ctx.body;
     const existing = patientByUser(ctx.user.sub);
+    // Civil-registry check on first profile save: the official name replaces the typed one.
+    if (!existing && b.dob) {
+      const v = await domain.identity.verifyPerson(ctx, b.dob);
+      if (v.verified) b.full_name = undefined;
+    }
+    const reg = db.get('SELECT registry_verified_at, birth_date, full_name FROM users WHERE id = ?', ctx.user.sub);
+    if (reg?.registry_verified_at) {
+      if (b.full_name !== undefined && b.full_name !== reg.full_name) throw badRequest('نام از ثبت احوال دریافت شده و قابل تغییر نیست', 'name_locked');
+      if (b.dob !== undefined && b.dob !== reg.birth_date) throw badRequest('تاریخ تولد از ثبت احوال تأیید شده و قابل تغییر نیست', 'dob_locked');
+      b.full_name = undefined;
+    }
     if (b.full_name !== undefined) {
       if (typeof b.full_name !== 'string' || b.full_name.trim().length < 2 || b.full_name.length > 100) {
         throw badRequest('نام و نام خانوادگی معتبر نیست');
@@ -180,7 +191,7 @@ export function register(router, { db, keys, platform, domain }) {
         if (verifiedNid && b.national_id && normalizeFa(b.national_id) !== verifiedNid) {
           throw badRequest('کد ملی با کد ملی تأییدشده هنگام ثبت‌نام یکسان نیست', 'national_id_mismatch');
         }
-        requireFields({ ...b, national_id: verifiedNid ?? b.national_id }, ['full_name', 'national_id', 'dob']);
+        requireFields({ ...b, full_name: reg?.registry_verified_at ? reg.full_name : b.full_name, national_id: verifiedNid ?? b.national_id }, ['full_name', 'national_id', 'dob']);
         const nid = verifiedNid ?? normalizeFa(b.national_id);
         if (!isValidNationalId(nid)) throw badRequest('کد ملی معتبر نیست', 'invalid_national_id');
         const id = uuid();

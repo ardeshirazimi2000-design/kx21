@@ -144,8 +144,6 @@ export function register(router, { db, keys, platform, config, limiter, domain }
         );
         if (reg.role === 'doctor') domain.patient.createDoctorDraft(ctx.tenantId, user.id);
       });
-      const who = await domain.identity.inquireIdentity({ nationalId: nid });
-      if (who?.full_name) db.run('UPDATE users SET full_name = ? WHERE id = ?', who.full_name, user.id);
       user = db.get('SELECT * FROM users WHERE id = ?', user.id);
       platform.publish(ctx, 'user.registered', { user_id: user.id, role: user.role });
       justRegistered = true;
@@ -197,13 +195,46 @@ export function register(router, { db, keys, platform, config, limiter, domain }
 
   router.get('/v1/auth/me', async (ctx) => {
     requireUser(ctx);
-    const user = db.get('SELECT id, role, phone, email, full_name, mfa_enabled, identity_verified_at, identity_source FROM users WHERE id = ?', ctx.user.sub);
+    const user = db.get('SELECT id, role, phone, email, full_name, mfa_enabled, identity_verified_at, identity_source, registry_verified_at, birth_date FROM users WHERE id = ?', ctx.user.sub);
     const doc = db.get('SELECT id, status, review_reason FROM doctors WHERE user_id = ?', ctx.user.sub);
     return {
       body: {
-        ...user, patient_id: ctx.user.pid ?? null, doctor_id: doc?.id ?? ctx.user.did ?? null,
+        ...user, person_info_enabled: domain.identity.personInfoEnabled, patient_id: ctx.user.pid ?? null, doctor_id: doc?.id ?? ctx.user.did ?? null,
         doctor_status: doc?.status ?? null, doctor_review_reason: doc?.review_reason ?? null,
       },
     };
   });
+
+  // Civil-registry check (ثبت احوال): verified national id + birth date → official name, which then
+  // replaces whatever the user typed and can no longer be edited by them.
+  router.post('/v1/auth/identity/person', async (ctx) => {
+    requireUser(ctx);
+    return { body: await verifyPerson(ctx, ctx.body.birth_date) };
+  });
+
+  async function verifyPerson(ctx, dobIso) {
+    const u = db.get('SELECT national_id_enc, full_name, registry_verified_at, birth_date FROM users WHERE id = ?', ctx.user.sub);
+    if (u.registry_verified_at) {
+      if (dobIso && dobIso !== u.birth_date) throw badRequest('تاریخ تولد با اطلاعات ثبت احوال یکسان نیست', 'identity_mismatch');
+      return { verified: true, full_name: u.full_name, birth_date: u.birth_date };
+    }
+    if (!domain.identity.personInfoEnabled) return { verified: false, skipped: true };
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(String(dobIso ?? '')) || isNaN(Date.parse(dobIso)) || dobIso > nowIso()) {
+      throw badRequest('تاریخ تولد معتبر نیست');
+    }
+    if (!u.national_id_enc) throw badRequest('کد ملی تأییدشده‌ای برای این حساب ثبت نشده است');
+    limiter.hit(`person:${ctx.user.sub}`, 5, 24 * 3600 * 1000);
+    const nid = unseal(keys, u.national_id_enc);
+    const p = await domain.identity.inquirePerson({ nationalId: nid, dobIso });
+    if (!p.found) {
+      platform.audit(ctx, 'identity.person_mismatch', `user:${ctx.user.sub}`);
+      throw new ApiError(422, 'identity_mismatch',
+        `تاریخ تولد با اطلاعات ثبت احوال برای این کد ملی مطابقت ندارد${p.message ? ` (${p.message})` : ''}`);
+    }
+    if (p.deceased) throw new ApiError(422, 'identity_deceased', 'این کد ملی در ثبت احوال به‌عنوان فوت‌شده ثبت شده است');
+    db.run('UPDATE users SET full_name = ?, birth_date = ?, registry_verified_at = ? WHERE id = ?', p.full_name, dobIso, nowIso(), ctx.user.sub);
+    platform.audit(ctx, 'identity.person_verified', `user:${ctx.user.sub}`);
+    return { verified: true, full_name: p.full_name, birth_date: dobIso };
+  }
+  domain.identity.verifyPerson = verifyPerson;
 }

@@ -282,7 +282,7 @@ VIEWS.onboarding = async () => {
     if (!consents.telehealth.checked) return toast('برای استفاده از ویزیت آنلاین، پذیرش رضایت‌نامه ویزیت از راه دور لازم است', true);
     if (!f.dob.value) return toast('تاریخ تولد را کامل انتخاب کنید (روز، ماه و سال)', true);
     await api('PUT', '/v1/patients/me', {
-      full_name: f.full_name.value, ...(me.identity_verified_at ? {} : { national_id: f.national_id.value }), dob: f.dob.value,
+      ...(me.person_info_enabled ? {} : { full_name: f.full_name.value }), ...(me.identity_verified_at ? {} : { national_id: f.national_id.value }), dob: f.dob.value,
       gender: f.gender.value || null, allergies: split(f.allergies.value), chronic_conditions: split(f.chronic.value),
     });
     for (const [type, cb] of Object.entries(consents)) if (cb.checked) await api('POST', '/v1/patients/me/consents', { type });
@@ -294,7 +294,9 @@ VIEWS.onboarding = async () => {
     h('h2', {}, 'تکمیل پروفایل'),
     h('p', { class: 'muted' }, 'کد ملی به‌صورت رمزنگاری‌شده و در داخل کشور نگهداری می‌شود.'),
     h('div', { class: 'grid2' },
-      h('div', {}, h('label', {}, 'نام و نام خانوادگی *'), f.full_name),
+      me.person_info_enabled
+        ? h('div', {}, h('label', {}, 'نام و نام خانوادگی'), h('p', { class: 'muted' }, 'پس از ثبت، از روی کد ملی و تاریخ تولد از ثبت احوال دریافت می‌شود.'))
+        : h('div', {}, h('label', {}, 'نام و نام خانوادگی *'), f.full_name),
       me.identity_verified_at
         ? h('div', {}, h('label', {}, 'کد ملی'), h('p', {}, `✓ تأییدشده با ${me.identity_source === 'shahkar' ? 'سامانه شاهکار' : 'استعلام آزمایشی'} هنگام ثبت‌نام`))
         : h('div', {}, h('label', {}, 'کد ملی *'), f.national_id),

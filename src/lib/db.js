@@ -312,6 +312,7 @@ const COLUMNS = {
   users: [
     ['national_id_enc', 'BLOB'], ['national_id_hash', 'BLOB'],
     ['identity_verified_at', 'TEXT'], ['identity_source', 'TEXT'],
+    ['registry_verified_at', 'TEXT'], ['birth_date', 'TEXT'], // civil-registry (PersonInfo) check: name is locked after it
   ],
   doctors: [
     ['status', "TEXT NOT NULL DEFAULT 'approved'"], // draft | pending_review | approved | rejected | suspended

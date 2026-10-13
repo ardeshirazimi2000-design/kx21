@@ -1,3 +1,4 @@
+import { jalaliPicker, todayJalali, formatJalaliDate } from './jalali.js';
 // Views added for the second requirements document (app.docx):
 //   doctor self-onboarding (profile, photo, medical-council card, status/rejection reason),
 //   admin credential review, admin settings (tariffs) and payments, doctor directory and
@@ -75,6 +76,23 @@ export function installV2(x) {
   };
 
   // ---------------------------------------------------------------- doctor: profile & documents
+  // Civil-registry (ثبت احوال) check: birth date + verified national id → official name.
+  function registryBox(d, readOnly) {
+    if (d.registry_verified) return h('div', { class: 'banner info' }, `✓ هویت در ثبت احوال تأیید شد (تاریخ تولد ${formatJalaliDate(d.birth_date)}).`);
+    if (!d.person_info_enabled || readOnly) return null;
+    let dob = null;
+    return h('div', { class: 'banner warn stack' },
+      h('b', {}, 'استعلام هویت از ثبت احوال (الزامی)'),
+      h('span', {}, 'تاریخ تولد را وارد کنید؛ نام شما از ثبت احوال دریافت و در پروفایل ثبت می‌شود.'),
+      jalaliPicker(h, { id: 'reg-dob', label: 'تاریخ تولد', minYear: todayJalali().jy - 100, onchange: (iso) => { dob = iso; } }),
+      h('button', { class: 'btn primary', onclick: guard(async () => {
+        if (!dob) throw new Error('تاریخ تولد را کامل انتخاب کنید');
+        await api('PUT', '/v1/doctors/me/profile', { birth_date: dob });
+        toast('هویت تأیید شد');
+        route('doctor-profile');
+      }) }, 'استعلام'));
+  }
+
   VIEWS['doctor-profile'] = async () => {
     const [d, specs] = await Promise.all([api('GET', '/v1/doctors/me/profile'), api('GET', '/v1/specialties')]);
     const s = x.getSession();
@@ -85,7 +103,7 @@ export function installV2(x) {
     const locked = d.status === 'pending_review';
     const approved = d.status === 'approved';
     const f = {
-      full_name: h('input', { type: 'text', value: d.full_name ?? '', disabled: locked || approved }),
+      full_name: h('input', { type: 'text', value: d.full_name ?? '', disabled: locked || approved || d.registry_verified }),
       specialty: h('select', { disabled: locked || approved }, specs.items.map((s) => h('option', { value: s.code, selected: s.code === d.specialty }, s.label))),
       license_no: h('input', { type: 'text', dir: 'ltr', value: d.license_no ?? '', disabled: locked || approved, placeholder: 'مثلاً 123456' }),
       education: h('textarea', { rows: 2, disabled: locked, placeholder: 'مثلاً دکترای حرفه‌ای پزشکی دانشگاه تهران؛ تخصص پوست …' }, d.education ?? ''),
@@ -114,15 +132,16 @@ export function installV2(x) {
     }[d.status];
     const save = async () => {
       const body = { education: f.education.value, experience_years: f.experience_years.value === '' ? null : Number(f.experience_years.value), bio: f.bio.value, photo_file_id: photoId };
-      if (!approved) Object.assign(body, { full_name: f.full_name.value, specialty: f.specialty.value, license_no: f.license_no.value, license_card_file_id: cardId });
+      if (!approved) Object.assign(body, { ...(d.registry_verified ? {} : { full_name: f.full_name.value }), specialty: f.specialty.value, license_no: f.license_no.value, license_card_file_id: cardId });
       return api('PUT', '/v1/doctors/me/profile', body);
     };
     x.$app.append(
       h('div', { class: 'card' }, h('div', { class: 'row' }, h('h2', { class: 'grow' }, 'پروفایل و مدارک پزشک'), h('span', { class: `pill ${approved ? 'ok' : d.status === 'rejected' ? 'danger' : 'warn'}` }, d.status_label)),
         banner, d.identity_verified ? h('p', { class: 'muted' }, `✓ هویت با ${d.identity_source === 'shahkar' ? 'استعلام شاهکار' : 'استعلام آزمایشی'} تأیید شده است.`) : null),
       h('div', { class: 'card stack' },
+        registryBox(d, locked || approved),
         h('div', { class: 'grid2' },
-          h('div', {}, h('label', {}, 'نام و نام خانوادگی *'), f.full_name),
+          h('div', {}, h('label', {}, d.registry_verified ? 'نام و نام خانوادگی (از ثبت احوال)' : 'نام و نام خانوادگی *'), f.full_name),
           h('div', {}, h('label', {}, 'تخصص *'), f.specialty),
           h('div', {}, h('label', {}, 'شماره نظام پزشکی *'), f.license_no),
           h('div', {}, h('label', {}, 'سابقه کار (سال)'), f.experience_years)),
@@ -168,7 +187,7 @@ export function installV2(x) {
         h('div', { class: 'grid2', style: 'margin-top:12px' },
           h('div', {}, h('label', {}, 'شماره نظام پزشکی'), h('bdi', {}, d.license_no || '—')),
           h('div', {}, h('label', {}, 'موبایل'), h('bdi', {}, d.phone)),
-          h('div', {}, h('label', {}, 'تأیید هویت'), d.identity_verified ? `✓ ${d.identity_source === 'shahkar' ? 'شاهکار' : 'آزمایشی'}` : '—'),
+          h('div', {}, h('label', {}, 'تأیید هویت'), d.identity_verified ? `✓ ${d.identity_source === 'shahkar' ? 'شاهکار' : 'آزمایشی'}` : '—', d.registry_verified ? ' · ✓ ثبت احوال' : ''),
           h('div', {}, h('label', {}, 'سابقه'), d.experience_years != null ? `${fa(d.experience_years)} سال` : '—')),
         h('h3', { style: 'margin-top:12px' }, 'تحصیلات'), h('p', {}, d.education ?? '—'),
         h('h3', {}, 'رزومه'), h('p', { style: 'white-space:pre-wrap' }, d.bio ?? '—'),

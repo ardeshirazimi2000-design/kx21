@@ -21,11 +21,12 @@ export function register(router, { db, platform, domain }) {
   };
 
   const fullView = (d) => {
-    const u = db.get('SELECT full_name, phone, identity_verified_at, identity_source FROM users WHERE id = ?', d.user_id);
+    const u = db.get('SELECT full_name, phone, identity_verified_at, identity_source, registry_verified_at, birth_date FROM users WHERE id = ?', d.user_id);
     return {
       ...domain.patient.doctorView(d),
       phone: u?.phone,
       identity_verified: !!u?.identity_verified_at, identity_source: u?.identity_source ?? null,
+      registry_verified: !!u?.registry_verified_at, birth_date: u?.birth_date ?? null, person_info_enabled: domain.identity.personInfoEnabled,
       license_no: String(d.license_no).startsWith('pending-') ? '' : d.license_no,
       license_card_url: d.license_card_file_id ? files.signedUrl(d.license_card_file_id) : null,
       photo_file_id: d.photo_file_id, license_card_file_id: d.license_card_file_id,
@@ -52,7 +53,15 @@ export function register(router, { db, platform, domain }) {
       if (locked.length) throw conflict('پس از تأیید، نام، تخصص، شماره نظام پزشکی و کارت نظام پزشکی فقط با درخواست به مدیر قابل تغییر است', 'locked_fields');
     }
     const up = {};
-    if (b.full_name !== undefined) {
+    if (b.birth_date !== undefined) {
+      const v = await domain.identity.verifyPerson(ctx, b.birth_date);
+      if (v.verified) b.full_name = undefined;
+    }
+    const reg = db.get('SELECT registry_verified_at, full_name FROM users WHERE id = ?', d.user_id);
+    if (reg?.registry_verified_at && b.full_name !== undefined && String(b.full_name).trim() !== reg.full_name) {
+      throw badRequest('نام از ثبت احوال دریافت شده و قابل تغییر نیست', 'name_locked');
+    }
+    if (b.full_name !== undefined && !reg?.registry_verified_at) {
       const n = String(b.full_name).trim();
       if (n.length < 3 || n.length > 100) throw badRequest('نام و نام خانوادگی معتبر نیست');
       db.run('UPDATE users SET full_name = ? WHERE id = ?', n, d.user_id);
@@ -91,9 +100,10 @@ export function register(router, { db, platform, domain }) {
   router.post('/v1/doctors/me/submit', async (ctx) => {
     const d = myDoctor(ctx);
     if (!['draft', 'rejected'].includes(d.status)) throw conflict('پرونده در وضعیت قابل ارسال نیست', 'invalid_status');
-    const u = db.get('SELECT full_name FROM users WHERE id = ?', d.user_id);
+    const u = db.get('SELECT full_name, registry_verified_at FROM users WHERE id = ?', d.user_id);
     const missing = [];
     if (!u?.full_name) missing.push('نام و نام خانوادگی');
+    if (domain.identity.personInfoEnabled && !u.registry_verified_at) missing.push('استعلام هویت از ثبت احوال (تاریخ تولد)');
     if (String(d.license_no).startsWith('pending-')) missing.push('شماره نظام پزشکی');
     if (!d.license_card_file_id) missing.push('تصویر کارت نظام پزشکی');
     if (!d.photo_file_id) missing.push('عکس پروفایل');

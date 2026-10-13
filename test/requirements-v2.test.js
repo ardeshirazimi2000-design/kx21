@@ -4,7 +4,7 @@ import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { startApp, randomNationalId } from './helpers.js';
 import { DEMO_ACCOUNTS } from '../src/seed.js';
-import { readVerdict, createIdentityService } from '../src/modules/identity.js';
+import { readVerdict, readPerson, createIdentityService } from '../src/modules/identity.js';
 import { reviewLabRows } from '../src/modules/ai/lab-review.js';
 
 let t;
@@ -41,6 +41,41 @@ test('Shahkar adapter: mismatch is refused; production without token fails close
   await assert.rejects(denied.verifyMobileOwnership({ nationalId: '0499370899', mobile: '09121234567' }), /توکن/);
   const prod = createIdentityService({ sapiToken: '', devMode: false });
   await assert.rejects(prod.verifyMobileOwnership({ nationalId: '0499370899', mobile: '09121234567' }), /پیکربندی نشده/);
+});
+
+test('PersonInfo (civil registry): reply parsing and Jalali birth date sent to s.api.ir', async () => {
+  assert.deepEqual(readPerson({ data: { firstName: 'علی', lastName: 'رضایی' }, success: true, code: 0 }).full_name, 'علی رضایی');
+  assert.equal(readPerson({ data: null, success: false, code: 3, message: 'یافت نشد' }).found, false);
+  assert.equal(readPerson({ data: { isDead: true, firstName: 'ا', lastName: 'ب' }, success: true, code: 0 }).deceased, true);
+  assert.equal(readPerson({ data: { foo: 1 }, success: true, code: 0 }), undefined);
+  let sent;
+  const fake = async (url, init) => { sent = { url, body: JSON.parse(init.body) }; return { ok: true, status: 200, text: async () => '{"data":{"firstName":"علی","lastName":"رضایی"},"success":true,"code":0}' }; };
+  const svc = createIdentityService({ sapiToken: 'x', sapiBase: 'https://s.api.ir/api/sw1', devMode: false }, fake);
+  assert.equal((await svc.inquirePerson({ nationalId: '0499370899', dobIso: '1992-03-21' })).full_name, 'علی رضایی');
+  assert.deepEqual(sent, { url: 'https://s.api.ir/api/sw1/PersonInfo', body: { nationalCode: '0499370899', birthDate: '1371/1/1' } });
+});
+
+test('patient onboarding takes the official name from the registry and locks it', async () => {
+  const idsvc = t.app.domain.identity;
+  const saved = { enabled: idsvc.personInfoEnabled, inquire: idsvc.inquirePerson };
+  idsvc.personInfoEnabled = true;
+  idsvc.inquirePerson = async ({ dobIso }) => (dobIso === '1992-03-21' ? { found: true, full_name: 'علی رضایی' } : { found: false, message: 'عدم تطابق' });
+  try {
+    const phone = `0935${String(Math.floor(1e6 + Math.random() * 8e6)).padStart(7, '0')}`;
+    const token = await t.login(phone, { nationalId: randomNationalId() });
+    assert.equal((await t.call('GET', '/v1/auth/me', { token })).body.person_info_enabled, true);
+    const bad = await t.call('PUT', '/v1/patients/me', { token, body: { dob: '1990-01-01' } });
+    assert.equal(bad.status, 422);
+    assert.equal(bad.body.code, 'identity_mismatch');
+    const ok = await t.call('PUT', '/v1/patients/me', { token, body: { full_name: 'نام دلخواه', dob: '1992-03-21' } });
+    assert.equal(ok.status, 201);
+    const me = (await t.call('GET', '/v1/auth/me', { token })).body;
+    assert.equal(me.full_name, 'علی رضایی');
+    assert.ok(me.registry_verified_at);
+    assert.equal((await t.call('PUT', '/v1/patients/me', { token, body: { full_name: 'دیگری' } })).body.code, 'name_locked');
+  } finally {
+    Object.assign(idsvc, { personInfoEnabled: saved.enabled, inquirePerson: saved.inquire });
+  }
 });
 
 test('doctor self-registration → documents → admin reject with reason → resubmit → approve → listed', async () => {
