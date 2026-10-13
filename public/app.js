@@ -3,6 +3,7 @@
 
 import { openTriageWizard, triageResultCard } from './triage-wizard.js';
 import { mediaSupported, startCall } from './video-call.js';
+import { installV2 } from './views-v2.js';
 import { jalaliPicker, formatJalaliDate, todayJalali, isoToJalali, MONTHS } from './jalali.js';
 
 // ---------------- utilities ----------------
@@ -51,7 +52,7 @@ const fmt = {
 const tehranDayKey = (iso) => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Tehran' }).format(new Date(iso));
 
 const LABELS = {
-  status: { pending: ['در انتظار', 'warn'], confirmed: ['تأییدشده', 'ok'], cancelled: ['لغوشده', ''], completed: ['انجام‌شده', 'info'], no_show: ['عدم حضور', 'danger'] },
+  status: { pending: ['در انتظار پرداخت', 'warn'], confirmed: ['تأییدشده', 'ok'], cancelled: ['لغوشده', ''], completed: ['انجام‌شده', 'info'], no_show: ['عدم حضور', 'danger'] },
   channel: { video: 'ویدیویی', audio: 'صوتی', chat: 'متنی' },
   mode: { INFO_MODE: 'اطلاع‌رسانی', TRIAGE_MODE: 'بررسی علائم', BOOKING_MODE: 'رزرو نوبت', EMERGENCY_MODE: 'اورژانس', FOLLOWUP_MODE: 'پیگیری' },
   urgency: { self_care: ['مراقبت در منزل', 'ok'], routine: ['غیرفوری', 'info'], urgent: ['فوری', 'warn'], emergency: ['اورژانسی', 'danger'] },
@@ -124,10 +125,11 @@ function installButton() {
 // ---------------- router ----------------
 let current = { view: null, cleanup: [] };
 const TABS = {
-  patient: [['assistant', 'دستیار هوشمند'], ['book', 'رزرو نوبت'], ['appointments', 'نوبت‌های من'], ['prescriptions', 'نسخه‌ها'], ['inbox', 'پیام‌ها'], ['profile', 'پروفایل و حریم خصوصی']],
-  doctor: [['doctor-appointments', 'نوبت‌ها'], ['calendar', 'تقویم'], ['doctor-rx', 'نسخه‌ها'], ['inbox', 'اعلان‌ها']],
+  patient: [['assistant', 'دستیار هوشمند'], ['doctors', 'پزشکان'], ['book', 'رزرو نوبت'], ['appointments', 'نوبت‌های من'], ['records', 'مدارک پزشکی'], ['prescriptions', 'نسخه‌ها'], ['inbox', 'پیام‌ها'], ['profile', 'پروفایل و حریم خصوصی']],
+  doctor: [['doctor-appointments', 'نوبت‌ها'], ['calendar', 'تقویم'], ['doctor-rx', 'نسخه‌ها'], ['doctor-profile', 'پروفایل و مدارک'], ['inbox', 'اعلان‌ها']],
+  doctor_pending: [['doctor-profile', 'پروفایل و مدارک'], ['inbox', 'اعلان‌ها']],
   operator: [['escalations', 'درخواست‌های ارجاع'], ['stats', 'آمار']],
-  admin: [['escalations', 'درخواست‌های ارجاع'], ['stats', 'آمار'], ['audit', 'لاگ ممیزی'], ['staff', 'کاربران']],
+  admin: [['admin-doctors', 'تأیید پزشکان'], ['settings', 'تعرفه‌ها'], ['payments', 'پرداخت‌ها'], ['escalations', 'درخواست‌های ارجاع'], ['stats', 'آمار'], ['audit', 'لاگ ممیزی'], ['staff', 'کاربران']],
 };
 
 function renderChrome() {
@@ -136,7 +138,8 @@ function renderChrome() {
   if (!session) return;
   const u = session.user;
   $user.append(h('span', {}, `${u.full_name || fa(u.phone)} · ${LABELS.role[u.role]}`), h('button', { class: 'btn small', onclick: logout }, 'خروج'));
-  for (const [id, label] of TABS[u.role] ?? []) {
+  const tabKey = u.role === 'doctor' && u.doctor_status && u.doctor_status !== 'approved' ? 'doctor_pending' : u.role;
+  for (const [id, label] of TABS[tabKey] ?? []) {
     $tabs.append(h('button', { 'aria-current': current.view === id ? 'page' : null, onclick: () => route(id) }, label));
   }
 }
@@ -164,38 +167,66 @@ VIEWS.home = async () => {
     try { await api('GET', '/v1/patients/me'); } catch (e) { if (e.code === 'profile_incomplete') return route('onboarding'); throw e; }
     return route('assistant');
   }
+  if (r === 'doctor') {
+    const me = await api('GET', '/v1/auth/me');
+    setSession({ ...session, user: { ...session.user, doctor_status: me.doctor_status, full_name: me.full_name } });
+    if (me.doctor_status !== 'approved') return route('doctor-profile');
+  }
   route(TABS[r][0][0]);
 };
 
 VIEWS.login = () => {
   let phone = '';
+  let role = null; // 'patient' | 'doctor' — chosen on the start screen
   let mfaToken = null;
   const box = h('div', { class: 'card narrow stack' });
   const hint = h('div', { class: 'muted' });
   const showDevCode = (code) => { if (code) hint.replaceChildren(h('div', { class: 'banner info' }, `محیط آزمایشی — کد: ${fa(code)}`)); };
+  const footer = () => (IS_NATIVE ? h('button', { class: 'btn small', onclick: () => route('server') }, `سرور: ${API_BASE.replace(/^https?:\/\//, '')} — تغییر`) : installButton());
 
-  const stepPhone = () => {
-    const input = h('input', { type: 'tel', dir: 'ltr', placeholder: '09121234567', autocomplete: 'tel', inputmode: 'tel' });
+  // Start screen: two entries, as in the requirements.
+  const stepRole = () => {
+    box.className = 'narrow stack';
+    box.replaceChildren(
+      h('div', { class: 'hero' }, h('img', { src: 'icon.svg', alt: '', width: 56, height: 56 }), h('h1', {}, 'کلینیک آنلاین'), h('p', { class: 'muted' }, 'ویزیت آنلاین با پزشک و دستیار هوشمند')),
+      h('button', { class: 'entry', onclick: () => { role = 'patient'; stepPhone(); } },
+        h('span', { class: 'entry-icon' }, '🧑'), h('span', {}, h('b', {}, 'ثبت‌نام و ورود بیماران'), h('br'), h('small', { class: 'muted' }, 'دریافت نوبت، ویزیت آنلاین، دستیار هوشمند'))),
+      h('button', { class: 'entry', onclick: () => { role = 'doctor'; stepPhone(); } },
+        h('span', { class: 'entry-icon' }, '👨‍⚕️'), h('span', {}, h('b', {}, 'ثبت‌نام و ورود پزشکان'), h('br'), h('small', { class: 'muted' }, 'پزشکان و کادر کلینیک'))),
+      config.dev_mode ? h('div', { class: 'banner info small' },
+        h('b', {}, 'حساب‌های نمونه (ورود پزشکان): '), 'پزشک ', h('bdi', {}, '09120000001'), ' · اپراتور ', h('bdi', {}, '09120000009'), ' · مدیر ', h('bdi', {}, '09120000010')) : null,
+      footer(),
+    );
+  };
+
+  const stepPhone = (needNid = false) => {
+    box.className = 'card narrow stack';
+    const input = h('input', { type: 'tel', dir: 'ltr', placeholder: '09121234567', autocomplete: 'tel', inputmode: 'tel', value: phone });
+    const nid = needNid ? h('input', { type: 'text', dir: 'ltr', inputmode: 'numeric', maxlength: 10, placeholder: 'کد ملی ۱۰ رقمی' }) : null;
     const submit = guard(async (e) => {
       e.preventDefault();
       phone = input.value.trim();
-      const r = await api('POST', '/v1/auth/otp/request', { phone });
-      stepCode();
+      const r = await api('POST', '/v1/auth/otp/request', { phone, role, ...(nid ? { national_id: nid.value.trim() } : {}) });
+      if (r.registration_required) { stepPhone(true); return; }
+      stepCode(r.registration);
       showDevCode(r.dev_code);
     });
     box.replaceChildren(
-      h('h2', {}, 'ورود / ثبت‌نام'),
-      h('p', { class: 'muted' }, 'شماره موبایل خود را وارد کنید. کد تأیید پیامک می‌شود.'),
-      h('form', { onsubmit: submit, class: 'stack' }, h('label', {}, 'شماره موبایل'), input, h('button', { class: 'btn primary block' }, 'دریافت کد')),
-      config.dev_mode ? h('div', { class: 'banner info' },
-        h('b', {}, 'حساب‌های نمونه: '), 'هر شماره جدید = بیمار · پزشک عمومی ', h('bdi', {}, '09120000001'), ' · پزشک قلب ', h('bdi', {}, '09120000002'),
-        ' · اپراتور ', h('bdi', {}, '09120000009'), ' · مدیر ', h('bdi', {}, '09120000010')) : null,
-      IS_NATIVE ? h('button', { class: 'btn small', onclick: () => route('server') }, `سرور: ${API_BASE.replace(/^https?:\/\//, '')} — تغییر`) : installButton(),
+      h('button', { class: 'btn small', type: 'button', onclick: stepRole }, '→ بازگشت'),
+      h('h2', {}, role === 'doctor' ? 'ورود / ثبت‌نام پزشکان' : 'ورود / ثبت‌نام بیماران'),
+      h('p', { class: 'muted' }, needNid
+        ? 'این شماره هنوز ثبت‌نام نشده است. برای ثبت‌نام کد ملی خود را وارد کنید؛ تطابق شماره موبایل با کد ملی از طریق سامانه شاهکار بررسی می‌شود. شماره باید به نام خود شما باشد.'
+        : 'شماره موبایل خود را وارد کنید. کد تأیید پیامک می‌شود.'),
+      h('form', { onsubmit: submit, class: 'stack' },
+        h('label', {}, 'شماره موبایل'), input,
+        nid ? h('label', {}, 'کد ملی') : null, nid,
+        h('button', { class: 'btn primary block' }, needNid ? 'استعلام و دریافت کد' : 'ادامه')),
+      footer(),
     );
-    input.focus();
+    (nid ?? input).focus();
   };
 
-  const stepCode = () => {
+  const stepCode = (registering = false) => {
     const input = h('input', { type: 'text', dir: 'ltr', inputmode: 'numeric', autocomplete: 'one-time-code', maxlength: 6 });
     const submit = guard(async (e) => {
       e.preventDefault();
@@ -205,10 +236,11 @@ VIEWS.login = () => {
     });
     box.replaceChildren(
       h('h2', {}, 'کد تأیید'),
+      registering ? h('div', { class: 'banner info' }, '✓ تطابق شماره موبایل و کد ملی در سامانه شاهکار تأیید شد.') : null,
       h('p', { class: 'muted' }, `کد ۶ رقمی ارسال‌شده به ${fa(phone)} را وارد کنید.`),
       hint,
       h('form', { onsubmit: submit, class: 'stack' }, input, h('button', { class: 'btn primary block' }, 'ورود')),
-      h('button', { class: 'btn small', onclick: stepPhone }, 'تغییر شماره'),
+      h('button', { class: 'btn small', onclick: () => stepPhone() }, 'تغییر شماره'),
     );
     input.focus();
   };
@@ -229,13 +261,14 @@ VIEWS.login = () => {
   };
 
   const done = (r) => { setSession(r); route('home'); };
-  stepPhone();
+  stepRole();
   $app.append(box);
 };
 
-VIEWS.onboarding = () => {
+VIEWS.onboarding = async () => {
+  const me = await api('GET', '/v1/auth/me').catch(() => ({}));
   const f = {
-    full_name: h('input', { type: 'text', autocomplete: 'name' }),
+    full_name: h('input', { type: 'text', autocomplete: 'name', value: me.full_name ?? '' }),
     national_id: h('input', { type: 'text', dir: 'ltr', inputmode: 'numeric', maxlength: 10 }),
     dob: { value: null }, // Gregorian ISO from the Jalali picker
     gender: h('select', {}, h('option', { value: '' }, '—'), h('option', { value: 'female' }, 'زن'), h('option', { value: 'male' }, 'مرد'), h('option', { value: 'other' }, 'سایر')),
@@ -249,7 +282,7 @@ VIEWS.onboarding = () => {
     if (!consents.telehealth.checked) return toast('برای استفاده از ویزیت آنلاین، پذیرش رضایت‌نامه ویزیت از راه دور لازم است', true);
     if (!f.dob.value) return toast('تاریخ تولد را کامل انتخاب کنید (روز، ماه و سال)', true);
     await api('PUT', '/v1/patients/me', {
-      full_name: f.full_name.value, national_id: f.national_id.value, dob: f.dob.value,
+      full_name: f.full_name.value, ...(me.identity_verified_at ? {} : { national_id: f.national_id.value }), dob: f.dob.value,
       gender: f.gender.value || null, allergies: split(f.allergies.value), chronic_conditions: split(f.chronic.value),
     });
     for (const [type, cb] of Object.entries(consents)) if (cb.checked) await api('POST', '/v1/patients/me/consents', { type });
@@ -262,7 +295,9 @@ VIEWS.onboarding = () => {
     h('p', { class: 'muted' }, 'کد ملی به‌صورت رمزنگاری‌شده و در داخل کشور نگهداری می‌شود.'),
     h('div', { class: 'grid2' },
       h('div', {}, h('label', {}, 'نام و نام خانوادگی *'), f.full_name),
-      h('div', {}, h('label', {}, 'کد ملی *'), f.national_id),
+      me.identity_verified_at
+        ? h('div', {}, h('label', {}, 'کد ملی'), h('p', {}, `✓ تأییدشده با ${me.identity_source === 'shahkar' ? 'سامانه شاهکار' : 'استعلام آزمایشی'} هنگام ثبت‌نام`))
+        : h('div', {}, h('label', {}, 'کد ملی *'), f.national_id),
       h('div', {}, h('label', { for: 'dob-d' }, 'تاریخ تولد (شمسی) *'), jalaliPicker(h, { id: 'dob', label: 'تاریخ تولد', minYear: todayJalali().jy - 120, onchange: (iso) => { f.dob.value = iso; } })),
       h('div', {}, h('label', {}, 'جنسیت'), f.gender),
       h('div', {}, h('label', {}, 'حساسیت‌ها (با ویرگول جدا کنید)'), f.allergies),
@@ -337,7 +372,10 @@ VIEWS.assistant = async () => {
     }
   };
 
-  const startWizard = guard(() => openTriageWizard({ h, api, toast, fa, onSubmit: (form) => send('📋 فرم بررسی علائم ارسال شد', form) }));
+  const startWizard = guard(async () => {
+    if (!(await V2.ensureTriagePaid())) return;
+    await openTriageWizard({ h, api, toast, fa, onSubmit: (form) => send('📋 فرم بررسی علائم ارسال شد', form) });
+  });
 
   async function send(text, form = null) {
     text = (text ?? input.value).trim();
@@ -377,7 +415,12 @@ VIEWS.assistant = async () => {
           else if (ev === 'triage_result') log.insertBefore(triageResultCard(h, data), chips);
           else if (ev === 'citation') cites.push(data.title);
           else if (ev === 'options') options = data.items;
-          else if (ev === 'escalation') chips.append(h('span', { class: 'chip' }, data.kind === 'emergency' ? '🚨 اپراتور مطلع شد' : '👤 به اپراتور ارجاع شد'));
+          else if (ev === 'payment') {
+            botEl.after(h('div', { class: 'chips' }, h('button', { class: 'btn primary small', onclick: guard(() => V2.pay(data.payment_id, {
+              title: data.purpose === 'triage' ? 'پرداخت هزینه ارزیابی علائم' : 'پرداخت هزینه ویزیت',
+              onPaid: () => toast(data.purpose === 'triage' ? 'اکنون می‌توانید علائم خود را بنویسید یا «بررسی علائم» را بزنید' : 'نوبت شما قطعی شد ✅'),
+            })) }, `💳 پرداخت ${fa(Math.round(data.amount / 10).toLocaleString('en-US'))} تومان`)));
+          } else if (ev === 'escalation') chips.append(h('span', { class: 'chip' }, data.kind === 'emergency' ? '🚨 اپراتور مطلع شد' : '👤 به اپراتور ارجاع شد'));
           else if (ev === 'error') throw new ApiErr(500, data);
           else if (ev === 'done') {
             setMode(data.mode);
@@ -460,7 +503,13 @@ VIEWS.book = async () => {
       const btn = e.currentTarget;
       btn.disabled = true;
       try {
-        await api('POST', '/v1/appointments', { doctor_id: chosen.doctor_id, slot_id: chosen.id, channel: channel.value }, { 'Idempotency-Key': key });
+        const a = await api('POST', '/v1/appointments', { doctor_id: chosen.doctor_id, slot_id: chosen.id, channel: channel.value }, { 'Idempotency-Key': key });
+        if (a.status === 'pending' && a.payment) {
+          toast('نوبت به‌طور موقت رزرو شد؛ پرداخت را انجام دهید');
+          route('appointments');
+          V2.pay(a.payment.id, { title: 'پرداخت هزینه ویزیت', onPaid: () => route('appointments') });
+          return;
+        }
         toast('نوبت شما ثبت شد ✅');
         route('appointments');
       } catch (err) {
@@ -494,7 +543,8 @@ function appointmentItem(a, role) {
     }, 'لغو'));
   }
   if (a.status === 'completed' && role === 'doctor') actions.push(h('button', { class: 'btn small', onclick: () => route('room', a.consultation.id) }, 'پرونده ویزیت'));
-  return h('li', {}, h('div', { class: 'row' },
+  if (role === 'patient' && ['pending', 'confirmed'].includes(a.status)) actions.push(h('button', { class: 'btn small', onclick: () => route('records') }, '📎 ارسال مدرک'));
+  return h('li', {}, role === 'patient' ? V2.paymentBanner(a, () => route('appointments')) : null, h('div', { class: 'row' },
     h('div', { class: 'grow' },
       h('b', {}, role === 'doctor' ? (a.patient?.full_name ?? 'بیمار') : a.doctor?.full_name), ' ',
       h('span', { class: 'muted' }, role === 'doctor' ? '' : a.doctor?.specialty_label), h('br'),
@@ -607,6 +657,7 @@ function callPanel(cid, info, join, isDoctor) {
 }
 
 async function doctorPanel(cid, info, ended) {
+  $app.append(await V2.doctorRecords(info.appointment_id).catch(() => h('div')));
   const patient = await api('GET', `/v1/patients/${info.patient_id}`).catch(() => null);
   if (patient) {
     $app.append(h('div', { class: 'card' }, h('h2', {}, 'پرونده بیمار'),
@@ -895,6 +946,28 @@ VIEWS.server = () => {
   input.focus();
 };
 
+// Views from the second requirements document (doctor onboarding, admin review, tariffs, payments, records).
+const V2 = { VIEWS, h, api, toast, fa, fmt, route, guard, onCleanup, every, apiUrl, IS_NATIVE, formatJalaliDate, $app, getSession: () => session, setSession, renderChrome };
+installV2(V2);
+// Book a slot from a doctor's profile page.
+V2.bookSlot = (slot) => {
+  const channel = h('select', {}, Object.entries(LABELS.channel).map(([k, v]) => h('option', { value: k }, v)));
+  const key = crypto.randomUUID();
+  const box = h('div', { class: 'wizard-overlay', role: 'dialog', 'aria-modal': 'true' }, h('div', { class: 'card pay-box stack' },
+    h('h2', {}, 'رزرو نوبت'), h('p', {}, h('b', {}, slot.doctor_name), ' — ', fmt.dt(slot.starts_at)),
+    h('label', {}, 'نوع ویزیت'), channel,
+    h('div', { class: 'row' },
+      h('button', { class: 'btn primary', onclick: guard(async () => {
+        const a = await api('POST', '/v1/appointments', { doctor_id: slot.doctor_id, slot_id: slot.id, channel: channel.value }, { 'Idempotency-Key': key });
+        box.remove();
+        route('appointments');
+        if (a.status === 'pending' && a.payment) V2.pay(a.payment.id, { title: 'پرداخت هزینه ویزیت', onPaid: () => route('appointments') });
+        else toast('نوبت شما ثبت شد ✅');
+      }) }, 'تأیید و رزرو'),
+      h('button', { class: 'btn', onclick: () => box.remove() }, 'انصراف'))));
+  document.body.append(box);
+};
+
 // ---------------- boot ----------------
 async function loadConfig() {
   config = await fetch(apiUrl('/v1/config')).then((r) => r.json()).catch(() => config);
@@ -908,5 +981,10 @@ async function loadConfig() {
   await loadConfig();
   const [view, arg] = location.hash.slice(1).split('/');
   if (!session) return route('login');
+  // Doctor approval can change while logged out of this device: refresh before drawing tabs.
+  if (session.user.role === 'doctor') {
+    const me = await api('GET', '/v1/auth/me').catch(() => null);
+    if (me) setSession({ ...session, user: { ...session.user, doctor_status: me.doctor_status, full_name: me.full_name } });
+  }
   route(view && VIEWS[view] && !['login', 'server'].includes(view) ? view : 'home', arg);
 })();

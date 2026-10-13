@@ -272,3 +272,44 @@ td.ltr { direction: ltr; text-align: left; font-family: ui-monospace, monospace;
 .call[data-state="connected"] .call-status { color: var(--ok); }
 .call-controls { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; }
 .call-controls .btn { min-height: 44px; }
+
+/* ---------------- start screen ---------------- */
+.hero { text-align: center; margin: 10px 0 18px; }
+.hero h1 { margin: 8px 0 2px; font-size: 24px; }
+.entry {
+  display: flex; align-items: center; gap: 14px; width: 100%; text-align: start; padding: 18px 16px;
+  border-radius: var(--radius); border: 1px solid var(--border); background: var(--surface); box-shadow: var(--shadow);
+  cursor: pointer; font: inherit; color: var(--text); margin-bottom: 12px;
+}
+.entry:hover { border-color: var(--primary); }
+.entry-icon { font-size: 34px; width: 54px; height: 54px; display: inline-flex; align-items: center; justify-content: center; border-radius: 14px; background: var(--primary-soft); }
+
+/* ---------------- doctors ---------------- */
+.avatar { width: 44px; height: 44px; border-radius: 50%; object-fit: cover; flex: none; }
+.avatar-lg { width: 88px; height: 88px; border-radius: 50%; object-fit: cover; }
+.avatar-xl { width: 128px; height: 128px; border-radius: 50%; object-fit: cover; }
+.ph { display: inline-flex; align-items: center; justify-content: center; background: var(--surface-2); font-size: 32px; }
+.avatar.ph { font-size: 20px; }
+.doc-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 12px; }
+.doc-card {
+  display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 16px 10px; text-align: center;
+  background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); cursor: pointer; font: inherit; color: var(--text);
+}
+.doc-card:hover { border-color: var(--primary); }
+.doc-profile { text-align: center; }
+.doc-profile h2 { margin-top: 10px; }
+.upload-prev { min-height: 90px; display: flex; align-items: center; justify-content: center; border: 1px dashed var(--border); border-radius: 12px; margin-bottom: 6px; padding: 8px; color: var(--muted); font-size: 13px; }
+.card-img { max-width: 100%; max-height: 360px; border-radius: 10px; border: 1px solid var(--border); }
+
+/* ---------------- records ---------------- */
+.thumbs { display: flex; flex-wrap: wrap; gap: 8px; margin: 8px 0; }
+.thumb { width: 84px; height: 84px; object-fit: cover; border-radius: 10px; border: 1px solid var(--border); display: inline-flex; align-items: center; justify-content: center; font-size: 13px; background: var(--surface-2); text-decoration: none; }
+.lab-row { display: grid; grid-template-columns: 2fr 1fr 1fr 1.5fr auto; gap: 6px; margin-bottom: 6px; }
+@media (max-width: 640px) { .lab-row { grid-template-columns: 1fr 1fr; } }
+.record { border-top: 1px solid var(--border); padding: 12px 0; }
+.record:first-of-type { border-top: 0; }
+.ai-review { margin-top: 8px; font-size: 14px; }
+.pay-box { max-width: 420px; width: calc(100% - 32px); margin: auto; }
+.record table, .card table { display: block; overflow-x: auto; max-width: 100%; }
+.card { overflow-wrap: anywhere; }
+main.container { overflow-x: hidden; }

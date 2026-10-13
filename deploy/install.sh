@@ -99,6 +99,13 @@ EOF
   chmod 600 "$ENV_FILE"
 fi
 sed -i "s/^PORT=.*/PORT=$PORT/" "$ENV_FILE"
+# Optional integrations passed on the command line are stored in the env file, e.g.
+#   curl … | SAPI_TOKEN=… ZARINPAL_MERCHANT_ID=… bash
+upsert() { sed -i "/^$1=/d" "$ENV_FILE"; printf '%s=%s\n' "$1" "$2" >> "$ENV_FILE"; }
+for VAR in SAPI_TOKEN SAPI_BASE IDENTITY_INQUIRY_URL ZARINPAL_MERCHANT_ID ZARINPAL_SANDBOX PUBLIC_BASE_URL VISION_LLM_BASE_URL VISION_LLM_MODEL LLM_BASE_URL LLM_MODEL; do
+  VAL="${!VAR:-}"; [ -n "$VAL" ] && upsert "$VAR" "$VAL" && echo "   set $VAR"
+done
+[ -n "$DOMAIN" ] && upsert PUBLIC_BASE_URL "https://$DOMAIN"
 # Behind Caddy only localhost may reach the app; without a domain it listens publicly.
 if [ -n "$DOMAIN" ]; then BIND=127.0.0.1; else BIND=0.0.0.0; fi
 sed -i "s/^HOST=.*/HOST=$BIND/" "$ENV_FILE"
