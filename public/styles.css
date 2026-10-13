@@ -305,6 +305,8 @@ td.ltr { direction: ltr; text-align: left; font-family: ui-monospace, monospace;
 .thumbs { display: flex; flex-wrap: wrap; gap: 8px; margin: 8px 0; }
 .thumb { width: 84px; height: 84px; object-fit: cover; border-radius: 10px; border: 1px solid var(--border); display: inline-flex; align-items: center; justify-content: center; font-size: 13px; background: var(--surface-2); text-decoration: none; }
 .lab-row { display: grid; grid-template-columns: 2fr 1fr 1fr 1.5fr auto; gap: 6px; margin-bottom: 6px; }
+.lab-row.check { background: var(--warn-soft); border-radius: 10px; padding: 4px; }
+.lab-row.check input[data-k="value"] { border-color: var(--warn); border-width: 2px; }
 @media (max-width: 640px) { .lab-row { grid-template-columns: 1fr 1fr; } }
 .record { border-top: 1px solid var(--border); padding: 12px 0; }
 .record:first-of-type { border-top: 0; }

@@ -20,6 +20,7 @@ import * as files from './modules/files.js';
 import * as doctors from './modules/doctors.js';
 import * as payments from './modules/payments.js';
 import * as records from './modules/records.js';
+import { createLabOcr } from './modules/ai/lab-ocr.js';
 import { createIdentityService } from './modules/identity.js';
 import { createAssistant } from './modules/ai/assistant.js';
 import { createLlm } from './modules/ai/llm.js';
@@ -86,6 +87,7 @@ export function createApp(overrides = {}) {
   if (!config.filesDir) config.filesDir = config.dbPath === ':memory:' ? join(tmpdir(), `kx21-files-${process.pid}-${Date.now()}`) : join(dirname(config.dbPath), 'files');
   domain.identity = createIdentityService(config);
   domain.files = files.createFilesDomain({ db, keys, config });
+  domain.labOcr = createLabOcr();
   domain.patient = patient.createPatientDomain({ db, keys, files: () => domain.files });
   domain.payments = payments.createPaymentsDomain({ db, platform, config });
   domain.appointment = appointment.createAppointmentDomain({ db, platform, patientDomain: domain.patient, payments: domain.payments });

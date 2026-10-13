@@ -1,7 +1,7 @@
 // Patient medical documents sent to a doctor, grouped by category (lab results, imaging, …),
 // plus the AI "pre-read" for the doctor and the doctor's final opinion back to the patient.
 // Access: the patient who owns them; the doctor of the appointment they were shared with.
-import { badRequest, notFound, forbidden, conflict, requireUuid } from '../lib/http.js';
+import { ApiError, badRequest, notFound, forbidden, conflict, requireUuid } from '../lib/http.js';
 import { uuid, nowIso, parseJson } from '../lib/db.js';
 import { requireUser } from './auth.js';
 import { reviewLabRows, summarizeFindings, LAB_REVIEW_VERSION } from './ai/lab-review.js';
@@ -12,7 +12,7 @@ export const RECORD_CATEGORIES = {
   prescription: 'نسخه یا داروهای قبلی', other: 'سایر',
 };
 
-export function register(router, { db, platform, config, domain }) {
+export function register(router, { db, platform, config, domain, limiter }) {
   const files = domain.files;
 
   const patientOf = (ctx) => {
@@ -61,7 +61,10 @@ export function register(router, { db, platform, config, domain }) {
       if (!f || f.owner_user_id !== ctx.user.sub || f.purpose !== 'medical_record') throw badRequest('فایل نامعتبر است', 'invalid_file');
     }
     const rows = (Array.isArray(b.lab_rows) ? b.lab_rows : []).slice(0, 60)
-      .map((r) => ({ name: String(r?.name ?? '').trim().slice(0, 60), value: String(r?.value ?? '').trim().slice(0, 20), unit: String(r?.unit ?? '').trim().slice(0, 20), ref: String(r?.ref ?? '').trim().slice(0, 30) }))
+      .map((r) => ({
+        name: String(r?.name ?? '').trim().slice(0, 60), value: String(r?.value ?? '').trim().slice(0, 20), unit: String(r?.unit ?? '').trim().slice(0, 20), ref: String(r?.ref ?? '').trim().slice(0, 30),
+        ...(r?.ocr ? { ocr: true } : {}), // read from the photo and confirmed by the patient
+      }))
       .filter((r) => r.name && r.value);
     if (!fileIds.length && !rows.length && !String(b.note ?? '').trim()) throw badRequest('حداقل یک فایل، متن یا مقدار آزمایش اضافه کنید');
     let apptId = null;
@@ -83,6 +86,32 @@ export function register(router, { db, platform, config, domain }) {
       if (d) platform.notify(ctx, { userId: d.id, channel: 'push', target: d.phone, body: `بیمار مدرک جدیدی ارسال کرد: ${RECORD_CATEGORIES[b.category]} — ${title}` });
     }
     return { status: 201, body: view(db.get('SELECT * FROM medical_records WHERE id = ?', id), 'patient') };
+  });
+
+  // Lab sheet photo/PDF → suggested rows for the patient to check before sending.
+  router.post('/v1/records/ocr', async (ctx) => {
+    patientOf(ctx);
+    const ids = Array.isArray(ctx.body.file_ids) ? ctx.body.file_ids.slice(0, 4) : [];
+    if (!ids.length) throw badRequest('ابتدا عکس یا PDF برگه آزمایش را اضافه کنید');
+    const list = ids.map((id) => {
+      const f = files.meta(requireUuid(id, 'file_id'));
+      if (!f || f.owner_user_id !== ctx.user.sub || f.purpose !== 'medical_record') throw badRequest('فایل نامعتبر است', 'invalid_file');
+      return db.get('SELECT * FROM files WHERE id = ?', id);
+    });
+    if (!(await domain.labOcr.isAvailable())) {
+      throw new ApiError(503, 'ocr_unavailable', 'خواندن خودکار روی سرور فعال نیست؛ مقادیر را دستی وارد کنید');
+    }
+    limiter.hit(`ocr:${ctx.user.sub}`, 20, 60 * 60 * 1000);
+    let result;
+    try {
+      result = await domain.labOcr.extract(list.map((f) => ({ mime: f.mime, data: files.read(f) })));
+    } catch (e) {
+      if (e.code === 'busy') throw new ApiError(429, 'ocr_busy', 'سرور در حال خواندن برگه‌های دیگر است؛ چند ثانیه بعد دوباره تلاش کنید');
+      console.error('[lab-ocr] failed:', e.message);
+      throw new ApiError(422, 'ocr_failed', 'خواندن فایل ممکن نشد؛ عکس واضح‌تری بگیرید یا مقادیر را دستی وارد کنید');
+    }
+    platform.audit(ctx, 'record.ocr', `user:${ctx.user.sub}`, { files: list.length, rows: result.rows.length, engine: result.engine });
+    return { body: { rows: result.rows.map(({ line, ...r }) => r), engine: result.engine, version: result.version } };
   });
 
   router.get('/v1/records', async (ctx) => {

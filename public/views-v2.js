@@ -296,13 +296,43 @@ export function installV2(x) {
     const prev = h('div', { class: 'thumbs' });
     const catChips = h('div', { class: 'choices' });
     const labBox = h('div', {});
-    const addRow = () => rows.append(h('div', { class: 'lab-row' },
-      h('input', { type: 'text', placeholder: 'نام آزمایش (مثلاً FBS)', 'data-k': 'name' }), h('input', { type: 'text', inputmode: 'decimal', placeholder: 'مقدار', 'data-k': 'value' }),
-      h('input', { type: 'text', placeholder: 'واحد', 'data-k': 'unit' }), h('input', { type: 'text', placeholder: 'محدوده مرجع (اختیاری)', 'data-k': 'ref' }),
+    const addRow = (v = {}) => rows.append(h('div', { class: `lab-row${v.low_confidence ? ' check' : ''}`, 'data-ocr': v.ocr ? '1' : '' },
+      h('input', { type: 'text', placeholder: 'نام آزمایش (مثلاً FBS)', 'data-k': 'name', value: v.name ?? '', dir: v.name ? 'ltr' : 'auto' }),
+      h('input', { type: 'text', inputmode: 'decimal', placeholder: 'مقدار', 'data-k': 'value', value: v.value ?? '', dir: 'ltr', title: v.low_confidence ? 'این عدد با اطمینان کم خوانده شد؛ با برگه مقایسه کنید' : '' }),
+      h('input', { type: 'text', placeholder: 'واحد', 'data-k': 'unit', value: v.unit ?? '', dir: 'ltr' }), h('input', { type: 'text', placeholder: 'محدوده مرجع (اختیاری)', 'data-k': 'ref', value: v.ref ?? '', dir: 'ltr' }),
       h('button', { type: 'button', class: 'btn small', onclick: (e) => e.currentTarget.parentElement.remove() }, '✕')));
+    // Reading values from the photo / PDF (on-server OCR) — the patient must check them.
+    let ocrUsed = false;
+    const confirmBox = h('input', { type: 'checkbox' });
+    const ocrNote = h('div', {});
+    const ocrBtn = h('button', { type: 'button', class: 'btn', onclick: guard(async (e) => {
+      if (!files.length) throw new Error('ابتدا عکس یا PDF برگه آزمایش را اضافه کنید');
+      const btn = e.currentTarget;
+      btn.disabled = true; btn.textContent = '⏳ در حال خواندن برگه…';
+      try {
+        const r = await api('POST', '/v1/records/ocr', { file_ids: files });
+        if (!r.rows.length) {
+          ocrNote.replaceChildren(h('div', { class: 'banner warn' }, 'مقداری از این فایل خوانده نشد. عکس را صاف، روشن و از نزدیک بگیرید (کل جدول در کادر باشد) یا مقادیر را دستی وارد کنید.'));
+          return;
+        }
+        rows.replaceChildren();
+        for (const row of r.rows) addRow({ ...row, ocr: true });
+        ocrUsed = true;
+        const unsure = r.rows.filter((x) => x.low_confidence).length;
+        ocrNote.replaceChildren(h('div', { class: 'banner warn stack' },
+          h('b', {}, `${fa(r.rows.length)} مقدار از برگه خوانده شد${unsure ? ` — ${fa(unsure)} مورد زرد را حتماً بررسی کنید` : ''}.`),
+          h('span', {}, 'خواندن خودکار ممکن است خطا داشته باشد (مثلاً جا افتادن ممیز). هر عدد را با برگه آزمایش مقایسه و در صورت نیاز اصلاح کنید؛ آزمایش‌هایی که خوانده نشده‌اند را با «+ ردیف» اضافه کنید.'),
+          h('label', { class: 'check' }, confirmBox, h('span', {}, 'مقادیر را با برگه آزمایش مقایسه کردم و درست هستند'))));
+      } finally {
+        btn.disabled = false; btn.textContent = '📷 خواندن خودکار مقادیر از عکس / PDF';
+      }
+    }) }, '📷 خواندن خودکار مقادیر از عکس / PDF');
     const renderCats = () => {
       catChips.replaceChildren(...cats.map((c) => h('button', { type: 'button', class: `choice${category === c.code ? ' on' : ''}`, onclick: () => { category = c.code; renderCats(); } }, `${RECORD_ICONS[c.code]} ${c.label}`)));
-      labBox.replaceChildren(...(category === 'lab' ? [h('label', {}, 'مقادیر آزمایش (اختیاری؛ به پزشک برای بررسی سریع‌تر کمک می‌کند)'), rows, h('button', { type: 'button', class: 'btn small', onclick: addRow }, '+ ردیف')] : []));
+      labBox.replaceChildren(...(category === 'lab' ? [
+        h('label', {}, 'مقادیر آزمایش (اختیاری؛ به پزشک برای بررسی سریع‌تر کمک می‌کند)'),
+        h('div', { class: 'row' }, ocrBtn, h('span', { class: 'muted small' }, 'پس از افزودن عکس یا PDF برگه آزمایش')),
+        ocrNote, rows, h('button', { type: 'button', class: 'btn small', onclick: () => addRow() }, '+ ردیف')] : []));
     };
     addRow();
     renderCats();
@@ -315,7 +345,10 @@ export function installV2(x) {
       e.target.value = '';
     }) });
     const submit = guard(async () => {
-      const lab_rows = [...rows.children].map((r) => Object.fromEntries([...r.querySelectorAll('input')].map((i) => [i.dataset.k, i.value.trim()]))).filter((r) => r.name && r.value);
+      const lab_rows = [...rows.children].map((r) => ({ ...Object.fromEntries([...r.querySelectorAll('input')].map((i) => [i.dataset.k, i.value.trim()])), ocr: r.dataset.ocr === '1' })).filter((r) => r.name && r.value);
+      if (category === 'lab' && ocrUsed && lab_rows.some((r) => r.ocr) && !confirmBox.checked) {
+        throw new Error('لطفاً مقادیر خوانده‌شده را با برگه آزمایش مقایسه کنید و تیک تأیید را بزنید');
+      }
       await api('POST', '/v1/records', { category, title: title.value, note: note.value, file_ids: files, lab_rows: category === 'lab' ? lab_rows : [], appointment_id: apptSel.value || null });
       toast(apptSel.value ? 'مدرک برای پزشک ارسال شد' : 'مدرک ذخیره شد');
       onDone();
@@ -343,6 +376,7 @@ export function installV2(x) {
         h('div', { class: 'row' }, h('b', { class: 'grow' }, `${RECORD_ICONS[rec.category]} ${rec.category_label}: ${rec.title}`), h('span', { class: 'muted' }, fmt.short(rec.created_at))),
         rec.note ? h('p', {}, rec.note) : null,
         rec.lab_rows.length ? h('table', {}, h('tbody', {}, rec.lab_rows.map((l) => h('tr', {}, h('td', {}, l.name), h('td', { class: 'ltr' }, `${l.value} ${l.unit}`), h('td', { class: 'ltr' }, l.ref))))) : null,
+        rec.lab_rows.some((l) => l.ocr) ? h('p', { class: 'muted small' }, '📷 بخشی از مقادیر به‌طور خودکار از عکس برگه خوانده و توسط بیمار تأیید شده است؛ در صورت تردید با تصویر پیوست مقایسه کنید.') : null,
         rec.files.length ? h('div', { class: 'thumbs' }, rec.files.map(thumb)) : null,
         h('button', { class: 'btn small', onclick: guard(async (e) => {
           e.currentTarget.disabled = true;

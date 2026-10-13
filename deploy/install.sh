@@ -35,6 +35,18 @@ elif command -v apt-get >/dev/null; then apt-get update -qq; PM="apt-get -y -qq 
 else die "unsupported distribution (need dnf, yum or apt)"; fi
 $PM git curl tar xz ca-certificates >/dev/null 2>&1 || $PM git curl tar xz-utils ca-certificates >/dev/null
 
+# Lab-sheet reading (OCR) runs on this server: Tesseract (English model), ImageMagick for photo
+# clean-up, poppler for PDFs. Optional — without them the app asks for manual entry.
+say "Installing OCR tools (tesseract, imagemagick, poppler)"
+if command -v apt-get >/dev/null; then
+  $PM tesseract-ocr tesseract-ocr-eng imagemagick poppler-utils >/dev/null 2>&1 || echo "   WARNING: OCR tools not installed; lab values must be typed in"
+else
+  $PM epel-release >/dev/null 2>&1 || true
+  $PM tesseract tesseract-langpack-eng ImageMagick poppler-utils >/dev/null 2>&1 \
+    || $PM tesseract ImageMagick poppler-utils >/dev/null 2>&1 || echo "   WARNING: OCR tools not installed; lab values must be typed in"
+fi
+command -v tesseract >/dev/null && echo "   $(tesseract --version 2>&1 | head -1)"
+
 # glibc >= 2.28 is required by Node 22 (CentOS 7 is too old).
 GLIBC=$(ldd --version 2>/dev/null | head -1 | grep -oE '[0-9]+\.[0-9]+$' || echo 0)
 awk -v v="$GLIBC" 'BEGIN { exit !(v >= 2.28) }' || die "glibc $GLIBC is too old for Node 22; use AlmaLinux/Rocky 8+, Debian 10+ or Ubuntu 20.04+"
