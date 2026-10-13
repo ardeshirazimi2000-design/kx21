@@ -12,6 +12,11 @@ import { isValidNationalId } from '../lib/fa.js';
 const VERDICT_KEYS = [/^(is)?match(ed)?$/i, /^(result|isvalid|valid)$/i];
 
 export function readVerdict(body) {
+  // s.api.ir Shahkar (sw1): {"data":true|false,"success":true,"code":0,"message":"استعلام انجام شد"}
+  // — `data` is the match verdict; `success` only says the inquiry itself ran.
+  if (body && typeof body === 'object' && typeof body.data === 'boolean') {
+    return body.success === false || (body.code !== undefined && body.code !== 0) ? undefined : body.data;
+  }
   const asBool = (v) => (typeof v === 'boolean' ? v : typeof v === 'string' && /^(true|false)$/i.test(v) ? v.toLowerCase() === 'true' : undefined);
   for (const re of VERDICT_KEYS) {
     const stack = [[body, 0]];

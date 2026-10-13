@@ -24,6 +24,10 @@ test('Shahkar verdict parsing never treats API success as a match', () => {
   assert.equal(readVerdict({ isSuccess: true, data: { isMatched: false } }), false);
   assert.equal(readVerdict({ data: { result: true } }), true);
   assert.equal(readVerdict({ status: true, message: 'ok' }), undefined);
+  // Real s.api.ir sw1/Shahkar reply.
+  assert.equal(readVerdict({ data: true, success: true, code: 0, message: 'استعلام انجام شد' }), true);
+  assert.equal(readVerdict({ data: false, success: true, code: 0, message: 'استعلام انجام شد' }), false);
+  assert.equal(readVerdict({ data: true, success: false, code: 5 }), undefined);
 });
 
 test('Shahkar adapter: mismatch is refused; production without token fails closed', async () => {
