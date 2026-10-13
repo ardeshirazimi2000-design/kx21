@@ -3,7 +3,7 @@ import { useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { MeetingStatusBadge } from '../components/status';
 import { Badge, Button, Card, dateFa, dateTimeFa, Empty, ErrorBox, Field, fa, JalaliDateInput, Loading, Modal, PageHeader, Tabs } from '../components/ui';
-import { patch, post } from '../lib/api';
+import { del, patch, post } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { useApi, useRoles } from '../lib/hooks';
 import { ActivityReport, CommissionArchive } from './CommissionArchive';
@@ -63,11 +63,22 @@ function Members({ commission }: { commission: any }) {
   const { data, reload } = useApi<any[]>(`/commissions/${commission.id}/members?includeEnded=${showEnded}`);
   const [adding, setAdding] = useState(false);
   const [changing, setChanging] = useState<any | null>(null);
+  const [err, setErr] = useState<Error | null>(null);
   const end = async (m: any) => {
     const reason = prompt(`پایان عضویت ${m.full_name} — دلیل:`);
     if (reason === null) return;
     await post(`/memberships/${m.id}/end`, { reason });
     void reload();
+  };
+  const remove = async (m: any) => {
+    if (!confirm(`عضویت «${m.full_name}» (${roleLabel(m.position, m.role_title)}) به‌طور کامل حذف شود؟\nاین کار فقط برای عضوی است که اشتباهی اضافه شده و دعوت‌های او به جلسات برگزارنشده هم لغو می‌شود.`)) return;
+    setErr(null);
+    try {
+      await del(`/memberships/${m.id}`);
+      void reload();
+    } catch (e) {
+      setErr(e as Error);
+    }
   };
   return (
     <Card
@@ -81,6 +92,7 @@ function Members({ commission }: { commission: any }) {
         </>
       }
     >
+      <ErrorBox error={err} />
       <div className="table-wrap">
         <table className="table">
           <thead>
@@ -116,6 +128,11 @@ function Members({ commission }: { commission: any }) {
                         پایان عضویت
                       </Button>
                     </>
+                  )}
+                  {isAdmin && m.can_delete && (
+                    <Button size="sm" variant="ghost" onClick={() => remove(m)} title="فقط برای عضوی که هنوز در جلسات و مصوبات سابقه‌ای ندارد">
+                      <span style={{ color: 'var(--danger)' }}>حذف</span>
+                    </Button>
                   )}
                 </td>
               </tr>

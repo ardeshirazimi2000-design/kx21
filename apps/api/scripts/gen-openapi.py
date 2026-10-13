@@ -90,6 +90,7 @@ E = [
     ("get", "/api/commissions/{id}/members", "Structure", "اعضا و سمت‌ها (?includeEnded)", None, None),
     ("post", "/api/commissions/{id}/members", "Structure", "افزودن عضو", S(userId=uuid, person={"type": "object"}, position=str_, hasVote=bool_, startDate=date, replaceExisting=bool_), "409 position_taken when an officer seat is occupied (use replaceExisting)."),
     ("patch", "/api/memberships/{id}", "Structure", "تغییر سمت (پایان رکورد قبلی + رکورد جدید)", S(position=str_, hasVote=bool_), None),
+    ("delete", "/api/memberships/{id}", "Structure", "حذف عضویتی که اشتباهی ثبت شده (فقط بدون سابقه در کمیسیون)", None, "409 membership_has_history when the person has attendance, votes, comments, resolutions, referrals, representatives or invitations to held meetings in the commission. Invitations to meetings not held yet are withdrawn."),
     ("post", "/api/memberships/{id}/end", "Structure", "پایان عضویت", S(endDate=date, reason=str_), None),
     ("get", "/api/people", "Structure", "جستجوی اشخاص (?chamberId&q)", None, None),
     ("post", "/api/people", "Structure", "ثبت شخص", S(chamberId=uuid, nationalId=str_, birthDate=str_, fullName=str_, mobile=str_, email=str_, organization=str_, password=str_), "With nationalId + birthDate the official name is taken from the identity service; IDENTITY_REQUIRED=true makes it mandatory."),

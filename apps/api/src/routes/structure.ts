@@ -341,11 +341,36 @@ structureRouter.patch('/commissions/:id', async (req, res) => {
 
 // ─────────────────────────────── Memberships (اعضا و سمت‌ها) ───────────────────────────────
 
+/**
+ * True when the person has left a trace in this commission (attendance, vote, comment, resolution,
+ * referral, representative, or an invitation to a meeting that has been held). Such a membership
+ * can only be ended, so minutes and reports stay complete.
+ */
+const MEMBER_HISTORY = (commission: string, user: string) => `(
+  EXISTS (SELECT 1 FROM attendance a JOIN meetings mt ON mt.id = a.meeting_id
+           WHERE mt.commission_id = ${commission} AND a.user_id = ${user} AND (a.status <> 'pending' OR a.checked_in_at IS NOT NULL))
+  OR EXISTS (SELECT 1 FROM votes v JOIN vote_sessions vs ON vs.id = v.vote_session_id JOIN meetings mt ON mt.id = vs.meeting_id
+           WHERE mt.commission_id = ${commission} AND (v.voter_id = ${user} OR v.cast_by = ${user}))
+  OR EXISTS (SELECT 1 FROM comments cm JOIN agenda_items ai ON ai.id = cm.agenda_item_id JOIN meetings mt ON mt.id = ai.meeting_id
+           WHERE mt.commission_id = ${commission} AND cm.user_id = ${user})
+  OR EXISTS (SELECT 1 FROM resolutions r WHERE r.commission_id = ${commission} AND r.owner_id = ${user})
+  OR EXISTS (SELECT 1 FROM referrals rf WHERE rf.commission_id = ${commission} AND rf.expert_id = ${user})
+  OR EXISTS (SELECT 1 FROM meeting_delegates d JOIN meetings mt ON mt.id = d.meeting_id
+           WHERE mt.commission_id = ${commission} AND (d.principal_id = ${user} OR d.delegate_id = ${user}))
+  OR EXISTS (SELECT 1 FROM meeting_invitees i JOIN meetings mt ON mt.id = i.meeting_id
+           WHERE mt.commission_id = ${commission} AND i.user_id = ${user}
+             AND mt.status NOT IN ('draft','scheduled','invitation_sent','checkin_open','cancelled'))
+)`;
+
+/** Meetings not held yet: a deleted member's invitations to them are withdrawn. */
+const NOT_HELD = `('draft','scheduled','invitation_sent','checkin_open')`;
+
 structureRouter.get('/commissions/:id/members', async (req, res) => {
   const a = await commissionAccess(currentUser(req), param(req, 'id'));
   const includeEnded = req.query.includeEnded === 'true';
   const rows = await query(
-    `SELECT m.*, u.full_name, u.organization, u.job_title, u.mobile, u.email, cr.title AS role_title
+    `SELECT m.*, u.full_name, u.organization, u.job_title, u.mobile, u.email, cr.title AS role_title,
+            NOT ${MEMBER_HISTORY('m.commission_id', 'm.user_id')} AS can_delete
        FROM commission_memberships m JOIN users u ON u.id = m.user_id
        LEFT JOIN custom_roles cr ON cr.chamber_id = m.chamber_id AND cr.key = m.position
       WHERE m.commission_id = $1 AND ($2 OR m.status = 'active')
@@ -562,6 +587,51 @@ structureRouter.post('/memberships/:id/end', async (req, res) => {
     return r;
   });
   res.json(row);
+});
+
+/**
+ * Delete a membership added by mistake. Only allowed while the person has no history in the
+ * commission; their invitations to meetings not held yet are withdrawn.
+ */
+structureRouter.delete('/memberships/:id', async (req, res) => {
+  const id = param(req, 'id');
+  await tx(async (c) => {
+    const before = await one('SELECT * FROM commission_memberships WHERE id = $1 FOR UPDATE', [id], c);
+    if (!before) throw notFound();
+    requireChamberAdmin(currentUser(req), before.chamber_id);
+    const h = await one<{ used: boolean }>(`SELECT ${MEMBER_HISTORY('$1::uuid', '$2::uuid')} AS used`, [before.commission_id, before.user_id], c);
+    if (h?.used) {
+      throw conflict('این عضو در جلسات یا مصوبات کمیسیون سابقه دارد و قابل حذف نیست؛ از «پایان عضویت» استفاده کنید', 'membership_has_history');
+    }
+    // Withdraw invitations to meetings not held yet, unless another active membership still covers them.
+    const others = await one<{ n: number }>(
+      `SELECT count(*)::int AS n FROM commission_memberships WHERE commission_id = $1 AND user_id = $2 AND id <> $3 AND status = 'active'`,
+      [before.commission_id, before.user_id, id],
+      c,
+    );
+    let withdrawn = 0;
+    if (!others?.n) {
+      await c.query(
+        `DELETE FROM attendance a USING meetings mt WHERE mt.id = a.meeting_id AND mt.commission_id = $1 AND a.user_id = $2 AND mt.status IN ${NOT_HELD}`,
+        [before.commission_id, before.user_id],
+      );
+      const r = await c.query(
+        `DELETE FROM meeting_invitees i USING meetings mt WHERE mt.id = i.meeting_id AND mt.commission_id = $1 AND i.user_id = $2 AND mt.status IN ${NOT_HELD}`,
+        [before.commission_id, before.user_id],
+      );
+      withdrawn = r.rowCount ?? 0;
+    }
+    await c.query('DELETE FROM commission_memberships WHERE id = $1', [id]);
+    await audit(c, req, {
+      chamberId: before.chamber_id,
+      action: 'membership.deleted',
+      entity: 'membership',
+      entityId: id,
+      before,
+      after: { withdrawnInvitations: withdrawn },
+    });
+  });
+  res.status(204).end();
 });
 
 // ─────────────────────────────── People ───────────────────────────────

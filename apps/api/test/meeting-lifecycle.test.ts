@@ -21,6 +21,7 @@ const as = (who: string) => ({
   post: (url: string, body: object = {}) => request(app).post(url).set('authorization', `Bearer ${tokens[who]}`).send(body),
   patch: (url: string, body: object = {}) => request(app).patch(url).set('authorization', `Bearer ${tokens[who]}`).send(body),
   put: (url: string, body: object = {}) => request(app).put(url).set('authorization', `Bearer ${tokens[who]}`).send(body),
+  del: (url: string) => request(app).delete(url).set('authorization', `Bearer ${tokens[who]}`),
 });
 
 async function login(who: string, email: string) {
@@ -436,6 +437,32 @@ describe('built-in webinar', () => {
 });
 
 describe('structure', () => {
+  it('deletes a membership added by mistake but keeps members with history', async () => {
+    const exp = (await as('admin').get('/api/commissions')).body.items.find((c: any) => c.code === 'EXP');
+    const chamberId = (await as('admin').get('/api/auth/me')).body.adminChambers[0];
+    const person = await as('admin').post('/api/people', { chamberId, fullName: 'عضو اشتباهی', email: 'mistake@kx.local' });
+    // an upcoming meeting already exists, so the new member gets invited to it
+    const meeting = await as('secretary').post('/api/meetings', { commissionId: exp.id, title: 'جلسه آینده', scheduledAt: new Date(Date.now() + 5 * 86400000).toISOString(), schedule: true });
+    const added = await as('admin').post(`/api/commissions/${exp.id}/members`, { userId: person.body.id, position: 'member' });
+    expect(added.status).toBe(201);
+    await as('secretary').post(`/api/meetings/${meeting.body.id}/invitees`, { userId: person.body.id, role: 'member' });
+    const list = (await as('admin').get(`/api/commissions/${exp.id}/members`)).body;
+    expect(list.find((m: any) => m.user_id === person.body.id).can_delete).toBe(true);
+    const withHistory = list.find((m: any) => m.user_id === ids.m1);
+    expect(withHistory.can_delete).toBe(false);
+    expect((await as('admin').del(`/api/memberships/${withHistory.id}`)).body.error.code).toBe('membership_has_history');
+    expect((await as('secretary').del(`/api/memberships/${added.body.id}`)).status).toBe(403);
+
+    expect((await as('admin').del(`/api/memberships/${added.body.id}`)).status).toBe(204);
+    const after = (await as('admin').get(`/api/commissions/${exp.id}/members?includeEnded=true`)).body;
+    expect(after.some((m: any) => m.user_id === person.body.id)).toBe(false);
+    const inv = (await as('secretary').get(`/api/meetings/${meeting.body.id}`)).body.invitees;
+    expect(inv.some((i: any) => i.user_id === person.body.id)).toBe(false);
+    const { rows } = await pool.query(`SELECT count(*)::int AS n FROM audit_logs WHERE action = 'membership.deleted'`);
+    expect(rows[0].n).toBe(1);
+    await as('secretary').post(`/api/meetings/${meeting.body.id}/cancel`, { reason: 'پایان آزمون حذف عضو' });
+  });
+
   it('keeps membership history when positions change', async () => {
     const commissions = await as('admin').get('/api/commissions');
     const exp = commissions.body.items.find((c: any) => c.code === 'EXP');
