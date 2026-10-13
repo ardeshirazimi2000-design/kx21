@@ -27,36 +27,55 @@ export function readVerdict(body) {
   return undefined;
 }
 
+// Tokens are often pasted with quotes, a trailing newline or the "Bearer " prefix itself.
+export const cleanToken = (t) => String(t ?? '').trim().replace(/^["']|["']$/g, '').replace(/^bearer\s+/i, '').trim();
+
+// One raw call to s.api.ir — shared by the service and the server-side diagnostic script.
+export async function callShahkar({ base, token, nationalId, mobile, fetchImpl = globalThis.fetch }) {
+  const res = await fetchImpl(`${base.replace(/\/$/, '')}/Shahkar`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json', Accept: 'application/json',
+      'User-Agent': 'Mozilla/5.0 (kx21-clinic) curl-compatible', Authorization: `Bearer ${cleanToken(token)}`,
+    },
+    body: JSON.stringify({ nationalCode: nationalId, mobile, isCompany: false }),
+    signal: AbortSignal.timeout(15000),
+  });
+  const text = await res.text();
+  let body = null;
+  try { body = JSON.parse(text); } catch { /* HTML error page from a CDN/WAF */ }
+  return { status: res.status, ok: res.ok, body, text };
+}
+
 export function createIdentityService(config, fetchImpl = globalThis.fetch) {
-  const mock = !config.sapiToken && config.devMode;
+  const token = cleanToken(config.sapiToken);
+  const mock = !token && config.devMode;
 
   async function verifyMobileOwnership({ nationalId, mobile }) {
     if (!isValidNationalId(nationalId)) return { matched: false, source: 'checksum' };
     if (mock) return { matched: true, source: 'mock' };
-    if (!config.sapiToken) {
+    if (!token) {
       throw new ApiError(503, 'identity_service_unavailable', 'سرویس استعلام شاهکار پیکربندی نشده است؛ ثبت‌نام موقتاً ممکن نیست');
     }
-    let res;
+    let r;
     try {
-      res = await fetchImpl(`${config.sapiBase.replace(/\/$/, '')}/Shahkar`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${config.sapiToken}` },
-        body: JSON.stringify({ nationalCode: nationalId, mobile, isCompany: false }),
-        signal: AbortSignal.timeout(15000),
-      });
+      r = await callShahkar({ base: config.sapiBase, token, nationalId, mobile, fetchImpl });
     } catch (e) {
-      console.error('[shahkar] request failed:', e.message);
-      throw new ApiError(503, 'identity_service_unavailable', 'سرویس استعلام شاهکار در دسترس نیست؛ کمی بعد دوباره تلاش کنید');
+      console.error('[shahkar] request failed (network/DNS/timeout — is s.api.ir reachable from this server?):', e.cause?.code ?? e.message);
+      throw new ApiError(503, 'identity_service_unavailable', 'سرور به سرویس شاهکار (s.api.ir) دسترسی ندارد؛ کمی بعد دوباره تلاش کنید');
     }
-    const body = await res.json().catch(() => null);
-    if (!res.ok) {
-      console.error('[shahkar] HTTP', res.status, JSON.stringify(body)?.slice(0, 300));
-      throw new ApiError(503, 'identity_service_unavailable', 'خطا در استعلام شاهکار؛ کمی بعد دوباره تلاش کنید');
+    if (!r.ok) {
+      console.error('[shahkar] HTTP', r.status, r.text.replace(/\d{10,11}/g, '…').slice(0, 300));
+      const why = r.status === 401 || r.status === 403
+        ? 'توکن s.api.ir پذیرفته نشد یا IP سرور مجاز نیست'
+        : r.status === 429 ? 'سقف درخواست‌های سرویس شاهکار پر شده است' : `پاسخ HTTP ${r.status}`;
+      throw new ApiError(503, 'identity_service_unavailable', `خطا در استعلام شاهکار (${why})`);
     }
+    const body = r.body;
     const verdict = readVerdict(body);
     if (verdict === undefined) {
       // Unknown response shape: never guess "match". Log the shape (values masked) for setup.
-      const shape = JSON.stringify(body, (k, v) => (typeof v === 'string' ? '…' : v))?.slice(0, 400);
+      const shape = JSON.stringify(body, (k, v) => (typeof v === 'string' ? '…' : v))?.slice(0, 400) ?? r.text.slice(0, 200);
       console.error('[shahkar] unrecognised response shape:', shape);
       throw new ApiError(503, 'identity_service_unavailable', 'پاسخ سرویس شاهکار قابل تفسیر نبود');
     }
@@ -65,11 +84,11 @@ export function createIdentityService(config, fetchImpl = globalThis.fetch) {
 
   // Optional: name / birth date from the national registry (configure IDENTITY_INQUIRY_URL).
   async function inquireIdentity({ nationalId, birthDate }) {
-    if (!config.identityInquiryUrl || !config.sapiToken) return null;
+    if (!config.identityInquiryUrl || !token) return null;
     try {
       const res = await fetchImpl(config.identityInquiryUrl, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${config.sapiToken}` },
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify({ nationalCode: nationalId, birthDate }),
         signal: AbortSignal.timeout(15000),
       });

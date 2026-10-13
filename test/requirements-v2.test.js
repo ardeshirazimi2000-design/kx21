@@ -10,6 +10,9 @@ import { reviewLabRows } from '../src/modules/ai/lab-review.js';
 let t;
 before(async () => { t = await startApp({ disableSweeper: true }); });
 after(() => t.close());
+// One admin session per file: the OTP rate limit is per phone number.
+let adminToken;
+const adminLogin = async () => (adminToken ??= await t.login(DEMO_ACCOUNTS.admin.phone));
 
 const PNG = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.alloc(64, 1)]);
 const upload = async (token, purpose, body = PNG, type = 'image/png') => {
@@ -24,9 +27,14 @@ test('Shahkar verdict parsing never treats API success as a match', () => {
 });
 
 test('Shahkar adapter: mismatch is refused; production without token fails closed', async () => {
-  const fake = async () => ({ ok: true, json: async () => ({ isSuccess: true, data: { isMatched: false } }) });
-  const svc = createIdentityService({ sapiToken: 'x', sapiBase: 'https://s.api.ir/api/sw1', devMode: false }, fake);
+  let auth;
+  const fake = async (url, init) => { auth = init.headers.Authorization; return { ok: true, status: 200, text: async () => JSON.stringify({ isSuccess: true, data: { isMatched: false } }) }; };
+  const svc = createIdentityService({ sapiToken: ' "Bearer x"\n', sapiBase: 'https://s.api.ir/api/sw1', devMode: false }, fake);
   assert.equal((await svc.verifyMobileOwnership({ nationalId: '0499370899', mobile: '09121234567' })).matched, false);
+  assert.equal(auth, 'Bearer x'); // pasted quotes / "Bearer " prefix are cleaned
+  const denied = createIdentityService({ sapiToken: 'x', sapiBase: 'https://s.api.ir/api/sw1', devMode: false },
+    async () => ({ ok: false, status: 401, text: async () => '{"message":"Unauthorized"}' }));
+  await assert.rejects(denied.verifyMobileOwnership({ nationalId: '0499370899', mobile: '09121234567' }), /توکن/);
   const prod = createIdentityService({ sapiToken: '', devMode: false });
   await assert.rejects(prod.verifyMobileOwnership({ nationalId: '0499370899', mobile: '09121234567' }), /پیکربندی نشده/);
 });
@@ -60,7 +68,7 @@ test('doctor self-registration → documents → admin reject with reason → re
   assert.equal((await t.call('POST', '/v1/doctors/me/submit', { token: doc, body: {} })).body.status, 'pending_review');
   assert.equal((await t.call('PUT', '/v1/doctors/me/profile', { token: doc, body: { bio: 'x'.repeat(40) } })).body.code, 'under_review');
 
-  const admin = await t.login(DEMO_ACCOUNTS.admin.phone);
+  const admin = await adminLogin();
   const apps = await t.call('GET', '/v1/admin/doctor-applications', { token: admin });
   const app = apps.body.items.find((d) => d.license_no === 'N-778899');
   assert.ok(app.license_card_url && app.photo_url);
@@ -90,7 +98,7 @@ test('doctor self-registration → documents → admin reject with reason → re
 });
 
 test('tariffs: visit is held pending until ZarinPal (mock) payment is verified; unpaid holds are released', async () => {
-  const admin = await t.login(DEMO_ACCOUNTS.admin.phone);
+  const admin = await adminLogin();
   assert.equal((await t.call('PUT', '/v1/admin/settings', { token: admin, body: { tariffs: { visit_video: 5000 } } })).status, 422);
   await t.call('PUT', '/v1/admin/settings', { token: admin, body: { tariffs: { visit_video: 1_500_000, visit_chat: 0 } } });
   const p = await t.newPatient({ nationalId: randomNationalId() });
@@ -128,7 +136,7 @@ test('tariffs: visit is held pending until ZarinPal (mock) payment is verified; 
 });
 
 test('triage is paid when a tariff is set, but emergencies are never behind the paywall', async () => {
-  const admin = await t.login(DEMO_ACCOUNTS.admin.phone);
+  const admin = await adminLogin();
   await t.call('PUT', '/v1/admin/settings', { token: admin, body: { tariffs: { triage: 200_000 } } });
   const p = await t.newPatient({ nationalId: randomNationalId() });
 
@@ -147,6 +155,27 @@ test('triage is paid when a tariff is set, but emergencies are never behind the 
   // One payment = one assessment.
   assert.equal((await t.call('GET', '/v1/payments/entitlements', { token: p.token })).body.triage.available, false);
   await t.call('PUT', '/v1/admin/settings', { token: admin, body: { tariffs: { triage: 0 } } });
+});
+
+test('admin can switch patient payments off (testing): visits confirm at once, triage is free', async () => {
+  const admin = await adminLogin();
+  await t.call('PUT', '/v1/admin/settings', { token: admin, body: { tariffs: { visit_video: 1_500_000, triage: 200_000 }, payments_enabled: false } });
+  const s = (await t.call('GET', '/v1/admin/settings', { token: admin })).body;
+  assert.equal(s.payments_enabled, false);
+  assert.equal(s.tariffs.visit_video, 1_500_000); // stored tariffs are kept
+  assert.equal((await t.call('PUT', '/v1/admin/settings', { token: admin, body: { payments_enabled: 'no' } })).status, 422);
+
+  const p = await t.newPatient({ nationalId: randomNationalId() });
+  assert.ok((await t.call('GET', '/v1/tariffs', { token: p.token })).body.items.every((i) => i.amount === 0));
+  const [slot] = (await t.call('GET', '/v1/slots?specialty=general&limit=10', { token: p.token })).body.items;
+  const a = await t.call('POST', '/v1/appointments', { token: p.token, headers: { 'Idempotency-Key': 'free-1' }, body: { doctor_id: slot.doctor_id, slot_id: slot.id, channel: 'video' } });
+  assert.equal(a.body.status, 'confirmed');
+  assert.equal(a.body.payment, null);
+  assert.equal((await t.call('POST', '/v1/ai/triage', { token: p.token, body: { symptoms: [{ name: 'سرفه', severity: 3 }] } })).status, 200);
+
+  await t.call('PUT', '/v1/admin/settings', { token: admin, body: { payments_enabled: true } });
+  assert.equal((await t.call('POST', '/v1/ai/triage', { token: p.token, body: { symptoms: [{ name: 'سرفه' }] } })).status, 402);
+  await t.call('PUT', '/v1/admin/settings', { token: admin, body: { tariffs: { visit_video: 0, triage: 0 } } });
 });
 
 test('patient documents by category reach only the appointment doctor; AI pre-read is doctor-only; opinion goes back', async () => {

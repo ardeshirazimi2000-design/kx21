@@ -185,16 +185,22 @@ export function installV2(x) {
   VIEWS.settings = async () => {
     const s = await api('GET', '/v1/admin/settings');
     const inputs = Object.fromEntries(Object.keys(s.tariffs).map((k) => [k, h('input', { type: 'number', min: 0, step: 1000, value: Math.round(s.tariffs[k] / 10) })]));
+    const enabled = h('input', { type: 'checkbox', checked: s.payments_enabled });
+    const note = h('div', { class: 'banner warn' }, 'حالت آزمایشی: از بیماران هیچ هزینه‌ای گرفته نمی‌شود؛ نوبت‌ها بلافاصله قطعی و تریاژ رایگان است. مبالغ زیر حفظ می‌شوند.');
+    const sync = () => { note.style.display = enabled.checked ? 'none' : ''; };
+    enabled.onchange = sync; sync();
     x.$app.append(h('div', { class: 'card stack' },
       h('h2', {}, 'تعرفه خدمات'),
+      h('label', { class: 'row', style: 'gap:8px;align-items:center;font-weight:700' }, enabled, 'دریافت هزینه از بیماران فعال است'),
+      note,
       h('p', { class: 'muted' }, 'مبالغ به تومان. صفر یعنی خدمت رایگان است. حداقل مبلغ قابل پرداخت در درگاه ۱٬۰۰۰ تومان است.'),
       h('div', { class: 'grid2' }, Object.entries(inputs).map(([k, el]) => h('div', {}, h('label', {}, s.labels[k]), el))),
       h('div', { class: `banner ${s.gateway === 'zarinpal' ? 'info' : 'warn'}` },
         s.gateway === 'zarinpal' ? `درگاه: زرین‌پال${s.sandbox ? ' (محیط آزمایشی sandbox)' : ''}` : 'درگاه زرین‌پال تنظیم نشده؛ پرداخت‌ها با درگاه آزمایشی شبیه‌سازی می‌شوند (ZARINPAL_MERCHANT_ID را روی سرور تنظیم کنید).'),
       h('button', { class: 'btn primary', onclick: guard(async () => {
         const tariffs = Object.fromEntries(Object.entries(inputs).map(([k, el]) => [k, Math.round(Number(el.value || 0)) * 10]));
-        await api('PUT', '/v1/admin/settings', { tariffs });
-        toast('تعرفه‌ها ذخیره شد');
+        await api('PUT', '/v1/admin/settings', { tariffs, payments_enabled: enabled.checked });
+        toast(enabled.checked ? 'تعرفه‌ها ذخیره شد' : 'ذخیره شد — پرداخت بیماران غیرفعال است');
       }) }, 'ذخیره تعرفه‌ها')));
   };
 

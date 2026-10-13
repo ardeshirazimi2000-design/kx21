@@ -45,6 +45,26 @@ export function createPaymentsDomain({ db, platform, config, fetchImpl = globalT
     return cur;
   }
 
+  // Admin switch (e.g. for testing): when off, patients are never charged — visits confirm
+  // immediately and triage is free. Stored tariffs are kept for when it is turned back on.
+  function paymentsEnabled(tenantId) {
+    const row = db.get(`SELECT value FROM settings WHERE tenant_id = ? AND key = 'payments'`, tenantId);
+    return parseJson(row?.value, {}).enabled !== false;
+  }
+  function setPaymentsEnabled(ctx, enabled) {
+    if (typeof enabled !== 'boolean') throw badRequest('payments_enabled باید true یا false باشد');
+    db.run(
+      `INSERT INTO settings (tenant_id, key, value, updated_at, updated_by) VALUES (?, 'payments', ?, ?, ?)
+       ON CONFLICT (tenant_id, key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at, updated_by = excluded.updated_by`,
+      ctx.tenantId, JSON.stringify({ enabled }), nowIso(), ctx.user.sub,
+    );
+    platform.audit(ctx, 'settings.payments', `tenant:${ctx.tenantId}`, { enabled });
+    return enabled;
+  }
+  // What patients are actually charged right now.
+  const effectiveTariffs = (tenantId) => (paymentsEnabled(tenantId)
+    ? getTariffs(tenantId) : Object.fromEntries(TARIFF_KEYS.map((k) => [k, 0])));
+
   function create(ctx, { userId, purpose, refId = null, amount, description }) {
     const id = uuid();
     db.run(
@@ -166,7 +186,7 @@ export function createPaymentsDomain({ db, platform, config, fetchImpl = globalT
 
   // Appointment booking hook: returns { status, payment } for the new appointment.
   function forAppointment(ctx, { appointmentId, patientUserId, channel, doctorName }) {
-    const fee = getTariffs(ctx.tenantId)[`visit_${channel}`];
+    const fee = effectiveTariffs(ctx.tenantId)[`visit_${channel}`];
     if (!fee) return { status: 'confirmed', payment: null };
     const payment = create(ctx, {
       userId: patientUserId, purpose: 'appointment', refId: appointmentId, amount: fee,
@@ -176,7 +196,7 @@ export function createPaymentsDomain({ db, platform, config, fetchImpl = globalT
   }
 
   // Triage entitlement.
-  const triageFee = (tenantId) => getTariffs(tenantId).triage;
+  const triageFee = (tenantId) => effectiveTariffs(tenantId).triage;
   const availableTriage = (userId) => db.get(
     `SELECT * FROM payments WHERE user_id = ? AND purpose = 'triage' AND status = 'paid' AND consumed_at IS NULL ORDER BY paid_at LIMIT 1`, userId,
   );
@@ -207,7 +227,7 @@ export function createPaymentsDomain({ db, platform, config, fetchImpl = globalT
   }
   if (!config.disableSweeper) setInterval(sweep, 60_000).unref();
 
-  return { getTariffs, setTariffs, create, start, verify, view, forAppointment, triageAllowed, consumeTriage, triagePayment, triageFee, sweep, gateway, toman, HOLD_MIN };
+  return { getTariffs, setTariffs, paymentsEnabled, setPaymentsEnabled, effectiveTariffs, create, start, verify, view, forAppointment, triageAllowed, consumeTriage, triagePayment, triageFee, sweep, gateway, toman, HOLD_MIN };
 }
 
 const RESULT_PAGE = (ok, title, detail) => `<!doctype html><html lang="fa" dir="rtl"><head><meta charset="utf-8">
@@ -233,18 +253,19 @@ export function register(router, { db, platform, config, domain }) {
   };
 
   router.get('/v1/tariffs', async (ctx) => {
-    const t = pay.getTariffs(ctx.tenantId);
-    return { body: { items: Object.entries(t).map(([k, rial]) => ({ key: k, label: TARIFF_LABELS[k], amount: rial, amount_toman: Math.round(rial / 10) })), gateway: pay.gateway } };
+    const t = pay.effectiveTariffs(ctx.tenantId);
+    return { body: { items: Object.entries(t).map(([k, rial]) => ({ key: k, label: TARIFF_LABELS[k], amount: rial, amount_toman: Math.round(rial / 10) })), gateway: pay.gateway, payments_enabled: pay.paymentsEnabled(ctx.tenantId) } };
   });
 
   router.get('/v1/admin/settings', async (ctx) => {
     requireUser(ctx, 'admin');
-    return { body: { tariffs: pay.getTariffs(ctx.tenantId), labels: TARIFF_LABELS, gateway: pay.gateway, sandbox: !!config.zarinpalSandbox } };
+    return { body: { tariffs: pay.getTariffs(ctx.tenantId), payments_enabled: pay.paymentsEnabled(ctx.tenantId), labels: TARIFF_LABELS, gateway: pay.gateway, sandbox: !!config.zarinpalSandbox } };
   });
 
   router.put('/v1/admin/settings', async (ctx) => {
     requireUser(ctx, 'admin');
-    return { body: { tariffs: pay.setTariffs(ctx, ctx.body.tariffs ?? {}) } };
+    if (ctx.body.payments_enabled !== undefined) pay.setPaymentsEnabled(ctx, ctx.body.payments_enabled);
+    return { body: { tariffs: pay.setTariffs(ctx, ctx.body.tariffs ?? {}), payments_enabled: pay.paymentsEnabled(ctx.tenantId) } };
   });
 
   router.get('/v1/payments', async (ctx) => {
