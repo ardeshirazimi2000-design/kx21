@@ -12,6 +12,7 @@ export function createKeyring(config) {
     kekId: 'local-kek-v1',
     hmacKey: derive('lookup-hmac'),
     livekitKey: derive('livekit'),
+    fileUrlKey: derive('file-url'),
   };
 }
 
@@ -109,4 +110,31 @@ export function canonical(v) {
     return `{${Object.keys(v).sort().map((k) => `${JSON.stringify(k)}:${canonical(v[k])}`).join(',')}}`;
   }
   return JSON.stringify(v);
+}
+
+// Binary envelope encryption for files: [u32 header length][header JSON][ciphertext].
+export function sealBuffer(keys, buf) {
+  const dek = crypto.randomBytes(32);
+  const iv = crypto.randomBytes(12);
+  const c = crypto.createCipheriv('aes-256-gcm', dek, iv);
+  const ct = Buffer.concat([c.update(buf), c.final()]);
+  const wiv = crypto.randomBytes(12);
+  const w = crypto.createCipheriv('aes-256-gcm', keys.kek, wiv);
+  const wrapped = Buffer.concat([wiv, w.update(dek), w.final(), w.getAuthTag()]);
+  const header = Buffer.from(JSON.stringify({ k: keys.kekId, w: b64u(wrapped), i: b64u(iv), t: b64u(c.getAuthTag()) }));
+  const len = Buffer.alloc(4);
+  len.writeUInt32BE(header.length);
+  return Buffer.concat([len, header, ct]);
+}
+
+export function unsealBuffer(keys, blob) {
+  const n = blob.readUInt32BE(0);
+  const env = JSON.parse(blob.subarray(4, 4 + n).toString());
+  const wrapped = Buffer.from(env.w, 'base64url');
+  const w = crypto.createDecipheriv('aes-256-gcm', keys.kek, wrapped.subarray(0, 12));
+  w.setAuthTag(wrapped.subarray(wrapped.length - 16));
+  const dek = Buffer.concat([w.update(wrapped.subarray(12, wrapped.length - 16)), w.final()]);
+  const d = crypto.createDecipheriv('aes-256-gcm', dek, Buffer.from(env.i, 'base64url'));
+  d.setAuthTag(Buffer.from(env.t, 'base64url'));
+  return Buffer.concat([d.update(blob.subarray(4 + n)), d.final()]);
 }

@@ -65,7 +65,8 @@ export function createAssistant({ db, platform, domain, llm, config }) {
           idempotencyKey: sha256(`${session.id}:${slot.id}`).slice(0, 64), bookedVia: 'ai_assistant',
           triageResultId: triage_result_id ?? null,
         });
-        return { appointment_id: appointment.id, replayed };
+        const pay = db.get(`SELECT * FROM payments WHERE purpose = 'appointment' AND ref_id = ? AND status = 'pending' ORDER BY created_at DESC LIMIT 1`, appointment.id);
+        return { appointment_id: appointment.id, replayed, status: appointment.status, payment_id: pay?.id ?? null, amount: pay?.amount ?? 0 };
       },
     },
     fetch_patient_history: {
@@ -205,6 +206,7 @@ export function createAssistant({ db, platform, domain, llm, config }) {
       case 'thanks':
         return turn.reply('خواهش می‌کنم. اگر سؤال دیگری داشتید در خدمتم.');
       case 'symptom_report':
+        if (triagePaywall(ctx, session, turn)) return;
         setMode(session, turn, 'TRIAGE_MODE', 'symptom_reported');
         session.state = { triage: newTriageState() };
         return handleTriage(ctx, session, turn, nlu, text);
@@ -247,6 +249,18 @@ export function createAssistant({ db, platform, domain, llm, config }) {
   }
 
   const newTriageState = () => ({ symptoms: [], asked: [] });
+
+  // Triage is a paid service when the admin sets a tariff. Emergency detection is not:
+  // the fixed red-flag rule runs before this point for every message and every form.
+  function triagePaywall(ctx, session, turn) {
+    if (domain.payments.triageAllowed(ctx)) return false;
+    const p = domain.payments.triagePayment(ctx);
+    turn.payment = { payment_id: p.id, amount: p.amount, purpose: 'triage' };
+    setMode(session, turn, 'INFO_MODE', 'payment_required');
+    session.state = {};
+    turn.reply(`ارزیابی علائم یک خدمت پولی است (${domain.payments.toman(p.amount)} تومان). پس از پرداخت با دکمه «پرداخت»، دوباره علائم خود را بنویسید یا «🩺 بررسی علائم» را بزنید.\nاگر علامت خطرناکی مثل درد قفسه سینه، تنگی نفس شدید یا بیهوشی دارید، همین حالا با ۱۱۵ تماس بگیرید.`);
+    return true;
+  }
 
   async function handleTriage(ctx, session, turn, nlu, text) {
     const tr = session.state.triage ?? (session.state.triage = newTriageState());
@@ -299,6 +313,8 @@ export function createAssistant({ db, platform, domain, llm, config }) {
     }
     if (form.age_years == null && form.who === 'self' && history?.age_years != null) form.age_years = history.age_years;
     const structured = assessStructured(form, { chronic_conditions: history?.chronic_conditions ?? [] });
+    // Emergencies are always handled, paid or not.
+    if (structured.urgency_level !== 'emergency' && triagePaywall(ctx, session, turn)) return;
     const summary = summarizeForm(form);
     const input = { symptoms: [{ name: summary.slice(0, 500), severity: form.severity, form }], free_text: summary };
     turn.form = { acuity: structured.acuity, safety_net: structured.safety_net, red_flags: structured.red_flags };
@@ -308,6 +324,7 @@ export function createAssistant({ db, platform, domain, llm, config }) {
   async function finishTriage(ctx, session, turn, nlu, text, input, structured) {
     turn.emit('tool_call', { name: 'triage_engine.assess', status: 'started' });
     const result = runTriage(ctx, { userId: ctx.user.sub, patientId: ctx.user.pid, input, structured });
+    if (result.urgency_level !== 'emergency') domain.payments.consumeTriage(ctx);
     turn.emit('tool_call', { name: 'triage_engine.assess', status: 'ok', result: { urgency_level: result.urgency_level, rule_version: result.rule_version } });
     if (structured) turn.emit('triage_result', { triage_result_id: result.id, urgency_level: result.urgency_level, ...turn.form, recommended_specialty: result.recommended_specialty });
     turn.tools.push({ name: 'triage_engine.assess', status: 'ok', result: { id: result.id, urgency_level: result.urgency_level } });
@@ -371,6 +388,7 @@ export function createAssistant({ db, platform, domain, llm, config }) {
 
     if (!b.specialty && !b.doctor_id) {
       if (nlu.intent === 'symptom_report') {
+        if (triagePaywall(ctx, session, turn)) return;
         setMode(session, turn, 'TRIAGE_MODE', 'symptom_reported');
         session.state = { triage: newTriageState() };
         return handleTriage(ctx, session, turn, nlu, text);
@@ -405,6 +423,10 @@ export function createAssistant({ db, platform, domain, llm, config }) {
         const slot = b.selected;
         setMode(session, turn, 'INFO_MODE', 'booked');
         session.state = {};
+        if (r.payment_id) {
+          turn.payment = { payment_id: r.payment_id, amount: r.amount, purpose: 'appointment', appointment_id: r.appointment_id };
+          return turn.reply(`📌 نوبت شما با ${slot.doctor_name} برای ${formatFaDateTime(slot.starts_at)} به‌طور موقت رزرو شد. برای قطعی شدن، ظرف ${toFaDigits(domain.payments.HOLD_MIN)} دقیقه مبلغ ${domain.payments.toman(r.amount)} تومان را با دکمه «پرداخت» بپردازید؛ در غیر این صورت زمان آزاد می‌شود.`);
+        }
         return turn.reply(`✅ نوبت شما با ${slot.doctor_name} برای ${formatFaDateTime(slot.starts_at)} ثبت شد. پیامک تأیید ارسال شد و از بخش «نوبت‌های من» می‌توانید وارد اتاق ویزیت شوید.`);
       } catch (e) {
         if (e.code === 'slot_taken' || e.code === 'slot_in_past') {
@@ -436,6 +458,7 @@ export function createAssistant({ db, platform, domain, llm, config }) {
       return handleBooking(ctx, session, turn, nlu, text);
     }
     if (nlu.intent === 'symptom_report') {
+      if (triagePaywall(ctx, session, turn)) return;
       setMode(session, turn, 'TRIAGE_MODE', 'followup_new_symptom');
       session.state = { triage: newTriageState() };
       return handleTriage(ctx, session, turn, nlu, text);
@@ -515,6 +538,7 @@ export function createAssistant({ db, platform, domain, llm, config }) {
       }
       for (const c of turn.citations) emit('citation', c);
       if (turn.options) emit('options', { items: turn.options });
+      if (turn.payment) emit('payment', turn.payment);
       emit('done', { message_id: messageId, mode: session.mode, trace_id: ctx.traceId, booked_appointment_id: turn.booked ?? null });
       return { messageId, mode: session.mode, reply };
     } finally {

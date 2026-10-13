@@ -216,6 +216,71 @@ CREATE TABLE IF NOT EXISTS outbox_events (
   created_at  TEXT NOT NULL
 );
 
+-- uploaded files (object storage stand-in); content is envelope-encrypted on disk
+CREATE TABLE IF NOT EXISTS files (
+  id            TEXT PRIMARY KEY,
+  tenant_id     TEXT NOT NULL,
+  owner_user_id TEXT NOT NULL REFERENCES users(id),
+  purpose       TEXT NOT NULL CHECK (purpose IN ('doctor_photo','license_card','medical_record')),
+  mime          TEXT NOT NULL,
+  size          INTEGER NOT NULL,
+  sha256        TEXT NOT NULL,
+  storage_key   TEXT NOT NULL,
+  created_at    TEXT NOT NULL
+);
+
+-- patient → doctor medical documents (lab results, imaging, reports …)
+CREATE TABLE IF NOT EXISTS medical_records (
+  id              TEXT PRIMARY KEY,
+  tenant_id       TEXT NOT NULL,
+  patient_id      TEXT NOT NULL REFERENCES patients(id),
+  appointment_id  TEXT REFERENCES appointments(id),
+  category        TEXT NOT NULL CHECK (category IN ('lab','imaging','report','prescription','other')),
+  title           TEXT NOT NULL,
+  note            TEXT,
+  lab_rows        TEXT NOT NULL DEFAULT '[]',
+  file_ids        TEXT NOT NULL DEFAULT '[]',
+  ai_review       TEXT,
+  doctor_opinion  TEXT,
+  opinion_by      TEXT REFERENCES doctors(id),
+  opinion_at      TEXT,
+  created_at      TEXT NOT NULL,
+  deleted_at      TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_records_patient ON medical_records (patient_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_records_appt ON medical_records (appointment_id);
+
+-- tenant settings (tariffs …)
+CREATE TABLE IF NOT EXISTS settings (
+  tenant_id   TEXT NOT NULL,
+  key         TEXT NOT NULL,
+  value       TEXT NOT NULL,
+  updated_at  TEXT NOT NULL,
+  updated_by  TEXT,
+  PRIMARY KEY (tenant_id, key)
+);
+
+CREATE TABLE IF NOT EXISTS payments (
+  id           TEXT PRIMARY KEY,
+  tenant_id    TEXT NOT NULL,
+  user_id      TEXT NOT NULL REFERENCES users(id),
+  purpose      TEXT NOT NULL CHECK (purpose IN ('appointment','triage')),
+  ref_id       TEXT,
+  amount       INTEGER NOT NULL,          -- Rial
+  status       TEXT NOT NULL DEFAULT 'pending'
+               CHECK (status IN ('pending','paid','failed','expired','refund_required','refunded')),
+  gateway      TEXT NOT NULL,
+  authority    TEXT,
+  ref_number   TEXT,
+  card_pan     TEXT,
+  description  TEXT,
+  consumed_at  TEXT,
+  created_at   TEXT NOT NULL,
+  paid_at      TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_payments_user ON payments (user_id, created_at DESC);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_payments_authority ON payments (authority) WHERE authority IS NOT NULL;
+
 CREATE TABLE IF NOT EXISTS audit_logs (
   id         INTEGER PRIMARY KEY AUTOINCREMENT,
   tenant_id  TEXT NOT NULL,
@@ -238,7 +303,31 @@ export function openDb(path) {
   const db = new DatabaseSync(path);
   if (path !== ':memory:') db.exec('PRAGMA journal_mode = WAL;');
   db.exec(SCHEMA);
+  migrate(db);
   return wrap(db);
+}
+
+// Additive migrations for databases created by earlier versions (columns only; data kept).
+const COLUMNS = {
+  users: [
+    ['national_id_enc', 'BLOB'], ['national_id_hash', 'BLOB'],
+    ['identity_verified_at', 'TEXT'], ['identity_source', 'TEXT'],
+  ],
+  doctors: [
+    ['status', "TEXT NOT NULL DEFAULT 'approved'"], // draft | pending_review | approved | rejected | suspended
+    ['photo_file_id', 'TEXT'], ['license_card_file_id', 'TEXT'],
+    ['education', 'TEXT'], ['experience_years', 'INTEGER'],
+    ['review_reason', 'TEXT'], ['reviewed_by', 'TEXT'], ['reviewed_at', 'TEXT'], ['submitted_at', 'TEXT'],
+  ],
+  appointments: [['payment_due_at', 'TEXT']],
+  otp_codes: [['payload', 'TEXT']], // pending registration (role, verified national id) until OTP is confirmed
+};
+function migrate(db) {
+  for (const [table, cols] of Object.entries(COLUMNS)) {
+    const have = new Set(db.prepare(`PRAGMA table_info(${table})`).all().map((c) => c.name));
+    for (const [name, type] of cols) if (!have.has(name)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${name} ${type}`);
+  }
+  db.exec(`CREATE INDEX IF NOT EXISTS idx_users_nid ON users (tenant_id, national_id_hash)`);
 }
 
 function wrap(db) {

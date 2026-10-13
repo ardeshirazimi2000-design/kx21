@@ -2,6 +2,7 @@
 import { ApiError, badRequest, notFound, forbidden, openSse, requireFields, requireUuid } from '../../lib/http.js';
 import { uuid, nowIso, parseJson } from '../../lib/db.js';
 import { checkInput } from './guardrails.js';
+import { assess } from './triage.js';
 import { catalog, validateForm, summarizeForm, FormError } from './triage-structured.js';
 import { requireUser } from '../auth.js';
 
@@ -86,10 +87,13 @@ export function register(router, { db, platform, limiter, domain }) {
       if (s.duration_hours != null && (!Number.isInteger(s.duration_hours) || s.duration_hours < 0)) throw badRequest('duration_hours نامعتبر است');
       if (s.severity != null && (!Number.isInteger(s.severity) || s.severity < 1 || s.severity > 10)) throw badRequest('severity باید بین ۱ تا ۱۰ باشد');
     }
-    const r = assistant.runTriage(ctx, {
-      userId: ctx.user.sub, patientId: ctx.user.pid,
-      input: { symptoms: symptoms.map(({ name, duration_hours, severity }) => ({ name, duration_hours, severity })) },
-    });
+    const input = { symptoms: symptoms.map(({ name, duration_hours, severity }) => ({ name, duration_hours, severity })) };
+    // Paid service, except that an emergency result is always returned.
+    if (!domain.payments.triageAllowed(ctx) && assess(input).urgency_level !== 'emergency') {
+      throw new ApiError(402, 'payment_required', 'برای ارزیابی علائم ابتدا هزینه آن را پرداخت کنید', { fee: domain.payments.triageFee(ctx.tenantId) });
+    }
+    const r = assistant.runTriage(ctx, { userId: ctx.user.sub, patientId: ctx.user.pid, input });
+    if (r.urgency_level !== 'emergency') domain.payments.consumeTriage(ctx);
     platform.audit(ctx, 'triage.assess', `triage:${r.id}`, { urgency_level: r.urgency_level });
     return {
       body: { id: r.id, urgency_level: r.urgency_level, recommended_specialty: r.recommended_specialty,

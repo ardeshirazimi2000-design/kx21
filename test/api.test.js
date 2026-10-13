@@ -10,27 +10,41 @@ after(() => t.close());
 const firstFreeSlot = async (token, specialty = 'general') =>
   (await t.call('GET', `/v1/slots?specialty=${specialty}&limit=50`, { token })).body.items;
 
-test('OTP login, profile with encrypted national id, standard error shape', async () => {
+test('registration: national id + Shahkar before OTP, role-specific entry, verified id reused in profile', async () => {
   const bad = await t.call('POST', '/v1/auth/otp/request', { body: { phone: '123' } });
   assert.equal(bad.status, 422);
   assert.deepEqual(Object.keys(bad.body).sort(), ['code', 'message', 'trace_id']);
 
-  const r1 = await t.call('POST', '/v1/auth/otp/request', { body: { phone: '+989121112233' } });
+  // A new number must register with a national id; no OTP is sent before that.
+  const r0 = await t.call('POST', '/v1/auth/otp/request', { body: { phone: '+989121112233', role: 'patient' } });
+  assert.equal(r0.body.registration_required, true);
+  assert.equal(r0.body.dev_code, undefined);
+  const badNid = await t.call('POST', '/v1/auth/otp/request', { body: { phone: '09121112233', role: 'patient', national_id: '1234567890' } });
+  assert.equal(badNid.body.code, 'invalid_national_id');
+
+  const r1 = await t.call('POST', '/v1/auth/otp/request', { body: { phone: '09121112233', role: 'patient', national_id: NATIONAL_IDS[5] } });
   assert.equal(r1.status, 202);
-  const wrong = await t.call('POST', '/v1/auth/otp/verify', { body: { phone: '09121112233', code: '000000' === r1.body.dev_code ? '111111' : '000000' } });
+  assert.equal(r1.body.identity_verified, true);
+  const wrong = await t.call('POST', '/v1/auth/otp/verify', { body: { phone: '09121112233', code: r1.body.dev_code === '000000' ? '111111' : '000000' } });
   assert.equal(wrong.status, 401);
   const ok = await t.call('POST', '/v1/auth/otp/verify', { body: { phone: '09121112233', code: r1.body.dev_code } });
   assert.equal(ok.status, 200);
   const token = ok.body.access_token;
 
+  // Same national id cannot open a second patient account; doctors' entry refuses patient numbers.
+  const dup = await t.call('POST', '/v1/auth/otp/request', { body: { phone: '09121112234', role: 'patient', national_id: NATIONAL_IDS[5] } });
+  assert.equal(dup.body.code, 'national_id_taken');
+  const mismatch = await t.call('POST', '/v1/auth/otp/request', { body: { phone: '09121112233', role: 'doctor' } });
+  assert.equal(mismatch.body.code, 'role_mismatch');
+
   const noProfile = await t.call('GET', '/v1/patients/me', { token });
   assert.equal(noProfile.body.code, 'profile_incomplete');
-  const invalidNid = await t.call('PUT', '/v1/patients/me', { token, body: { full_name: 'علی', national_id: '1234567890', dob: '1990-01-01' } });
-  assert.equal(invalidNid.body.code, 'invalid_national_id');
-  const created = await t.call('PUT', '/v1/patients/me', { token, body: { full_name: 'علی رضایی', national_id: NATIONAL_IDS[5], dob: '1990-01-01' } });
+  const otherNid = await t.call('PUT', '/v1/patients/me', { token, body: { full_name: 'علی', national_id: NATIONAL_IDS[4], dob: '1990-01-01' } });
+  assert.equal(otherNid.body.code, 'national_id_mismatch');
+  // The verified id is used even when the form does not send one.
+  const created = await t.call('PUT', '/v1/patients/me', { token, body: { full_name: 'علی رضایی', dob: '1990-01-01' } });
   assert.equal(created.status, 201);
   assert.equal(created.body.national_id, '******9645');
-
   const row = t.app.db.get('SELECT national_id_enc FROM patients WHERE id = ?', created.body.id);
   assert.ok(!Buffer.from(row.national_id_enc).toString().includes('0076229645'), 'national id must be encrypted at rest');
 });
@@ -204,7 +218,7 @@ test('audit log is append-only', () => {
 });
 
 test('rate limiting returns 429 with the standard error shape', async () => {
-  const phone = '09129998877';
+  const phone = DEMO_ACCOUNTS.doctors[7].phone; // existing account → every request sends an OTP
   for (let i = 0; i < 3; i++) await t.call('POST', '/v1/auth/otp/request', { body: { phone } });
   const r = await t.call('POST', '/v1/auth/otp/request', { body: { phone } });
   assert.equal(r.status, 429);

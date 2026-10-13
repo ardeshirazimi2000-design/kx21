@@ -24,8 +24,13 @@ export async function startApp(overrides = {}) {
     return { status: res.status, body: json, text, headers: res.headers };
   }
 
-  async function login(phone) {
-    const r1 = await call('POST', '/v1/auth/otp/request', { body: { phone } });
+  // New numbers register with a national id (Shahkar is mocked in dev: valid checksum ⇒ match).
+  async function login(phone, { nationalId, role } = {}) {
+    let r1 = await call('POST', '/v1/auth/otp/request', { body: { phone, role } });
+    if (r1.body?.registration_required) {
+      r1 = await call('POST', '/v1/auth/otp/request', { body: { phone, role, national_id: nationalId ?? randomNationalId() } });
+    }
+    if (!r1.body?.dev_code) throw new Error(`otp request failed: ${JSON.stringify(r1.body)}`);
     const r2 = await call('POST', '/v1/auth/otp/verify', { body: { phone, code: r1.body.dev_code } });
     if (r2.body.mfa_required) {
       const r3 = await call('POST', '/v1/auth/mfa/verify', { body: { mfa_token: r2.body.mfa_token, code: r2.body.dev_code } });
@@ -37,7 +42,7 @@ export async function startApp(overrides = {}) {
   // Registers a patient with profile + telehealth consent; returns a token that carries pid.
   async function newPatient({ phone, nationalId = '0499370899', consents = ['telehealth'] } = {}) {
     const p = phone ?? `0912${String(Math.floor(1e6 + Math.random() * 8e6)).padStart(7, '0')}`;
-    let token = await login(p);
+    let token = await login(p, { nationalId });
     const r = await call('PUT', '/v1/patients/me', { token, body: { full_name: 'بیمار آزمایشی', national_id: nationalId, dob: '1990-05-01' } });
     if (r.status !== 201) throw new Error(`profile failed: ${r.text}`);
     for (const type of consents) await call('POST', '/v1/patients/me/consents', { token, body: { type } });

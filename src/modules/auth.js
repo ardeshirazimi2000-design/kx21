@@ -1,9 +1,9 @@
 // Auth service (Keycloak in production): phone OTP, JWT issuance, RBAC and mandatory MFA
 // for doctor/admin/operator accounts.
 import { ApiError, badRequest, forbidden, requireFields } from '../lib/http.js';
-import { signJwt, verifyJwt, sha256, randomDigits, safeEqualHex } from '../lib/crypto.js';
+import { signJwt, verifyJwt, sha256, randomDigits, safeEqualHex, seal, unseal, lookupHash } from '../lib/crypto.js';
 import { uuid, nowIso } from '../lib/db.js';
-import { normalizePhone } from '../lib/fa.js';
+import { normalizePhone, normalizeFa, isValidNationalId } from '../lib/fa.js';
 
 const OTP_TTL_MS = 2 * 60 * 1000;
 const OTP_MAX_ATTEMPTS = 5;
@@ -26,17 +26,17 @@ export function requireUser(ctx, ...roles) {
   return ctx.user;
 }
 
-export function register(router, { db, keys, platform, config, limiter }) {
-  const issueOtp = (ctx, target, purpose) => {
+export function register(router, { db, keys, platform, config, limiter, domain }) {
+  const issueOtp = (ctx, target, purpose, payload = null) => {
     const code = randomDigits(6);
     db.run(
       `UPDATE otp_codes SET used_at = ? WHERE tenant_id = ? AND target = ? AND purpose = ? AND used_at IS NULL`,
       nowIso(), ctx.tenantId, target, purpose,
     );
     db.run(
-      'INSERT INTO otp_codes (id, tenant_id, target, purpose, code_hash, expires_at, created_at) VALUES (?,?,?,?,?,?,?)',
+      'INSERT INTO otp_codes (id, tenant_id, target, purpose, code_hash, expires_at, created_at, payload) VALUES (?,?,?,?,?,?,?,?)',
       uuid(), ctx.tenantId, target, purpose, sha256(`${target}:${code}`),
-      new Date(Date.now() + OTP_TTL_MS).toISOString(), nowIso(),
+      new Date(Date.now() + OTP_TTL_MS).toISOString(), nowIso(), payload ? JSON.stringify(payload) : null,
     );
     return code;
   };
@@ -57,6 +57,7 @@ export function register(router, { db, keys, platform, config, limiter }) {
       throw invalid;
     }
     db.run('UPDATE otp_codes SET used_at = ? WHERE id = ?', nowIso(), row.id);
+    return row.payload ? JSON.parse(row.payload) : null;
   };
 
   const accessToken = (user) => {
@@ -79,35 +80,80 @@ export function register(router, { db, keys, platform, config, limiter }) {
     requireFields(ctx.body, ['phone']);
     const phone = normalizePhone(ctx.body.phone);
     if (!phone) throw badRequest('شماره موبایل معتبر نیست (مثال: 09121234567)', 'invalid_phone');
+    // role = which entry the user chose on the start screen: 'patient' or 'doctor' (doctors and staff).
+    const intent = ctx.body.role === 'doctor' ? 'doctor' : ctx.body.role === 'patient' ? 'patient' : null;
+    const existing = db.get('SELECT id, role, deleted_at FROM users WHERE tenant_id = ? AND phone = ?', ctx.tenantId, phone);
+    if (existing?.deleted_at) throw forbidden('این حساب غیرفعال شده است', 'account_disabled');
+    if (existing && intent) {
+      const staff = existing.role !== 'patient';
+      if (intent === 'patient' && staff) throw new ApiError(409, 'role_mismatch', 'این شماره به‌عنوان پزشک/کادر ثبت شده است؛ از گزینه «ورود پزشکان» استفاده کنید');
+      if (intent === 'doctor' && !staff) throw new ApiError(409, 'role_mismatch', 'این شماره به‌عنوان بیمار ثبت شده است؛ از گزینه «ورود بیماران» استفاده کنید');
+    }
+
+    let payload = null;
+    if (!existing) {
+      // Registration: national code + mobile must match in Shahkar before any account is created.
+      const nid = ctx.body.national_id ? normalizeFa(ctx.body.national_id) : null;
+      if (!nid) return { body: { registration_required: true } };
+      if (!isValidNationalId(nid)) throw badRequest('کد ملی معتبر نیست', 'invalid_national_id');
+      limiter.hit(`shahkar:${ctx.tenantId}:${phone}`, 5, 60 * 60 * 1000);
+      const role = intent ?? 'patient';
+      const nidHash = lookupHash(keys, `${ctx.tenantId}:${nid}`);
+      const taken = db.get('SELECT 1 FROM users WHERE tenant_id = ? AND national_id_hash = ? AND role = ? AND deleted_at IS NULL', ctx.tenantId, nidHash, role);
+      if (taken) throw new ApiError(409, 'national_id_taken', 'برای این کد ملی قبلاً حساب ایجاد شده است؛ با شماره ثبت‌شده وارد شوید');
+      const v = await domain.identity.verifyMobileOwnership({ nationalId: nid, mobile: phone });
+      platform.audit(ctx, 'identity.shahkar', `phone:${phone}`, { matched: v.matched, source: v.source });
+      if (!v.matched) {
+        throw badRequest('این شماره موبایل به نام صاحب کد ملی واردشده ثبت نشده است (استعلام شاهکار). لطفاً شماره‌ای که به نام خودتان است وارد کنید.', 'shahkar_mismatch');
+      }
+      payload = { role, nid, source: v.source };
+    }
     limiter.hit(`otp:${ctx.tenantId}:${phone}`, 3, 10 * 60 * 1000);
-    const code = issueOtp(ctx, phone, 'login');
+    const code = issueOtp(ctx, phone, 'login', payload && { ...payload, nid: seal(keys, payload.nid).toString('base64') });
     platform.notify(ctx, { channel: 'sms', target: phone, body: `کد ورود شما: ${code}` });
-    platform.audit(ctx, 'auth.otp_requested', `phone:${phone}`);
-    return { status: 202, body: { sent: true, expires_in: OTP_TTL_MS / 1000, ...(config.devMode ? { dev_code: code } : {}) } };
+    platform.audit(ctx, 'auth.otp_requested', `phone:${phone}`, { registration: !!payload });
+    return {
+      status: 202,
+      body: { sent: true, registration: !!payload, identity_verified: !!payload, expires_in: OTP_TTL_MS / 1000, ...(config.devMode ? { dev_code: code } : {}) },
+    };
   });
 
   router.post('/v1/auth/otp/verify', async (ctx) => {
     requireFields(ctx.body, ['phone', 'code']);
     const phone = normalizePhone(ctx.body.phone);
     if (!phone) throw badRequest('شماره موبایل معتبر نیست', 'invalid_phone');
-    consumeOtp(ctx, phone, 'login', ctx.body.code);
+    const reg = consumeOtp(ctx, phone, 'login', ctx.body.code);
 
     let user = db.get('SELECT * FROM users WHERE tenant_id = ? AND phone = ?', ctx.tenantId, phone);
     if (user?.deleted_at) throw forbidden('این حساب غیرفعال شده است', 'account_disabled');
+    let justRegistered = false;
     if (!user) {
+      if (!reg) throw new ApiError(409, 'registration_required', 'ابتدا کد ملی را برای ثبت‌نام وارد کنید');
+      const nidSealed = Buffer.from(reg.nid, 'base64');
+      const nid = unseal(keys, nidSealed);
       user = {
-        id: uuid(), tenant_id: ctx.tenantId, role: 'patient', phone, email: null,
+        id: uuid(), tenant_id: ctx.tenantId, role: reg.role, phone, email: null,
         full_name: null, mfa_enabled: 0, created_at: nowIso(),
       };
-      db.run(
-        'INSERT INTO users (id, tenant_id, role, phone, full_name, created_at) VALUES (?,?,?,?,?,?)',
-        user.id, user.tenant_id, user.role, user.phone, null, user.created_at,
-      );
-      platform.publish(ctx, 'user.registered', { user_id: user.id, role: 'patient' });
+      db.tx(() => {
+        db.run(
+          `INSERT INTO users (id, tenant_id, role, phone, full_name, created_at, national_id_enc, national_id_hash, identity_verified_at, identity_source)
+           VALUES (?,?,?,?,?,?,?,?,?,?)`,
+          user.id, user.tenant_id, user.role, user.phone, null, user.created_at,
+          seal(keys, nid), lookupHash(keys, `${ctx.tenantId}:${nid}`), nowIso(), reg.source,
+        );
+        if (reg.role === 'doctor') domain.patient.createDoctorDraft(ctx.tenantId, user.id);
+      });
+      const who = await domain.identity.inquireIdentity({ nationalId: nid });
+      if (who?.full_name) db.run('UPDATE users SET full_name = ? WHERE id = ?', who.full_name, user.id);
+      user = db.get('SELECT * FROM users WHERE id = ?', user.id);
+      platform.publish(ctx, 'user.registered', { user_id: user.id, role: user.role });
+      justRegistered = true;
     }
     ctx.user = { sub: user.id };
 
-    if (MFA_ROLES.has(user.role)) {
+    // A doctor who has just proved Shahkar + OTP gets in to complete the profile; every later login is 2-step.
+    if (MFA_ROLES.has(user.role) && !justRegistered) {
       // Second factor goes to a different channel (email; falls back to push in production).
       const code = issueOtp(ctx, `mfa:${user.id}`, 'mfa');
       platform.notify(ctx, {
@@ -151,7 +197,13 @@ export function register(router, { db, keys, platform, config, limiter }) {
 
   router.get('/v1/auth/me', async (ctx) => {
     requireUser(ctx);
-    const user = db.get('SELECT id, role, phone, email, full_name, mfa_enabled FROM users WHERE id = ?', ctx.user.sub);
-    return { body: { ...user, patient_id: ctx.user.pid ?? null, doctor_id: ctx.user.did ?? null } };
+    const user = db.get('SELECT id, role, phone, email, full_name, mfa_enabled, identity_verified_at, identity_source FROM users WHERE id = ?', ctx.user.sub);
+    const doc = db.get('SELECT id, status, review_reason FROM doctors WHERE user_id = ?', ctx.user.sub);
+    return {
+      body: {
+        ...user, patient_id: ctx.user.pid ?? null, doctor_id: doc?.id ?? ctx.user.did ?? null,
+        doctor_status: doc?.status ?? null, doctor_review_reason: doc?.review_reason ?? null,
+      },
+    };
   });
 }

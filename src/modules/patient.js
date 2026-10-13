@@ -32,7 +32,7 @@ const strList = (v, name) => {
   return v.map((x) => x.trim()).filter(Boolean);
 };
 
-export function createPatientDomain({ db, keys }) {
+export function createPatientDomain({ db, keys, files = () => null }) {
   const patientByUser = (userId) =>
     db.get('SELECT * FROM patients WHERE user_id = ? AND deleted_at IS NULL', userId);
 
@@ -69,6 +69,7 @@ export function createPatientDomain({ db, keys }) {
     };
   };
 
+  // Public doctor card / profile (photo via short-lived signed URL).
   const doctorView = (d) => {
     const u = db.get('SELECT full_name FROM users WHERE id = ?', d.user_id);
     return {
@@ -76,11 +77,27 @@ export function createPatientDomain({ db, keys }) {
       full_name: u?.full_name ?? null,
       specialty: d.specialty,
       specialty_label: SPECIALTIES[d.specialty] ?? d.specialty,
-      license_no: d.license_no,
+      license_no: String(d.license_no).startsWith('pending-') ? null : d.license_no,
       bio: d.bio,
+      education: d.education ?? null,
+      experience_years: d.experience_years ?? null,
       languages: parseJson(d.languages, ['fa']),
+      photo_url: d.photo_file_id ? files().signedUrl(d.photo_file_id) : null,
+      status: d.status ?? 'approved',
     };
   };
+
+  // Self-registered doctor (after Shahkar + OTP): empty profile in "draft" until submitted for review.
+  function createDoctorDraft(tenantId, userId) {
+    const kp = newSigningKeyPair(keys);
+    const id = uuid();
+    db.run(
+      `INSERT INTO doctors (id, tenant_id, user_id, specialty, license_no, sign_public_pem, sign_private_sealed, status)
+       VALUES (?,?,?,?,?,?,?,'draft')`,
+      id, tenantId, userId, 'general', `pending-${id.slice(0, 8)}`, kp.publicPem, kp.privateSealed,
+    );
+    return id;
+  }
 
   function createDoctor(tenantId, { phone, full_name, email, specialty, license_no, bio }) {
     const p = normalizePhone(phone);
@@ -109,7 +126,7 @@ export function createPatientDomain({ db, keys }) {
     });
   }
 
-  return { patientByUser, activeConsent, doctorHasRelation, patientView, doctorView, createDoctor };
+  return { patientByUser, activeConsent, doctorHasRelation, patientView, doctorView, createDoctor, createDoctorDraft };
 }
 
 export function register(router, { db, keys, platform, domain }) {
@@ -157,8 +174,14 @@ export function register(router, { db, keys, platform, domain }) {
     let patient;
     try {
       if (!existing) {
-        requireFields(b, ['full_name', 'national_id', 'dob']);
-        const nid = normalizeFa(b.national_id);
+        // National id verified at registration (Shahkar) takes precedence over anything typed now.
+        const u = db.get('SELECT national_id_enc FROM users WHERE id = ?', ctx.user.sub);
+        const verifiedNid = u?.national_id_enc ? unseal(keys, u.national_id_enc) : null;
+        if (verifiedNid && b.national_id && normalizeFa(b.national_id) !== verifiedNid) {
+          throw badRequest('کد ملی با کد ملی تأییدشده هنگام ثبت‌نام یکسان نیست', 'national_id_mismatch');
+        }
+        requireFields({ ...b, national_id: verifiedNid ?? b.national_id }, ['full_name', 'national_id', 'dob']);
+        const nid = verifiedNid ?? normalizeFa(b.national_id);
         if (!isValidNationalId(nid)) throw badRequest('کد ملی معتبر نیست', 'invalid_national_id');
         const id = uuid();
         db.run(
@@ -294,18 +317,23 @@ export function register(router, { db, keys, platform, domain }) {
 
   router.get('/v1/doctors', async (ctx) => {
     requireUser(ctx);
-    const { specialty } = ctx.query;
-    const rows = specialty
-      ? db.all('SELECT * FROM doctors WHERE tenant_id = ? AND specialty = ? AND deleted_at IS NULL', ctx.tenantId, specialty)
-      : db.all('SELECT * FROM doctors WHERE tenant_id = ? AND deleted_at IS NULL', ctx.tenantId);
-    return { body: { items: rows.map(doctorView) } };
+    const { specialty, q } = ctx.query;
+    let rows = db.all(
+      `SELECT d.* FROM doctors d JOIN users u ON u.id = d.user_id
+       WHERE d.tenant_id = ? AND d.deleted_at IS NULL AND d.status = 'approved' ${specialty ? 'AND d.specialty = ?' : ''}
+       ORDER BY u.full_name`,
+      ctx.tenantId, ...(specialty ? [specialty] : []),
+    );
+    let items = rows.map(doctorView);
+    if (q) { const t = String(q).trim(); items = items.filter((d) => (d.full_name ?? '').includes(t) || d.specialty_label.includes(t)); }
+    return { body: { items } };
   });
 
   router.get('/v1/doctors/:id', async (ctx) => {
     requireUser(ctx);
     const d = db.get('SELECT * FROM doctors WHERE id = ? AND tenant_id = ? AND deleted_at IS NULL',
       requireUuid(ctx.params.id, 'id'), ctx.tenantId);
-    if (!d) throw notFound('پزشک');
+    if (!d || (d.status !== 'approved' && ctx.user.role !== 'admin')) throw notFound('پزشک');
     return { body: doctorView(d) };
   });
 

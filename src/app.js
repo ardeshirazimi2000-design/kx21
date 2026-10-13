@@ -3,8 +3,9 @@
 // tables and talks to the others through the domain objects / events defined here, so it can be
 // split into its own deployable later (design doc §1, "5 services in MVP").
 import http from 'node:http';
+import { tmpdir } from 'node:os';
 import { readFile } from 'node:fs/promises';
-import { extname, join, normalize } from 'node:path';
+import { dirname, extname, join, normalize } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Router, RateLimiter, readJson, sendJson, sendError, newTraceId, ApiError } from './lib/http.js';
 import { openDb } from './lib/db.js';
@@ -15,6 +16,11 @@ import * as patient from './modules/patient.js';
 import * as appointment from './modules/appointment.js';
 import * as consultation from './modules/consultation.js';
 import * as aiRoutes from './modules/ai/routes.js';
+import * as files from './modules/files.js';
+import * as doctors from './modules/doctors.js';
+import * as payments from './modules/payments.js';
+import * as records from './modules/records.js';
+import { createIdentityService } from './modules/identity.js';
 import { createAssistant } from './modules/ai/assistant.js';
 import { createLlm } from './modules/ai/llm.js';
 import { seed } from './seed.js';
@@ -44,6 +50,20 @@ export function loadConfig(env = process.env) {
     turnUrls: (env.TURN_URLS || '').split(',').map((u) => u.trim()).filter(Boolean),
     turnSecret: env.TURN_SECRET || '',
     stunUrls: (env.STUN_URLS ?? 'stun:stun.l.google.com:19302').split(',').map((u) => u.trim()).filter(Boolean),
+    // Identity (s.api.ir): Shahkar mobile ↔ national-code match; optional identity inquiry URL.
+    sapiToken: env.SAPI_TOKEN || '',
+    sapiBase: env.SAPI_BASE || 'https://s.api.ir/api/sw1',
+    identityInquiryUrl: env.IDENTITY_INQUIRY_URL || '',
+    // Uploaded files (encrypted at rest). Defaults next to the database.
+    filesDir: env.FILES_DIR || '',
+    // Payments (ZarinPal v4). Without a merchant id, development uses a mock gateway.
+    zarinpalMerchantId: env.ZARINPAL_MERCHANT_ID || '',
+    zarinpalSandbox: env.ZARINPAL_SANDBOX === 'true',
+    publicBaseUrl: (env.PUBLIC_BASE_URL || '').replace(/\/$/, ''),
+    // Optional self-hosted vision model for the doctor's AI pre-read of images.
+    visionLlmBaseUrl: env.VISION_LLM_BASE_URL || '',
+    visionLlmModel: env.VISION_LLM_MODEL || 'qwen2.5-vl-7b-instruct',
+    disableSweeper: false,
     enforceJoinWindow: env.ENFORCE_JOIN_WINDOW === 'true',
     streamDelayMs: Number(env.STREAM_DELAY_MS ?? 12),
     logNotifications: env.LOG_NOTIFICATIONS !== 'false',
@@ -63,8 +83,12 @@ export function createApp(overrides = {}) {
   const router = new Router();
 
   const domain = {};
-  domain.patient = patient.createPatientDomain({ db, keys });
-  domain.appointment = appointment.createAppointmentDomain({ db, platform, patientDomain: domain.patient });
+  if (!config.filesDir) config.filesDir = config.dbPath === ':memory:' ? join(tmpdir(), `kx21-files-${process.pid}-${Date.now()}`) : join(dirname(config.dbPath), 'files');
+  domain.identity = createIdentityService(config);
+  domain.files = files.createFilesDomain({ db, keys, config });
+  domain.patient = patient.createPatientDomain({ db, keys, files: () => domain.files });
+  domain.payments = payments.createPaymentsDomain({ db, platform, config });
+  domain.appointment = appointment.createAppointmentDomain({ db, platform, patientDomain: domain.patient, payments: domain.payments });
   const deps = { db, keys, platform, config, limiter, domain };
 
   auth.register(router, deps);
@@ -73,6 +97,10 @@ export function createApp(overrides = {}) {
   consultation.register(router, deps); // also sets domain.prescription
   domain.assistant = createAssistant({ db, platform, domain, config, llm: createLlm(config) });
   aiRoutes.register(router, deps);
+  files.register(router, deps);
+  doctors.register(router, deps);
+  payments.register(router, deps);
+  records.register(router, deps);
 
   router.get('/healthz', async () => ({ body: { status: 'ok' } }));
   router.get('/v1/config', async () => ({
@@ -150,7 +178,9 @@ export function createApp(overrides = {}) {
       auth.authenticate(ctx, keys);
       if (ctx.user && headerTenant && headerTenant !== ctx.user.tid) throw new ApiError(403, 'tenant_mismatch', 'tenant نامعتبر است');
       if (ctx.user) limiter.hit(`user:${ctx.user.sub}`, 300, 60_000);
-      ctx.body = await readJson(req);
+      // File uploads stream the raw body to the handler; everything else is JSON.
+      const ctype = String(req.headers['content-type'] ?? '');
+      ctx.body = /^(image\/|application\/(pdf|octet-stream))/.test(ctype) ? {} : await readJson(req);
       if (ctx.body === null || typeof ctx.body !== 'object' || Array.isArray(ctx.body)) throw new ApiError(422, 'invalid_json', 'بدنه باید شیء JSON باشد');
 
       const out = await m.handler(ctx);

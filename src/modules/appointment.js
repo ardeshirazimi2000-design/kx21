@@ -12,14 +12,14 @@ import { SPECIALTIES } from './patient.js';
 const CHANNELS = ['video', 'audio', 'chat'];
 const MAX_SLOTS_PER_REQUEST = 64;
 
-export function createAppointmentDomain({ db, platform, patientDomain }) {
+export function createAppointmentDomain({ db, platform, patientDomain, payments = null }) {
   const slotView = (s) => ({ id: s.id, doctor_id: s.doctor_id, starts_at: s.starts_at, ends_at: s.ends_at });
 
   // Free future slots, optionally filtered by doctor or specialty. Used by the REST API and
   // by the assistant's check_availability tool.
   function checkAvailability(tenantId, { doctorId, specialty, from, limit = 20 } = {}) {
     const fromIso = from && !isNaN(Date.parse(from)) ? new Date(from).toISOString() : nowIso();
-    const where = ['s.tenant_id = ?', 's.starts_at > ?', 'd.deleted_at IS NULL',
+    const where = ['s.tenant_id = ?', 's.starts_at > ?', 'd.deleted_at IS NULL', "d.status = 'approved'",
       `NOT EXISTS (SELECT 1 FROM appointments a WHERE a.slot_id = s.id AND a.status IN ('pending','confirmed'))`];
     const params = [tenantId, fromIso];
     if (doctorId) { where.push('s.doctor_id = ?'); params.push(doctorId); }
@@ -50,7 +50,12 @@ export function createAppointmentDomain({ db, platform, patientDomain }) {
       starts_at: slot?.starts_at, ends_at: slot?.ends_at,
       doctor: doc && { id: doc.id, full_name: doc.full_name, specialty: doc.specialty, specialty_label: SPECIALTIES[doc.specialty] },
       consultation: consultation ?? null,
+      payment_due_at: a.payment_due_at ?? null,
     };
+    if (payments && (!forRole || forRole === 'patient' || forRole === 'admin')) {
+      const p = db.get(`SELECT * FROM payments WHERE purpose = 'appointment' AND ref_id = ? ORDER BY created_at DESC LIMIT 1`, a.id);
+      out.payment = p ? payments.view(p) : null;
+    }
     if (forRole && forRole !== 'patient') {
       const pu = db.get('SELECT u.full_name FROM patients p JOIN users u ON u.id = p.user_id WHERE p.id = ?', a.patient_id);
       out.patient = { id: a.patient_id, full_name: pu?.full_name ?? null };
@@ -86,6 +91,7 @@ export function createAppointmentDomain({ db, platform, patientDomain }) {
     }
     const slot = db.get('SELECT * FROM slots WHERE id = ? AND tenant_id = ?', slotId, ctx.tenantId);
     if (!slot || slot.doctor_id !== doctorId) throw notFound('زمان انتخاب‌شده');
+    if (db.get('SELECT status FROM doctors WHERE id = ?', doctorId)?.status !== 'approved') throw conflict('این پزشک فعلاً نوبت نمی‌پذیرد', 'doctor_not_available');
     if (slot.starts_at <= nowIso()) throw conflict('زمان این نوبت گذشته است', 'slot_in_past');
     if (triageResultId) {
       const t = db.get('SELECT user_id, patient_id FROM triage_results WHERE id = ? AND tenant_id = ?', triageResultId, ctx.tenantId);
@@ -96,14 +102,20 @@ export function createAppointmentDomain({ db, platform, patientDomain }) {
 
     const id = uuid();
     const ts = nowIso();
+    let billing = { status: 'confirmed', payment: null, due_at: null };
     try {
       db.tx(() => {
+        const patientUser = db.get('SELECT user_id FROM patients WHERE id = ?', patientId)?.user_id;
+        const doctorName = db.get('SELECT u.full_name FROM doctors d JOIN users u ON u.id = d.user_id WHERE d.id = ?', doctorId)?.full_name;
         db.run(
           `INSERT INTO appointments (id, tenant_id, patient_id, doctor_id, slot_id, status, channel, idempotency_key,
              request_hash, booked_via, triage_result_id, created_at, updated_at)
-           VALUES (?,?,?,?,?,'confirmed',?,?,?,?,?,?,?)`,
+           VALUES (?,?,?,?,?,'pending',?,?,?,?,?,?,?)`,
           id, ctx.tenantId, patientId, doctorId, slotId, channel, scopedKey, requestHash, bookedVia, triageResultId, ts, ts,
         );
+        // A visit with a tariff stays "pending" (slot held) until the payment is verified.
+        if (payments) billing = payments.forAppointment(ctx, { appointmentId: id, patientUserId: patientUser, channel, doctorName });
+        db.run('UPDATE appointments SET status = ?, payment_due_at = ? WHERE id = ?', billing.status, billing.due_at ?? null, id);
         db.run(
           'INSERT INTO consultations (id, tenant_id, appointment_id, room_id, channel) VALUES (?,?,?,?,?)',
           uuid(), ctx.tenantId, id, `room_${uuid().replace(/-/g, '').slice(0, 16)}`, channel,
@@ -119,11 +131,13 @@ export function createAppointmentDomain({ db, platform, patientDomain }) {
       throw e;
     }
     const appt = db.get('SELECT * FROM appointments WHERE id = ?', id);
-    platform.audit(ctx, 'appointment.book', `appointment:${id}`, { via: bookedVia, slot_id: slotId });
-    platform.publish(ctx, 'appointment.booked', {
-      appointment_id: id, patient_id: patientId, doctor_id: doctorId, slot_id: slotId, starts_at: slot.starts_at, booked_via: bookedVia,
-    });
-    return { appointment: appt, replayed: false };
+    platform.audit(ctx, 'appointment.book', `appointment:${id}`, { via: bookedVia, slot_id: slotId, awaiting_payment: !!billing.payment });
+    if (billing.status === 'confirmed') {
+      platform.publish(ctx, 'appointment.booked', {
+        appointment_id: id, patient_id: patientId, doctor_id: doctorId, slot_id: slotId, starts_at: slot.starts_at, booked_via: bookedVia,
+      });
+    }
+    return { appointment: appt, replayed: false, payment: billing.payment };
   }
 
   function cancel(ctx, appt, reason = null) {
@@ -195,8 +209,14 @@ export function register(router, { db, platform, domain }) {
     return { body: { items: rows.map((s) => ({ id: s.id, starts_at: s.starts_at, ends_at: s.ends_at, booked: !!s.appointment_id })) } };
   });
 
-  router.post('/v1/doctors/me/slots', async (ctx) => {
+  const requireApprovedDoctor = (ctx) => {
     requireUser(ctx, 'doctor');
+    const st = db.get('SELECT status FROM doctors WHERE id = ?', ctx.user.did)?.status;
+    if (st !== 'approved') throw forbidden('انتشار نوبت پس از تأیید مدارک توسط مدیر ممکن است', 'doctor_not_approved');
+  };
+
+  router.post('/v1/doctors/me/slots', async (ctx) => {
+    requireApprovedDoctor(ctx);
     requireFields(ctx.body, ['starts_at', 'ends_at']);
     const start = Date.parse(ctx.body.starts_at);
     const end = Date.parse(ctx.body.ends_at);
