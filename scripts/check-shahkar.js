@@ -4,6 +4,7 @@
 // Reads SAPI_TOKEN / SAPI_BASE from the environment or /etc/kx21.env. The token is never printed.
 import { readFileSync } from 'node:fs';
 import { callShahkar, callSapi, cleanToken, readVerdict, readPerson } from '../src/modules/identity.js';
+import { normalizeFa, isValidNationalId } from '../src/lib/fa.js';
 
 const env = { ...process.env };
 try {
@@ -15,11 +16,15 @@ try {
 
 const args = process.argv.slice(2);
 const person = args[0] === 'person';
-const [nationalId, mobile] = person ? args.slice(1) : args; // for `person`, the 2nd value is the Jalali birth date
+// Persian/Arabic digits are accepted; for `person`, the 2nd value is the Jalali birth date (1371/1/1).
+const [nationalId, mobile] = (person ? args.slice(1) : args).map((a) => normalizeFa(a ?? '').replace(/\s/g, '') || undefined);
 if (!nationalId || !mobile) {
   console.log('usage: node scripts/check-shahkar.js <nationalCode> <mobile>\n       node scripts/check-shahkar.js person <nationalCode> <1371/1/1>');
   process.exit(1);
 }
+if (!/^\d{10}$/.test(nationalId)) { console.log(`national code must be exactly 10 digits (got ${nationalId.length} characters: "${nationalId.replace(/\d/g, '#')}")`); process.exit(1); }
+if (!isValidNationalId(nationalId)) console.log('warning: national code checksum is invalid');
+if (person && !/^1[34]\d\d\/\d{1,2}\/\d{1,2}$/.test(mobile)) { console.log('birth date must be Jalali like 1371/1/1'); process.exit(1); }
 const token = cleanToken(env.SAPI_TOKEN);
 const base = env.SAPI_BASE || 'https://s.api.ir/api/sw1';
 const raw = String(env.SAPI_TOKEN ?? '');

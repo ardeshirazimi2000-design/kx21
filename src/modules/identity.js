@@ -111,6 +111,10 @@ export function createIdentityService(config, fetchImpl = globalThis.fetch) {
       throw new ApiError(503, 'identity_service_unavailable', `خطا در استعلام هویت (HTTP ${r.status})`);
     }
     const p = readPerson(r.body);
+    if (p?.error) {
+      console.error('[person-info] service error:', p.message);
+      throw new ApiError(503, 'identity_service_unavailable', `خطا در استعلام هویت${p.message ? ` (${p.message})` : ''}`);
+    }
     if (p === undefined) {
       const shape = JSON.stringify(r.body, (k, v) => (typeof v === 'string' ? '…' : v))?.slice(0, 400) ?? r.text.slice(0, 200);
       console.error('[person-info] unrecognised response shape:', shape);
@@ -133,9 +137,12 @@ export function readPerson(body) {
   if (!body || typeof body !== 'object') return undefined;
   const failed = body.success === false || (typeof body.code === 'number' && body.code !== 0);
   const data = body.data ?? body.result ?? (failed ? null : body);
-  if (failed || data === null || data === false) {
-    return { found: false, message: typeof body.message === 'string' ? body.message : null };
+  const message = typeof body.message === 'string' ? body.message : null;
+  // Request/credential/server errors (e.g. code 400 "data is invalid") are not a "no match".
+  if (typeof body.code === 'number' && (body.code === 400 || body.code === 401 || body.code === 403 || body.code === 429 || body.code >= 500)) {
+    return { found: false, error: true, message };
   }
+  if (failed || data === null || data === false) return { found: false, message };
   if (typeof data !== 'object') return undefined;
   const find = (re) => {
     const stack = [[data, 0]];

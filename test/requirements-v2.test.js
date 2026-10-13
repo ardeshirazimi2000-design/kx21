@@ -48,6 +48,8 @@ test('PersonInfo (civil registry): reply parsing and Jalali birth date sent to s
   assert.equal(readPerson({ data: null, success: false, code: 3, message: 'یافت نشد' }).found, false);
   assert.equal(readPerson({ data: { isDead: true, firstName: 'ا', lastName: 'ب' }, success: true, code: 0 }).deceased, true);
   assert.equal(readPerson({ data: { foo: 1 }, success: true, code: 0 }), undefined);
+  // Real validation-error reply: a service error, never a "birth date mismatch".
+  assert.equal(readPerson({ data: null, success: false, code: 400, message: 'data is invalid ( NationalCode  Length is 10)' }).error, true);
   let sent;
   const fake = async (url, init) => { sent = { url, body: JSON.parse(init.body) }; return { ok: true, status: 200, text: async () => '{"data":{"firstName":"علی","lastName":"رضایی"},"success":true,"code":0}' }; };
   const svc = createIdentityService({ sapiToken: 'x', sapiBase: 'https://s.api.ir/api/sw1', devMode: false }, fake);
