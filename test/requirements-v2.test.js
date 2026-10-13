@@ -48,6 +48,10 @@ test('PersonInfo (civil registry): reply parsing and Jalali birth date sent to s
   assert.equal(readPerson({ data: null, success: false, code: 3, message: 'یافت نشد' }).found, false);
   assert.equal(readPerson({ data: { isDead: true, firstName: 'ا', lastName: 'ب' }, success: true, code: 0 }).deceased, true);
   assert.equal(readPerson({ data: { foo: 1 }, success: true, code: 0 }), undefined);
+  // Real s.api.ir sw1 PersonInfo reply.
+  const real = { data: { nationalCode: '0499370899', firstName: 'علی', lastName: 'رضایی', fatherName: 'حسن', gender: 1, alive: true }, success: true, code: 0, message: '' };
+  assert.deepEqual([readPerson(real).full_name, readPerson(real).father_name, readPerson(real).deceased], ['علی رضایی', 'حسن', false]);
+  assert.equal(readPerson({ ...real, data: { ...real.data, alive: false } }).deceased, true);
   // Real validation-error reply: a service error, never a "birth date mismatch".
   assert.equal(readPerson({ data: null, success: false, code: 400, message: 'data is invalid ( NationalCode  Length is 10)' }).error, true);
   let sent;

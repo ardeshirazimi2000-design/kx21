@@ -130,7 +130,8 @@ export function createIdentityService(config, fetchImpl = globalThis.fetch) {
   };
 }
 
-// Tolerant reader for PersonInfo replies ({data:{firstName,lastName,…},success,code,message}).
+// Tolerant reader for PersonInfo replies. s.api.ir sw1 shape:
+// {data:{nationalCode,firstName,lastName,fatherName,gender:1,alive:true},success:true,code:0,message:""}
 const FIRST = /^(first_?name|name|fname|esm)$/i;
 const LAST = /^(last_?name|family(_?name)?|lname|surname)$/i;
 export function readPerson(body) {
@@ -163,6 +164,6 @@ export function readPerson(body) {
   return {
     found: true, first_name: first, last_name: last, full_name: full,
     father_name: find(/^father_?name$/i), gender: find(/^(gender|sex)$/i),
-    deceased: deadVal === true || deadVal === 'true',
+    deceased: deadVal === true || deadVal === 'true' || data.alive === false || data.isAlive === false,
   };
 }
