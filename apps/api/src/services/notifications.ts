@@ -153,7 +153,14 @@ export async function sendSms(sms: SmsSettings, mobile: string, text: string): P
   });
   const body: any = await res.json().catch(() => null);
   if (!res.ok || body?.return?.status !== 200) {
-    throw new Error(`کاوه‌نگار: ${body?.return?.message ?? `HTTP ${res.status}`}`);
+    const status = body?.return?.status ?? res.status;
+    const hint: Record<number, string> = {
+      403: 'کلید API نامعتبر است؛ آن را از پنل کاوه‌نگار دوباره کپی کنید',
+      412: 'شماره خط فرستنده نامعتبر است؛ شماره خط خود را از پنل کاوه‌نگار (بخش خطوط) در «شماره خط فرستنده» وارد کنید',
+      418: 'اعتبار حساب کاوه‌نگار کافی نیست',
+      411: 'شماره موبایل گیرنده نامعتبر است',
+    };
+    throw new Error(`کاوه‌نگار: ${hint[status] ?? body?.return?.message ?? `HTTP ${res.status}`}`);
   }
   return 'sent';
 }

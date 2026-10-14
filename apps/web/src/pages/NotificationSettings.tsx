@@ -79,8 +79,8 @@ export function NotificationSettingsPage() {
           <Field label="کلید API کاوه‌نگار" hint={data.sms.apiKeyHint ? `کلید ذخیره‌شده: ${data.sms.apiKeyHint} — برای تغییر، کلید جدید را وارد کنید` : 'از پنل کاوه‌نگار، بخش «تنظیمات حساب ← کلید API»'}>
             <input className="input ltr" type="password" autoComplete="off" value={form.sms.apiKey} onChange={(e) => set(['sms', 'apiKey'], e.target.value)} placeholder={data.sms.apiKeyHint || ''} />
           </Field>
-          <Field label="شماره خط فرستنده" hint="خط اختصاصی شما در کاوه‌نگار؛ اگر خالی بماند خط پیش‌فرض حساب استفاده می‌شود">
-            <input className="input ltr" value={form.sms.sender} onChange={(e) => set(['sms', 'sender'], e.target.value)} placeholder="10004346" />
+          <Field label="شماره خط فرستنده" hint="شماره خط خودتان را از پنل کاوه‌نگار، بخش «خطوط» کپی کنید (معمولاً با ۱۰۰۰، ۲۰۰۰ یا ۳۰۰۰ شروع می‌شود)">
+            <input className="input ltr" value={form.sms.sender} onChange={(e) => set(['sms', 'sender'], e.target.value.replace(/[^\d+]/g, ''))} placeholder="شماره خط از پنل کاوه‌نگار" />
           </Field>
           <TestSend channel="sms" chamberId={chamberId!} event={event} initial={me?.mobile ?? ''} label="شماره موبایل" />
         </Card>
