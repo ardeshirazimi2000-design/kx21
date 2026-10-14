@@ -1,6 +1,7 @@
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
+import { NotificationBridge } from '../components/NotificationBridge';
 import { AuthProvider } from '../lib/auth';
 import { useTheme } from '../lib/theme';
 
@@ -10,6 +11,7 @@ export default function RootLayout() {
     <SafeAreaProvider>
       <AuthProvider>
         <StatusBar style="auto" />
+        <NotificationBridge />
         <Stack
           screenOptions={{
             headerTitleAlign: 'center',

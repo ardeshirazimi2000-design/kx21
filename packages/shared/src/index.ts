@@ -6,3 +6,4 @@ export * from './permissions.js';
 export * from './jalali.js';
 export * from './labels.js';
 export * from './identity.js';
+export * from './notificationSettings.js';

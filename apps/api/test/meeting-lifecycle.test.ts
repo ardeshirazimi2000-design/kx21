@@ -9,6 +9,7 @@ import { pool } from '../src/db/pool.js';
 import { seed, SEED_PASSWORD } from '../src/db/seed.js';
 import { closeRealtime, initRealtime } from '../src/realtime.js';
 import { runScheduledJobs } from '../src/services/scheduler.js';
+import { testOutbox } from '../src/services/notifications.js';
 
 const app = createApp();
 let server: http.Server;
@@ -433,6 +434,61 @@ describe('built-in webinar', () => {
     expect((await as('secretary').post(`/api/meetings/${inPerson.body.id}/webinar/join`)).body.error.code).toBe('webinar_in_person');
     await as('secretary').post(`/api/meetings/${id}/cancel`, { reason: 'پایان آزمون وبینار' });
     await as('secretary').post(`/api/meetings/${inPerson.body.id}/cancel`, { reason: 'پایان آزمون وبینار' });
+  });
+});
+
+describe('notification settings (SMS / email texts)', () => {
+  it('lets the chamber admin set the SMS panel and message texts with variables', async () => {
+    const chamberId = (await as('admin').get('/api/auth/me')).body.adminChambers[0];
+    const url = `/api/chambers/${chamberId}/notification-settings`;
+    const s = (await as('admin').get(url)).body;
+    expect(s.sms.enabled).toBe(false);
+    expect(s.events['meeting.invited'].sms.text).toContain('{تاریخ}');
+    expect((await as('m1').get(url)).status).toBe(403);
+    expect((await as('secretary').get(url)).status).toBe(403);
+
+    s.publicUrl = 'https://commission.example.ir/';
+    s.sms = { ...s.sms, enabled: true, apiKey: 'ABCDEF1234567890', sender: '10004346' };
+    s.email = { ...s.email, enabled: true, host: 'mail.example.ir', port: 587, secure: false, user: 'noreply', password: 'secret-pass', from: 'noreply@example.ir', fromName: 'اتاق یزد' };
+    s.events['meeting.invited'].sms.text = '{نام} عزیز، جلسه {کمیسیون} روز {تاریخ} ساعت {ساعت} در {مکان} برگزار می‌شود.';
+    const saved = await as('admin').put(url, s);
+    expect(saved.status).toBe(200);
+    expect(saved.body.sms.apiKey).toBe('');
+    expect(saved.body.sms.apiKeyHint).toBe('••••7890');
+    expect(saved.body.email.password).toBe('');
+    expect(saved.body.email.hasPassword).toBe(true);
+    // saving again without re-typing the secrets keeps them
+    expect((await as('admin').put(url, saved.body)).body.sms.apiKeyHint).toBe('••••7890');
+    const { rows } = await pool.query(`SELECT settings->'notifications'->'sms'->>'apiKey' AS k, settings->'notifications'->'email'->>'password' AS p FROM chambers WHERE id = $1`, [chamberId]);
+    expect(rows[0]).toEqual({ k: 'ABCDEF1234567890', p: 'secret-pass' });
+
+    // an invitation now goes out by SMS and email with the meeting's own date filled in
+    const exp = (await as('secretary').get('/api/commissions')).body.items.find((c: any) => c.code === 'EXP');
+    const when = new Date('2026-11-17T06:30:00Z'); // ۲۶ آبان ۱۴۰۵، ۱۰:۰۰ تهران
+    const m = await as('secretary').post('/api/meetings', { commissionId: exp.id, title: 'جلسه آزمون پیامک', scheduledAt: when.toISOString(), location: 'سالن شهید بهشتی', schedule: true });
+    testOutbox.length = 0;
+    await as('secretary').post(`/api/meetings/${m.body.id}/invite`);
+    await new Promise((r) => setTimeout(r, 300));
+    const sms = testOutbox.filter((x) => x.channel === 'sms');
+    expect(sms.length).toBeGreaterThan(3);
+    const toM1 = sms.find((x) => x.text.startsWith('زهرا محمدی'))!;
+    expect(toM1.text).toBe('زهرا محمدی عزیز، جلسه کمیسیون تجارت و صادرات یزد روز سه‌شنبه ۲۶ آبان ۱۴۰۵ ساعت ۱۰:۰۰ در سالن شهید بهشتی برگزار می‌شود.');
+    const mail = testOutbox.find((x) => x.channel === 'email')!;
+    expect(mail.subject).toBe('دعوت به جلسه کمیسیون تجارت و صادرات یزد — سه‌شنبه ۲۶ آبان ۱۴۰۵');
+    expect(mail.text).toContain(`https://commission.example.ir/meetings/${m.body.id}`);
+    const n = await pool.query(`SELECT delivery FROM notifications WHERE event = 'meeting.invited' AND data->>'meetingId' = $1 LIMIT 1`, [m.body.id]);
+    expect(n.rows[0].delivery).toMatchObject({ in_app: 'sent', sms: 'sent' });
+
+    // test message with sample values
+    testOutbox.length = 0;
+    expect((await as('admin').post(`${url}/test`, { channel: 'sms', to: '09120000000' })).status).toBe(200);
+    expect(testOutbox[0].text).toContain('سه‌شنبه ۲۹ مهر ۱۴۰۵');
+
+    // switch SMS off again so later tests are unaffected
+    saved.body.sms.enabled = false;
+    saved.body.email.enabled = false;
+    await as('admin').put(url, saved.body);
+    await as('secretary').post(`/api/meetings/${m.body.id}/cancel`, { reason: 'پایان آزمون پیامک' });
   });
 });
 

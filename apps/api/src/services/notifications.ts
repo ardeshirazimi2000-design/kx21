@@ -1,30 +1,23 @@
-import type { NotificationChannel, NotificationEvent } from '@kx/shared';
-import { SOCKET_EVENTS } from '@kx/shared';
+import {
+  formatJalaliLong,
+  formatTime,
+  MEETING_TYPE_LABELS,
+  mergeNotificationSettings,
+  renderTemplate,
+  SOCKET_EVENTS,
+  toPersianDigits,
+  type EmailSettings,
+  type MeetingType,
+  type NotificationChannel,
+  type NotificationEvent,
+  type NotificationSettings,
+  type SmsSettings,
+} from '@kx/shared';
+import nodemailer, { type Transporter } from 'nodemailer';
 import { config } from '../config.js';
-import { pool, query } from '../db/pool.js';
+import { one, pool, query } from '../db/pool.js';
 import { logger } from '../lib/logger.js';
 import { emitToUser } from '../realtime.js';
-
-/** Notification matrix (section 10 of the spec): event → channels. In-app is always stored. */
-export const NOTIFICATION_MATRIX: Record<NotificationEvent, NotificationChannel[]> = {
-  'meeting.invited': ['in_app', 'push', 'sms', 'email'],
-  'meeting.changed': ['in_app', 'push', 'sms'],
-  'meeting.cancelled': ['in_app', 'push', 'sms'],
-  'meeting.checkin_opened': ['in_app', 'push'],
-  'meeting.checkin_reminder': ['in_app', 'push'],
-  'meeting.quorum_not_reached': ['in_app', 'push'],
-  'vote.opened': ['in_app', 'push'],
-  'vote.result': ['in_app'],
-  'minutes.pending_approval': ['in_app', 'push'],
-  'minutes.returned': ['in_app', 'push'],
-  'minutes.approved': ['in_app', 'push'],
-  'resolution.created': ['in_app', 'push', 'email'],
-  'resolution.due_soon': ['in_app', 'push'],
-  'resolution.overdue': ['in_app', 'push', 'email'],
-  'resolution.reviewed': ['in_app', 'push'],
-  'referral.created': ['in_app', 'push', 'email'],
-  'referral.answered': ['in_app', 'push'],
-};
 
 export interface NotifyInput {
   chamberId: string | null;
@@ -37,78 +30,202 @@ export interface NotifyInput {
 
 interface Recipient {
   id: string;
+  full_name: string;
   mobile: string | null;
   email: string | null;
   push_tokens: string[];
 }
 
-interface Provider {
-  send(r: Recipient, n: NotifyInput): Promise<'sent' | 'skipped'>;
-}
+type Vars = Record<string, string>;
 
-const logProvider = (channel: string): Provider => ({
-  async send(r, n) {
-    logger.info({ channel, to: r.id, event: n.event, title: n.title }, 'notification (log provider)');
-    return 'sent';
-  },
-});
+/** Messages "sent" while running tests (nothing leaves the machine). */
+export const testOutbox: { channel: 'sms' | 'email'; to: string; text: string; subject?: string }[] = [];
+type Result = 'sent' | 'skipped';
 
-const expoPush: Provider = {
-  async send(r, n) {
-    if (!r.push_tokens.length) return 'skipped';
-    const messages = r.push_tokens.map((to) => ({ to, title: n.title, body: n.body, data: { event: n.event, ...n.data }, sound: 'default' }));
-    const res = await fetch('https://exp.host/--/api/v2/push/send', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json', accept: 'application/json' },
-      body: JSON.stringify(messages),
-    });
-    if (!res.ok) throw new Error(`expo push failed: ${res.status}`);
-    return 'sent';
-  },
-};
+// ─────────────────────────────── Settings ───────────────────────────────
 
-const kavenegarSms: Provider = {
-  async send(r, n) {
-    if (!r.mobile || !config.kavenegarApiKey) return 'skipped';
-    const url = `https://api.kavenegar.com/v1/${config.kavenegarApiKey}/sms/send.json`;
-    const res = await fetch(url, {
-      method: 'POST',
-      headers: { 'content-type': 'application/x-www-form-urlencoded' },
-      body: new URLSearchParams({ receptor: r.mobile, sender: config.kavenegarSender ?? '', message: `${n.title}\n${n.body}` }),
-    });
-    if (!res.ok) throw new Error(`sms failed: ${res.status}`);
-    return 'sent';
-  },
-};
+const cache = new Map<string, { at: number; value: NotificationSettings }>();
 
-function provider(channel: NotificationChannel): Provider | null {
-  switch (channel) {
-    case 'in_app':
-      return null;
-    case 'push':
-      return config.pushProvider === 'expo' && !config.isTest ? expoPush : logProvider('push');
-    case 'sms':
-      return config.smsProvider === 'kavenegar' && !config.isTest ? kavenegarSms : logProvider('sms');
-    case 'email':
-      // SMTP integration point; logged until the organisation's mail relay is configured.
-      return logProvider('email');
+/** Notification settings of a chamber (cached briefly); the SMS key may also come from .env. */
+export async function loadNotificationSettings(chamberId: string | null): Promise<NotificationSettings> {
+  const key = chamberId ?? '-';
+  const hit = cache.get(key);
+  if (hit && Date.now() - hit.at < 30_000) return hit.value;
+  const row = chamberId ? await one<{ n: unknown }>(`SELECT settings->'notifications' AS n FROM chambers WHERE id = $1`, [chamberId]) : null;
+  const s = mergeNotificationSettings(row?.n);
+  // Installs configured before the settings page: SMS_PROVIDER=kavenegar + KAVENEGAR_API_KEY in .env.
+  if (!s.sms.apiKey && config.smsProvider === 'kavenegar' && config.kavenegarApiKey) {
+    s.sms = { ...s.sms, enabled: true, apiKey: config.kavenegarApiKey, sender: s.sms.sender || (config.kavenegarSender ?? '') };
   }
+  cache.set(key, { at: Date.now(), value: s });
+  return s;
 }
+
+export function invalidateNotificationSettings(chamberId: string) {
+  cache.delete(chamberId);
+  transporters.clear();
+}
+
+/** Channels used for an event with the chamber's settings (in-app is always on). */
+export function channelsFor(s: NotificationSettings, event: NotificationEvent): NotificationChannel[] {
+  const e = s.events[event];
+  const ch: NotificationChannel[] = ['in_app'];
+  if (e.push.enabled) ch.push('push');
+  if (s.sms.enabled && e.sms.enabled) ch.push('sms');
+  if (s.email.enabled && e.email.enabled) ch.push('email');
+  return ch;
+}
+
+// ─────────────────────────────── Variables ───────────────────────────────
+
+const faDigits = (v: string | number | null | undefined) => (v === null || v === undefined || v === '' ? '' : toPersianDigits(String(v)));
+
+/** Values for {تاریخ}, {کمیسیون}, … taken from the meeting / resolution the notification is about. */
+async function contextVars(n: NotifyInput, s: NotificationSettings): Promise<Vars> {
+  const vars: Vars = { عنوان: n.title, متن: n.body };
+  const base = s.publicUrl.replace(/\/+$/, '');
+  const d = n.data ?? {};
+  let chamberId = n.chamberId;
+  if (typeof d.meetingId === 'string') {
+    const m = await one(
+      `SELECT m.title, m.number, m.scheduled_at, m.location, m.type, c.name AS commission, m.chamber_id
+         FROM meetings m JOIN commissions c ON c.id = m.commission_id WHERE m.id = $1`,
+      [d.meetingId],
+    );
+    if (m) {
+      Object.assign(vars, {
+        عنوان_جلسه: m.title,
+        شماره_جلسه: faDigits(m.number),
+        کمیسیون: m.commission,
+        تاریخ: formatJalaliLong(m.scheduled_at),
+        ساعت: faDigits(formatTime(m.scheduled_at)),
+        مکان: m.location ?? (m.type === 'online' ? 'برخط (وبینار)' : ''),
+        نوع_جلسه: MEETING_TYPE_LABELS[m.type as MeetingType] ?? '',
+      });
+      chamberId ??= m.chamber_id;
+      if (base) vars.لینک = `${base}/meetings/${d.meetingId}`;
+    }
+  }
+  if (typeof d.resolutionId === 'string') {
+    const r = await one(
+      `SELECT r.number, r.text, r.due_date, c.name AS commission, r.chamber_id
+         FROM resolutions r JOIN commissions c ON c.id = r.commission_id WHERE r.id = $1`,
+      [d.resolutionId],
+    );
+    if (r) {
+      Object.assign(vars, {
+        شماره_مصوبه: r.number,
+        متن_مصوبه: r.text,
+        مهلت: r.due_date ? formatJalaliLong(`${r.due_date}T12:00:00`) : 'تعیین نشده',
+        کمیسیون: vars.کمیسیون ?? r.commission,
+      });
+      chamberId ??= r.chamber_id;
+      if (base) vars.لینک = `${base}/resolutions/${d.resolutionId}`;
+    }
+  }
+  if (typeof d.referralId === 'string') {
+    const f = await one(`SELECT c.name AS commission FROM referrals f JOIN commissions c ON c.id = f.commission_id WHERE f.id = $1`, [d.referralId]);
+    if (f) vars.کمیسیون ??= f.commission;
+    if (base) vars.لینک ??= `${base}/referrals`;
+  }
+  if (chamberId) {
+    const ch = await one<{ name: string }>('SELECT name FROM chambers WHERE id = $1', [chamberId]);
+    if (ch) vars.اتاق = ch.name;
+  }
+  vars.لینک ??= base;
+  return vars;
+}
+
+// ─────────────────────────────── Providers ───────────────────────────────
+
+/** Kavenegar «sms/send»: the message text is composed here from the chamber's template. */
+export async function sendSms(sms: SmsSettings, mobile: string, text: string): Promise<Result> {
+  if (!mobile) return 'skipped';
+  if (config.isTest) {
+    testOutbox.push({ channel: 'sms', to: mobile, text });
+    return 'sent';
+  }
+  if (!sms.apiKey) throw new Error('کلید API کاوه‌نگار تنظیم نشده است');
+  const res = await fetch(`https://api.kavenegar.com/v1/${encodeURIComponent(sms.apiKey)}/sms/send.json`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({ receptor: mobile, message: text, ...(sms.sender ? { sender: sms.sender } : {}) }),
+  });
+  const body: any = await res.json().catch(() => null);
+  if (!res.ok || body?.return?.status !== 200) {
+    throw new Error(`کاوه‌نگار: ${body?.return?.message ?? `HTTP ${res.status}`}`);
+  }
+  return 'sent';
+}
+
+const transporters = new Map<string, Transporter>();
+function transporter(e: EmailSettings): Transporter {
+  const key = JSON.stringify([e.host, e.port, e.secure, e.user, e.password]);
+  let t = transporters.get(key);
+  if (!t) {
+    t = nodemailer.createTransport({
+      host: e.host,
+      port: e.port,
+      secure: e.secure,
+      auth: e.user ? { user: e.user, pass: e.password } : undefined,
+      connectionTimeout: 15_000,
+    });
+    transporters.set(key, t);
+  }
+  return t;
+}
+
+const escapeHtml = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
+export async function sendEmail(e: EmailSettings, to: string, subject: string, text: string): Promise<Result> {
+  if (!to) return 'skipped';
+  if (config.isTest) {
+    testOutbox.push({ channel: 'email', to, subject, text });
+    return 'sent';
+  }
+  if (!e.host || !e.from) throw new Error('سرور ایمیل یا نشانی فرستنده تنظیم نشده است');
+  const html = `<div dir="rtl" style="font-family:Tahoma,Arial,sans-serif;font-size:14px;line-height:1.9">${escapeHtml(text)
+    .replace(/(https?:\/\/\S+)/g, '<a href="$1">$1</a>')
+    .replace(/\n/g, '<br>')}</div>`;
+  await transporter(e).sendMail({ from: e.fromName ? { name: e.fromName, address: e.from } : e.from, to, subject, text, html });
+  return 'sent';
+}
+
+async function sendPush(r: Recipient, title: string, body: string, data: Record<string, unknown>): Promise<Result> {
+  if (!r.push_tokens.length) return 'skipped';
+  if (config.isTest || config.pushProvider !== 'expo') {
+    logger.info({ to: r.id, title }, 'push (log provider)');
+    return 'sent';
+  }
+  const messages = r.push_tokens.map((to) => ({ to, title, body, data, sound: 'default', channelId: 'default' }));
+  const res = await fetch('https://exp.host/--/api/v2/push/send', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', accept: 'application/json' },
+    body: JSON.stringify(messages),
+  });
+  if (!res.ok) throw new Error(`expo push failed: ${res.status}`);
+  return 'sent';
+}
+
+// ─────────────────────────────── Dispatch ───────────────────────────────
 
 /**
- * Stores in-app notifications, pushes them over the socket and dispatches external
- * channels asynchronously. Call after the business transaction has committed.
+ * Stores in-app notifications, pushes them over the socket and sends push / SMS / email according
+ * to the chamber's settings, with each recipient's own text. Call after the transaction committed.
  */
 export async function notify(n: NotifyInput): Promise<void> {
   const userIds = [...new Set(n.userIds.filter(Boolean))];
   if (!userIds.length) return;
-  const channels = NOTIFICATION_MATRIX[n.event];
+  const settings = await loadNotificationSettings(n.chamberId);
+  const channels = channelsFor(settings, n.event);
   const recipients = await query<Recipient>(
-    `SELECT u.id, u.mobile, u.email, COALESCE(array_agg(d.push_token) FILTER (WHERE d.push_token IS NOT NULL), '{}') AS push_tokens
+    `SELECT u.id, u.full_name, u.mobile, u.email, COALESCE(array_agg(d.push_token) FILTER (WHERE d.push_token IS NOT NULL), '{}') AS push_tokens
        FROM users u LEFT JOIN devices d ON d.user_id = u.id
       WHERE u.id = ANY($1) AND u.is_active GROUP BY u.id`,
     [userIds],
   );
+  const needVars = channels.some((c) => c === 'sms' || c === 'email');
+  const vars = needVars ? await contextVars(n, settings).catch(() => ({ عنوان: n.title, متن: n.body }) as Vars) : {};
   for (const r of recipients) {
     const [row] = await query<{ id: string; created_at: Date }>(
       `INSERT INTO notifications (chamber_id, user_id, event, title, body, data, channels)
@@ -123,21 +240,23 @@ export async function notify(n: NotifyInput): Promise<void> {
       data: n.data ?? {},
       createdAt: row.created_at,
     });
-    void dispatch(row.id, r, n, channels);
+    void dispatch(row.id, r, n, channels, settings, { ...vars, نام: r.full_name });
   }
 }
 
-async function dispatch(notificationId: string, r: Recipient, n: NotifyInput, channels: NotificationChannel[]) {
+async function dispatch(id: string, r: Recipient, n: NotifyInput, channels: NotificationChannel[], s: NotificationSettings, vars: Vars) {
   const delivery: Record<string, string> = { in_app: 'sent' };
+  const tpl = s.events[n.event];
   for (const ch of channels) {
-    const p = provider(ch);
-    if (!p) continue;
+    if (ch === 'in_app') continue;
     try {
-      delivery[ch] = await p.send(r, n);
+      if (ch === 'push') delivery.push = await sendPush(r, n.title, n.body, { event: n.event, ...n.data });
+      if (ch === 'sms') delivery.sms = await sendSms(s.sms, r.mobile ?? '', renderTemplate(tpl.sms.text, vars));
+      if (ch === 'email') delivery.email = await sendEmail(s.email, r.email ?? '', renderTemplate(tpl.email.subject, vars), renderTemplate(tpl.email.text, vars));
     } catch (e) {
       delivery[ch] = 'failed';
-      logger.warn({ err: (e as Error).message, ch, notificationId }, 'notification delivery failed');
+      logger.warn({ err: (e as Error).message, ch, notificationId: id }, 'notification delivery failed');
     }
   }
-  await pool.query('UPDATE notifications SET delivery = $2 WHERE id = $1', [notificationId, JSON.stringify(delivery)]).catch(() => {});
+  await pool.query('UPDATE notifications SET delivery = $2 WHERE id = $1', [id, JSON.stringify(delivery)]).catch(() => {});
 }

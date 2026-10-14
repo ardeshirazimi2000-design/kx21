@@ -3624,6 +3624,99 @@ paths:
         in: path
         required: true
         schema: *id004
+  /api/chambers/{id}/notification-settings:
+    get:
+      tags:
+      - Structure
+      summary: تنظیمات اطلاع‌رسانی اتاق (پیامک، ایمیل، متن پیام‌ها؛ کلیدها پوشیده)
+      responses:
+        '200':
+          description: OK
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Forbidden
+        '404':
+          description: Not found or not visible
+        '409':
+          description: Conflict (state machine / business rule)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: *id004
+    put:
+      tags:
+      - Structure
+      summary: ذخیره تنظیمات اطلاع‌رسانی (apiKey/password خالی = بدون تغییر)
+      responses:
+        '200':
+          description: OK
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Forbidden
+        '404':
+          description: Not found or not visible
+        '409':
+          description: Conflict (state machine / business rule)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      description: Message texts may use variables such as {نام} {کمیسیون} {عنوان_جلسه} {تاریخ} {ساعت} {مکان} {مهلت} {لینک}.
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: *id004
+  /api/chambers/{id}/notification-settings/test:
+    post:
+      tags:
+      - Structure
+      summary: ارسال پیامک یا ایمیل آزمایشی با مقادیر نمونه
+      responses:
+        '200':
+          description: OK
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Forbidden
+        '404':
+          description: Not found or not visible
+        '409':
+          description: Conflict (state machine / business rule)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: *id004
   /api/documents:
     post:
       tags:

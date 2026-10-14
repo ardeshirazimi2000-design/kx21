@@ -11,6 +11,7 @@ import { HomePage } from './pages/Home';
 import { LoginPage } from './pages/Login';
 import { MeetingRoomPage } from './pages/MeetingRoom';
 import { MeetingsPage } from './pages/Meetings';
+import { NotificationSettingsPage } from './pages/NotificationSettings';
 import { NotificationsPage } from './pages/Notifications';
 import { PeoplePage } from './pages/People';
 import { ProfilePage } from './pages/Profile';
@@ -42,6 +43,7 @@ export function App() {
         <Route path="/commissions/:id" element={<CommissionDetailPage />} />
         <Route path="/people" element={<PeoplePage />} />
         <Route path="/roles" element={<RolesPage />} />
+        <Route path="/notification-settings" element={<NotificationSettingsPage />} />
         <Route path="/meetings" element={<MeetingsPage />} />
         <Route path="/meetings/:id" element={<MeetingRoomPage />} />
         <Route path="/resolutions" element={<ResolutionsPage />} />
@@ -106,6 +108,7 @@ function Shell({ children }: { children: ReactNode }) {
           {isAdmin && item('/terms', 'دوره‌ها')}
           {(isAdmin || isOfficer) && item('/people', 'اشخاص و کاربران')}
           {isAdmin && item('/roles', 'نقش‌ها و دسترسی‌ها')}
+          {isAdmin && item('/notification-settings', 'تنظیمات اطلاع‌رسانی')}
           {me!.is_super_admin && item('/chambers', 'اتاق‌ها')}
           {(isAdmin || isOfficer) && (
             <>

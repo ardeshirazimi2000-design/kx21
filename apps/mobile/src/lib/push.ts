@@ -33,3 +33,25 @@ export async function registerForPush(): Promise<void> {
     // Push is optional: without an EAS projectId (e.g. local development) the app keeps working with in-app/socket notifications.
   }
 }
+
+/**
+ * Shows every new notification of the logged-in user in the phone's notification bar while the app
+ * is running (foreground or background), using the live connection. This works without any push
+ * service; notifications to a closed app additionally need Expo/Firebase push (see docs/10-mobile-build.md).
+ */
+export function showLiveNotification(n: { id: string; title: string; body: string; data?: Record<string, unknown> }) {
+  if (Platform.OS === 'web') return;
+  void Notifications.scheduleNotificationAsync({
+    identifier: n.id,
+    content: { title: n.title, body: n.body, data: n.data ?? {}, sound: 'default' },
+    trigger: Platform.OS === 'android' ? { channelId: 'default' } : null,
+  }).catch(() => {});
+}
+
+/** Screen to open when a notification is tapped. */
+export function routeForNotification(data: Record<string, unknown> | undefined): string | null {
+  if (!data) return null;
+  if (typeof data.meetingId === 'string') return `/meeting/${data.meetingId}`;
+  if (typeof data.resolutionId === 'string') return `/resolution/${data.resolutionId}`;
+  return '/notifications';
+}
