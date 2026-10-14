@@ -7,6 +7,7 @@ import {
 } from '@kx/shared';
 import { useEffect, useState, type ButtonHTMLAttributes, type ReactNode } from 'react';
 import type { ApiError } from '../lib/api';
+import { JalaliPicker } from './JalaliPicker';
 
 export const fa = (v: string | number | null | undefined) => (v === null || v === undefined ? '—' : toPersianDigits(v));
 
@@ -150,25 +151,9 @@ export function Tabs<T extends string>({ tabs, value, onChange }: { tabs: { id: 
   );
 }
 
-/** Jalali date + time input. Value is an ISO string (or '' when empty). */
+/** Jalali date + time input (month calendar picker). Value is an ISO string (or '' when empty). */
 export function JalaliDateTimeInput({ value, onChange, withTime = true }: { value: string; onChange: (iso: string) => void; withTime?: boolean }) {
-  const initial = value ? new Date(value) : null;
-  const [date, setDate] = useState(initial ? formatJalaliDate(initial, false) : '');
-  const [time, setTime] = useState(initial ? toLatinDigits(formatTime(initial)) : '10:00');
-  const [invalid, setInvalid] = useState(false);
-  useEffect(() => {
-    if (!date) return;
-    const d = parseJalali(date, withTime ? time : '12:00');
-    setInvalid(!d);
-    if (d) onChange(d.toISOString());
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [date, time]);
-  return (
-    <div className="row gap-sm">
-      <input className={`input ltr ${invalid ? 'input-error' : ''}`} placeholder="۱۴۰۵/۰۷/۲۰" value={date} onChange={(e) => setDate(toLatinDigits(e.target.value))} />
-      {withTime && <input className="input ltr" style={{ maxWidth: 110 }} placeholder="10:00" value={time} onChange={(e) => setTime(toLatinDigits(e.target.value))} />}
-    </div>
-  );
+  return <JalaliPicker value={value} onChange={onChange} withTime={withTime} />;
 }
 
 /** Jalali date input returning 'YYYY-MM-DD' (Gregorian, for DATE columns). */

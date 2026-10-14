@@ -1,7 +1,8 @@
-import { JALALI_MONTHS, MEETING_TYPE_LABELS, MEETING_TYPES, toGregorian, toJalali, type MeetingType } from '@kx/shared';
+import { formatTime, JALALI_MONTHS, jalaliMonthLength, MEETING_TYPE_LABELS, MEETING_TYPES, toGregorian, toJalali, type MeetingType } from '@kx/shared';
 import { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { MeetingStatusBadge } from '../components/status';
+import { dateOfJalali, firstColumn, jalaliOf, WEEK_HEADER } from '../components/JalaliPicker';
 import { Badge, Button, Card, dateTimeFa, Empty, ErrorBox, Field, fa, JalaliDateTimeInput, Loading, Modal, PageHeader } from '../components/ui';
 import { post } from '../lib/api';
 import { useAuth } from '../lib/auth';
@@ -23,7 +24,7 @@ export function MeetingsPage() {
     return { from: new Date(gy, gm - 1, gd).toISOString(), to: new Date(gy2, gm2 - 1, gd2).toISOString() };
   }, [jy, jm]);
   const { data, loading, reload } = useApi(`/meetings?from=${range.from}&to=${range.to}&pageSize=100&mine=${mine}`);
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState<false | { date?: string }>(false);
   // Meetings are created by each commission's secretary/chair (executive work), not by the chamber admin.
   const canCreate = me!.memberships.some((m) => ['chair', 'vice_chair', 'secretary'].includes(m.position));
   const shift = (d: number) => {
@@ -53,7 +54,7 @@ export function MeetingsPage() {
             <label className="check" style={{ margin: 0 }}>
               <input type="checkbox" checked={mine} onChange={(e) => setMine(e.target.checked)} /> فقط جلسات من
             </label>
-            {canCreate && <Button onClick={() => setOpen(true)}>جلسه جدید</Button>}
+            {canCreate && <Button onClick={() => setOpen({})}>جلسه جدید</Button>}
           </>
         }
       />
@@ -69,6 +70,16 @@ export function MeetingsPage() {
             ماه بعد
           </Button>
         </div>
+        <MonthCalendar
+          year={jy}
+          month={jm}
+          meetings={data?.items ?? []}
+          onOpen={(id) => nav(`/meetings/${id}`)}
+          onPickDay={canCreate ? (date) => setOpen({ date }) : undefined}
+        />
+        {canCreate && <p className="muted small mt">برای تعریف جلسه، روی روز مورد نظر در تقویم بزنید.</p>}
+      </Card>
+      <Card title="فهرست جلسات این ماه">
         {loading && !data ? (
           <Loading />
         ) : byDay.length === 0 ? (
@@ -104,12 +115,12 @@ export function MeetingsPage() {
           ))
         )}
       </Card>
-      {open && <NewMeetingModal onClose={() => setOpen(false)} onSaved={(id) => { setOpen(false); void reload(); nav(`/meetings/${id}`); }} />}
+      {open && <NewMeetingModal initialDate={open.date} onClose={() => setOpen(false)} onSaved={(id) => { setOpen(false); void reload(); nav(`/meetings/${id}`); }} />}
     </>
   );
 }
 
-export function NewMeetingModal({ commissionId, onClose, onSaved }: { commissionId?: string; onClose: () => void; onSaved: (id: string) => void }) {
+export function NewMeetingModal({ commissionId, initialDate, onClose, onSaved }: { commissionId?: string; initialDate?: string; onClose: () => void; onSaved: (id: string) => void }) {
   const { me } = useAuth();
   const webinar = !!me?.features?.webinar;
   const commissions = useApi(commissionId ? null : '/commissions?pageSize=100');
@@ -119,7 +130,7 @@ export function NewMeetingModal({ commissionId, onClose, onSaved }: { commission
   const [form, setForm] = useState({
     commissionId: commissionId ?? '',
     title: '',
-    scheduledAt: '',
+    scheduledAt: initialDate ?? '',
     durationMinutes: 90,
     type: 'in_person' as MeetingType,
     location: '',
@@ -210,5 +221,63 @@ export function NewMeetingModal({ commissionId, onClose, onSaved }: { commission
       </Button>
       <p className="muted small mt">همه اعضای فعال کمیسیون (به‌جز کارشناسان) به‌صورت خودکار دعوت می‌شوند؛ مدعوین را بعداً در صفحه جلسه اضافه کنید.</p>
     </Modal>
+  );
+}
+
+const LIVE = ['checkin_open', 'in_progress', 'agenda_processing'];
+
+/** Month grid (Saturday-first) with the meetings of each day; clicking a day can start a new meeting. */
+function MonthCalendar({ year, month, meetings, onOpen, onPickDay }: { year: number; month: number; meetings: any[]; onOpen: (id: string) => void; onPickDay?: (iso: string) => void }) {
+  const today = jalaliOf(new Date());
+  const lead = firstColumn(year, month);
+  const days = jalaliMonthLength(year, month);
+  const byDay = new Map<number, any[]>();
+  for (const m of meetings) {
+    const [y, mo, d] = jalaliOf(new Date(m.scheduled_at));
+    if (y === year && mo === month) byDay.set(d, [...(byDay.get(d) ?? []), m]);
+  }
+  const cells: (number | null)[] = [...Array(lead).fill(null), ...Array.from({ length: days }, (_, i) => i + 1)];
+  while (cells.length % 7) cells.push(null);
+  return (
+    <div className="cal" role="grid" aria-label={`${JALALI_MONTHS[month - 1]} ${year}`}>
+      {WEEK_HEADER.map((w, i) => (
+        <div key={w} className={`cal-wd ${i === 6 ? 'jp-fri' : ''}`}>
+          <span className="cal-wd-long">{['شنبه', 'یکشنبه', 'دوشنبه', 'سه‌شنبه', 'چهارشنبه', 'پنجشنبه', 'جمعه'][i]}</span>
+          <span className="cal-wd-short">{w}</span>
+        </div>
+      ))}
+      {cells.map((d, i) => {
+        if (d === null) return <div key={`e${i}`} className="cal-cell cal-out" />;
+        const isToday = today[0] === year && today[1] === month && today[2] === d;
+        const items = byDay.get(d) ?? [];
+        return (
+          <div
+            key={d}
+            className={`cal-cell ${isToday ? 'cal-today' : ''} ${onPickDay ? 'cal-pickable' : ''}`}
+            onClick={() => onPickDay?.(dateOfJalali([year, month, d], 10, 0).toISOString())}
+            title={onPickDay ? 'تعریف جلسه در این روز' : undefined}
+          >
+            <div className={`cal-num ${i % 7 === 6 ? 'jp-fri' : ''}`}>
+              <span>{fa(d)}</span>
+              {onPickDay && <span className="cal-add">+ جلسه</span>}
+            </div>
+            {items.map((m) => (
+              <button
+                key={m.id}
+                type="button"
+                className={`cal-ev ${LIVE.includes(m.status) ? 'cal-ev-live' : ''} ${m.status === 'cancelled' ? 'cal-ev-cancelled' : ''}`}
+                title={`${m.commission_name} — جلسه ${fa(m.number)}: ${m.title}`}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onOpen(m.id);
+                }}
+              >
+                {fa(formatTime(m.scheduled_at))} {m.title}
+              </button>
+            ))}
+          </div>
+        );
+      })}
+    </div>
   );
 }

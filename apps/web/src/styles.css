@@ -265,3 +265,45 @@ table.table { width: 100%; border-collapse: collapse; }
   .content { padding: 16px; }
   .topbar { padding: 10px 16px; }
 }
+
+/* ───────── Jalali date picker ───────── */
+.jp-anchor { position: relative; min-width: 210px; }
+.jp-field { text-align: start; cursor: pointer; display: flex; gap: 8px; align-items: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.jp-empty { color: var(--muted); }
+.jp-pop { position: absolute; z-index: 60; top: calc(100% + 6px); inset-inline-start: 0; width: 290px; max-width: calc(100vw - 32px); background: var(--surface); border: 1px solid var(--border); border-radius: 12px; box-shadow: var(--shadow); padding: 10px; }
+.jp-head { display: flex; align-items: center; gap: 4px; margin-bottom: 8px; }
+.jp-title { flex: 1; text-align: center; }
+.jp-nav { display: inline-flex; align-items: center; justify-content: center; border: 0; background: transparent; color: var(--text); font: inherit; font-size: 1.1rem; width: 30px; height: 30px; border-radius: 8px; cursor: pointer; }
+.jp-nav:hover { background: var(--surface-2); }
+.jp-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 3px; }
+.jp-wd { text-align: center; font-size: 0.8rem; color: var(--muted); padding: 4px 0; }
+.jp-day { border: 0; background: transparent; color: var(--text); font: inherit; height: 34px; border-radius: 8px; cursor: pointer; }
+.jp-day:hover { background: var(--primary-soft); }
+.jp-fri { color: var(--danger); }
+.jp-today { outline: 1px solid var(--primary); }
+.jp-sel, .jp-sel:hover { background: var(--primary); color: var(--primary-ink); }
+.jp-foot { display: flex; justify-content: center; margin-top: 6px; }
+
+/* ───────── Month calendar (meetings) ───────── */
+.cal { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); border-top: 1px solid var(--border); border-inline-start: 1px solid var(--border); }
+.cal-wd-short { display: none; }
+.cal-wd { text-align: center; font-size: 0.85rem; color: var(--muted); padding: 6px 0; border-inline-end: 1px solid var(--border); border-bottom: 1px solid var(--border); background: var(--surface-2); }
+.cal-cell { min-height: 104px; padding: 4px 6px; border-inline-end: 1px solid var(--border); border-bottom: 1px solid var(--border); display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.cal-cell.cal-out { background: var(--surface-2); }
+.cal-cell.cal-pickable { cursor: pointer; }
+.cal-cell.cal-pickable:hover { background: var(--primary-soft); }
+.cal-num { font-weight: 600; font-size: 0.9rem; display: flex; justify-content: space-between; align-items: center; }
+.cal-today .cal-num span:first-child { background: var(--primary); color: var(--primary-ink); border-radius: 99px; padding: 0 7px; }
+.cal-add { color: var(--primary); font-size: 0.8rem; opacity: 0; }
+.cal-pickable:hover .cal-add { opacity: 1; }
+.cal-ev { font-size: 0.78rem; border-radius: 6px; padding: 2px 6px; background: var(--info-soft); color: var(--text); cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; border: 0; text-align: start; font-family: inherit; }
+.cal-ev:hover { filter: brightness(0.95); }
+.cal-ev.cal-ev-live { background: var(--success-soft); }
+.cal-ev.cal-ev-cancelled { background: var(--surface-2); text-decoration: line-through; color: var(--muted); }
+@media (max-width: 720px) {
+  .cal-wd-long { display: none; }
+  .cal-wd-short { display: inline; }
+  .cal-cell { min-height: 64px; padding: 3px; }
+  .cal-ev { font-size: 0; padding: 0; height: 8px; border-radius: 4px; }
+  .cal-add { display: none; }
+}
