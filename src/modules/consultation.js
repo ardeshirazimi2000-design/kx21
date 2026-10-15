@@ -1,11 +1,13 @@
 // Consultation service: visit room join (LiveKit-style access token), in-room text chat
 // (also the fallback channel when video/audio fails), end of visit. Prescription service
 // (v1 in the roadmap) is included: drafts are invalid until the doctor signs them (Ed25519).
-import { badRequest, forbidden, notFound, conflict, requireFields, requireUuid } from '../lib/http.js';
+import { ApiError, badRequest, forbidden, notFound, conflict, requireFields, requireUuid } from '../lib/http.js';
 import { uuid, nowIso, parseJson, isUniqueViolation } from '../lib/db.js';
 import crypto from 'node:crypto';
 import { signJwt, signPayload, verifyPayload, canonical, sha256 } from '../lib/crypto.js';
 import { requireUser } from './auth.js';
+import { checkPrescription, unknownDrugs, DRUG_KB_VERSION } from './rx/drug-kb.js';
+import { icdByCode } from './rx/icd10.js';
 
 const JOIN_EARLY_MIN = 15;
 const JOIN_LATE_MIN = 60;
@@ -181,34 +183,69 @@ export function register(router, { db, keys, platform, config, domain }) {
     });
   };
 
-  const rxView = (r) => ({
+  const validateDiagnoses = (codes) => {
+    if (codes == null) return [];
+    if (!Array.isArray(codes) || codes.length > 5) throw badRequest('فهرست تشخیص‌ها نامعتبر است');
+    return [...new Set(codes)].map((c) => {
+      const x = icdByCode(typeof c === 'string' ? c : c?.code);
+      if (!x) throw badRequest(`کد ICD-10 «${typeof c === 'string' ? c : c?.code}» شناخته نشد`, 'unknown_icd_code');
+      return { code: x.code, label_fa: x.label_fa };
+    });
+  };
+
+  // Safety context: recorded allergies + drugs on the patient's other prescriptions of the last 60 days.
+  function safetyFor(patientId, drugs, excludeConsultationId = null) {
+    const p = db.get('SELECT allergies FROM patients WHERE id = ?', patientId);
+    const since = new Date(Date.now() - 60 * 864e5).toISOString();
+    const activeDrugs = db.all(
+      `SELECT drugs, issued_at FROM prescriptions WHERE patient_id = ? AND issued_at IS NOT NULL AND issued_at > ? AND consultation_id != ?`,
+      patientId, since, excludeConsultationId ?? '-',
+    ).flatMap((r) => parseJson(r.drugs, []).map((d) => ({ name: d.name, prescribed_at: r.issued_at })));
+    return {
+      warnings: checkPrescription(drugs, { allergies: parseJson(p?.allergies, []), activeDrugs }),
+      unrecognised: unknownDrugs(drugs),
+      kb_version: DRUG_KB_VERSION,
+    };
+  }
+
+  const rxView = (r, { forDoctor = false } = {}) => ({
     id: r.id, consultation_id: r.consultation_id, doctor_id: r.doctor_id, patient_id: r.patient_id,
     drugs: parseJson(r.drugs, []), notes: r.notes, status: r.issued_at ? 'issued' : 'draft',
+    diagnoses: parseJson(r.diagnoses, []),
     issued_at: r.issued_at, created_at: r.created_at,
     signature: r.signature ? Buffer.from(r.signature).toString('base64') : null,
+    ...(forDoctor ? {
+      safety: r.issued_at ? parseJson(r.safety, null) : safetyFor(r.patient_id, parseJson(r.drugs, []), r.consultation_id),
+    } : {}),
   });
 
-  const signedPayload = (r) => canonical({
-    id: r.id, consultation_id: r.consultation_id, doctor_id: r.doctor_id, patient_id: r.patient_id,
-    drugs: parseJson(r.drugs, []), notes: r.notes ?? null, issued_at: r.issued_at,
-  });
+  // Diagnoses are part of the signed payload only when present, so older signatures stay valid.
+  const signedPayload = (r) => {
+    const dx = parseJson(r.diagnoses, []);
+    return canonical({
+      id: r.id, consultation_id: r.consultation_id, doctor_id: r.doctor_id, patient_id: r.patient_id,
+      drugs: parseJson(r.drugs, []), notes: r.notes ?? null, issued_at: r.issued_at,
+      ...(dx.length ? { diagnoses: dx.map((d) => d.code) } : {}),
+    });
+  };
 
   // Draft creation; also used by the assistant's create_prescription_draft tool (doctor sessions only).
-  function createDraft(ctx, { consultationId, drugs, notes, idempotencyKey }) {
+  function createDraft(ctx, { consultationId, drugs, notes, idempotencyKey, diagnoses }) {
     requireUser(ctx, 'doctor');
     if (!idempotencyKey) throw badRequest('هدر Idempotency-Key الزامی است', 'idempotency_key_required');
     const c = loadConsultation(ctx, consultationId);
     if (!c.isDoctor) throw forbidden();
     const items = validateDrugs(drugs);
+    const dx = validateDiagnoses(diagnoses);
     const key = `${ctx.user.did}:${idempotencyKey}`;
     const prior = db.get('SELECT * FROM prescriptions WHERE tenant_id = ? AND idempotency_key = ?', ctx.tenantId, key);
     if (prior) return { rx: prior, replayed: true };
     const id = uuid();
     try {
       db.run(
-        `INSERT INTO prescriptions (id, tenant_id, consultation_id, doctor_id, patient_id, drugs, notes, idempotency_key, created_at)
-         VALUES (?,?,?,?,?,?,?,?,?)`,
-        id, ctx.tenantId, c.id, c.doctor_id, c.patient_id, JSON.stringify(items), notes ? String(notes).slice(0, 2000) : null, key, nowIso(),
+        `INSERT INTO prescriptions (id, tenant_id, consultation_id, doctor_id, patient_id, drugs, notes, diagnoses, idempotency_key, created_at)
+         VALUES (?,?,?,?,?,?,?,?,?,?)`,
+        id, ctx.tenantId, c.id, c.doctor_id, c.patient_id, JSON.stringify(items), notes ? String(notes).slice(0, 2000) : null, JSON.stringify(dx), key, nowIso(),
       );
     } catch (e) {
       if (isUniqueViolation(e)) return { rx: db.get('SELECT * FROM prescriptions WHERE idempotency_key = ?', key), replayed: true };
@@ -217,31 +254,49 @@ export function register(router, { db, keys, platform, config, domain }) {
     platform.audit(ctx, 'prescription.draft', `prescription:${id}`);
     return { rx: db.get('SELECT * FROM prescriptions WHERE id = ?', id), replayed: false };
   }
-  domain.prescription = { createDraft };
+  domain.prescription = { createDraft, safetyFor };
+
+  // Live safety check while the prescriber types (nothing is stored).
+  router.post('/v1/prescriptions/check', async (ctx) => {
+    requireUser(ctx, 'doctor');
+    const c = loadConsultation(ctx, ctx.body?.consultation_id);
+    const drugs = (Array.isArray(ctx.body.drugs) ? ctx.body.drugs : []).filter((d) => d && typeof d.name === 'string' && d.name.trim()).slice(0, 20);
+    return { body: safetyFor(c.patient_id, drugs.map((d) => ({ name: d.name.trim() })), c.id) };
+  });
 
   router.post('/v1/prescriptions', async (ctx) => {
     requireFields(ctx.body, ['consultation_id', 'drugs']);
     const { rx, replayed } = createDraft(ctx, {
-      consultationId: ctx.body.consultation_id, drugs: ctx.body.drugs, notes: ctx.body.notes,
+      consultationId: ctx.body.consultation_id, drugs: ctx.body.drugs, notes: ctx.body.notes, diagnoses: ctx.body.diagnoses,
       idempotencyKey: ctx.req.headers['idempotency-key'],
     });
-    return { status: replayed ? 200 : 201, body: rxView(rx) };
+    return { status: replayed ? 200 : 201, body: rxView(rx, { forDoctor: true }) };
   });
 
   router.post('/v1/prescriptions/:id/sign', async (ctx) => {
     requireUser(ctx, 'doctor');
     const r = db.get('SELECT * FROM prescriptions WHERE id = ? AND tenant_id = ?', requireUuid(ctx.params.id, 'id'), ctx.tenantId);
     if (!r || r.doctor_id !== ctx.user.did) throw notFound('نسخه');
-    if (r.issued_at) return { body: rxView(r) };
+    if (r.issued_at) return { body: rxView(r, { forDoctor: true }) };
+    // Safety check at signing: a high-severity warning needs the prescriber's written reason.
+    const safety = safetyFor(r.patient_id, parseJson(r.drugs, []), r.consultation_id);
+    const high = safety.warnings.filter((w) => w.severity === 'high');
+    const reason = String(ctx.body?.override_reason ?? '').trim();
+    if (high.length && reason.length < 5) {
+      throw new ApiError(409, 'safety_override_required', 'هشدار ایمنی جدی برای این نسخه وجود دارد؛ برای صدور، دلیل خود را بنویسید', { warnings: safety.warnings });
+    }
     const doc = db.get('SELECT sign_private_sealed FROM doctors WHERE id = ?', r.doctor_id);
     const issued = { ...r, issued_at: nowIso() };
     const sig = signPayload(keys, doc.sign_private_sealed, signedPayload(issued));
-    db.run('UPDATE prescriptions SET signature = ?, issued_at = ? WHERE id = ? AND issued_at IS NULL', sig, issued.issued_at, r.id);
-    platform.audit(ctx, 'prescription.issue', `prescription:${r.id}`, { payload_sha256: sha256(signedPayload(issued)) });
+    const stored = { ...safety, checked_at: issued.issued_at, override_reason: high.length ? reason.slice(0, 500) : null };
+    db.run('UPDATE prescriptions SET signature = ?, issued_at = ?, safety = ? WHERE id = ? AND issued_at IS NULL', sig, issued.issued_at, JSON.stringify(stored), r.id);
+    platform.audit(ctx, 'prescription.issue', `prescription:${r.id}`, {
+      payload_sha256: sha256(signedPayload(issued)), warnings: safety.warnings.map((w) => `${w.severity}:${w.type}`), override: high.length ? stored.override_reason : undefined,
+    });
     platform.publish(ctx, 'prescription.issued', { prescription_id: r.id, patient_id: r.patient_id, doctor_id: r.doctor_id });
     const pu = db.get('SELECT u.id, u.phone FROM patients p JOIN users u ON u.id = p.user_id WHERE p.id = ?', r.patient_id);
     if (pu) platform.notify(ctx, { userId: pu.id, channel: 'sms', target: pu.phone, body: 'نسخه الکترونیک شما صادر شد و در اپ قابل مشاهده است.' });
-    return { body: rxView(db.get('SELECT * FROM prescriptions WHERE id = ?', r.id)) };
+    return { body: rxView(db.get('SELECT * FROM prescriptions WHERE id = ?', r.id), { forDoctor: true }) };
   });
 
   router.get('/v1/prescriptions', async (ctx) => {
@@ -258,7 +313,7 @@ export function register(router, { db, keys, platform, config, domain }) {
       body: {
         items: rows.map((r) => {
           const d = db.get('SELECT u.full_name, d.license_no FROM doctors d JOIN users u ON u.id = d.user_id WHERE d.id = ?', r.doctor_id);
-          return { ...rxView(r), doctor_name: d?.full_name, doctor_license_no: d?.license_no };
+          return { ...rxView(r, { forDoctor: ctx.user.role === 'doctor' }), doctor_name: d?.full_name, doctor_license_no: d?.license_no };
         }),
       },
     };
@@ -271,7 +326,7 @@ export function register(router, { db, keys, platform, config, domain }) {
     if (!r.issued_at) return { body: { valid: false, reason: 'draft' } };
     const doc = db.get('SELECT sign_public_pem FROM doctors WHERE id = ?', r.doctor_id);
     const valid = verifyPayload(doc.sign_public_pem, signedPayload(r), r.signature);
-    return { body: { valid, issued_at: r.issued_at, drugs: valid ? parseJson(r.drugs, []) : undefined } };
+    return { body: { valid, issued_at: r.issued_at, drugs: valid ? parseJson(r.drugs, []) : undefined, diagnoses: valid ? parseJson(r.diagnoses, []) : undefined } };
   });
 
 }

@@ -60,7 +60,7 @@ export function register(router, { db, platform, config, domain }) {
         file_count: parseJson(r.file_ids, []).length, doctor_opinion: r.doctor_opinion,
       })),
       prescriptions: db.all('SELECT * FROM prescriptions WHERE consultation_id = ? ORDER BY created_at', c.id)
-        .map((r) => ({ id: r.id, drugs: parseJson(r.drugs, []), notes: r.notes, status: r.issued_at ? 'issued' : 'draft' })),
+        .map((r) => ({ id: r.id, drugs: parseJson(r.drugs, []), notes: r.notes, diagnoses: parseJson(r.diagnoses, []), status: r.issued_at ? 'issued' : 'draft' })),
     };
   }
 

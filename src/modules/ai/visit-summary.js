@@ -85,6 +85,8 @@ export function buildVisitSummary(facts) {
 
   // ---- P: what was prescribed and advised
   const p = [];
+  const dx = [...new Map(prescriptions.flatMap((r) => r.diagnoses ?? []).map((d) => [d.code, d])).values()];
+  if (dx.length) p.push(`تشخیص ثبت‌شده در نسخه (ICD-10): ${dx.map((d) => `${d.code} ${d.label_fa}`).join('، ')}`);
   for (const rx of prescriptions) {
     sources.push(`prescription:${rx.id ?? ''}`);
     const tag = rx.status === 'issued' ? 'نسخه صادرشده' : 'پیش‌نویس نسخه (هنوز امضا نشده)';

@@ -364,6 +364,131 @@ export function installV2(x) {
   }
   x.recordForm = recordForm;
 
+  // ---------------------------------------------------------------- prescribing (phase 1 aids)
+  const SEV = { high: ['جدی', 'danger'], moderate: ['احتیاط', 'warn'] };
+  const safetyList = (s) => h('div', { class: 'stack' },
+    ...(s?.warnings ?? []).map((w) => h('div', { class: `banner ${SEV[w.severity][1]} small` }, h('b', {}, `⚠️ ${SEV[w.severity][0]}: `), w.message)),
+    s?.unrecognised?.length ? h('p', { class: 'muted small' }, `این داروها در فهرست بررسی ایمنی نیستند (بررسی دستی): ${s.unrecognised.join('، ')}`) : null,
+    s && !s.warnings?.length && !s.unrecognised?.length ? h('p', { class: 'muted small' }, '✓ هشداری در بررسی ایمنی (حساسیت، تکرار، تداخل‌های مهم) یافت نشد.') : null);
+
+  x.rxPanel = async (cid, { endButton = null } = {}) => {
+    const drugNames = (await api('GET', '/v1/drugs').catch(() => ({ items: [] }))).items;
+    const dl = h('datalist', { id: 'drug-names' }, drugNames.map((n) => h('option', { value: n })));
+    let dx = [];
+    const rows = h('div');
+    const notes = h('textarea', { rows: 2, placeholder: 'توضیحات نسخه' });
+    const safetyBox = h('div');
+    const existing = h('div', { class: 'stack' });
+    let rxKey = crypto.randomUUID();
+    let timer = null;
+    const current = () => [...rows.children].map((r) => Object.fromEntries([...r.querySelectorAll('input')].map((i) => [i.dataset.k, i.value.trim()]))).filter((d) => d.name);
+    const recheck = () => {
+      clearTimeout(timer);
+      timer = setTimeout(async () => {
+        const drugs = current();
+        if (!drugs.length) { safetyBox.replaceChildren(); return; }
+        const r = await api('POST', '/v1/prescriptions/check', { consultation_id: cid, drugs }).catch(() => null);
+        if (r) safetyBox.replaceChildren(safetyList(r));
+      }, 500);
+    };
+    const addRow = (d = {}) => {
+      rows.append(h('div', { class: 'drug-row' },
+        h('input', { type: 'text', placeholder: 'نام دارو', 'data-k': 'name', list: 'drug-names', value: d.name ?? '', dir: 'auto', oninput: recheck }),
+        h('input', { type: 'text', placeholder: 'دوز', 'data-k': 'dose', value: d.dose ?? '' }),
+        h('input', { type: 'text', placeholder: 'دفعات مصرف', 'data-k': 'frequency', value: d.frequency ?? '' }),
+        h('input', { type: 'text', placeholder: 'مدت', 'data-k': 'duration', value: d.duration ?? '' }),
+        h('button', { class: 'btn small', type: 'button', onclick: (e) => { e.currentTarget.parentElement.remove(); recheck(); } }, '✕')));
+    };
+    addRow();
+
+    // diagnosis (ICD-10)
+    const dxChips = h('div', { class: 'choices' });
+    const dxInput = h('input', { type: 'search', placeholder: 'جستجوی تشخیص (فارسی، انگلیسی یا کد)، مثلاً «گلودرد» یا J02' });
+    const dxResults = h('div', { class: 'choices' });
+    const renderDx = () => {
+      dxChips.replaceChildren(...dx.map((d) => h('button', { type: 'button', class: 'choice on', title: 'حذف', onclick: () => { dx = dx.filter((x) => x.code !== d.code); renderDx(); loadTemplates(); } }, `${d.code} ${d.label_fa} ✕`)));
+    };
+    let dxTimer = null;
+    dxInput.oninput = () => {
+      clearTimeout(dxTimer);
+      dxTimer = setTimeout(async () => {
+        const q = dxInput.value.trim();
+        if (!q) { dxResults.replaceChildren(); return; }
+        const r = await api('GET', `/v1/icd10?q=${encodeURIComponent(q)}`).catch(() => ({ items: [] }));
+        dxResults.replaceChildren(...r.items.map((it) => h('button', { type: 'button', class: 'choice', onclick: () => {
+          if (!dx.some((d) => d.code === it.code) && dx.length < 5) dx.push(it);
+          dxInput.value = ''; dxResults.replaceChildren(); renderDx(); loadTemplates();
+        } }, h('b', { class: 'ltr' }, it.code), ` ${it.label_fa}`)));
+      }, 250);
+    };
+
+    // personal templates
+    const tplSel = h('select', {}, h('option', { value: '' }, 'الگوهای من…'));
+    let templates = [];
+    async function loadTemplates() {
+      const r = await api('GET', `/v1/doctors/me/rx-templates${dx[0] ? `?diagnosis_code=${encodeURIComponent(dx[0].code)}` : ''}`).catch(() => ({ items: [] }));
+      templates = r.items;
+      tplSel.replaceChildren(h('option', { value: '' }, templates.length ? 'الگوهای من…' : 'هنوز الگویی ذخیره نکرده‌اید'),
+        ...templates.map((t) => h('option', { value: t.id }, `${t.name}${t.diagnosis_code ? ` (${t.diagnosis_code})` : ''}`)));
+    }
+    tplSel.onchange = guard(async () => {
+      const t = templates.find((x) => x.id === tplSel.value);
+      if (!t) return;
+      rows.replaceChildren(); t.drugs.forEach(addRow);
+      if (t.notes) notes.value = t.notes;
+      if (t.diagnosis_code && !dx.some((d) => d.code === t.diagnosis_code)) { dx.push({ code: t.diagnosis_code, label_fa: t.diagnosis_label }); renderDx(); }
+      api('POST', `/v1/doctors/me/rx-templates/${t.id}/use`, {}).catch(() => {});
+      tplSel.value = '';
+      recheck();
+      toast(`الگوی «${t.name}» اعمال شد؛ پیش از ذخیره بررسی کنید`);
+    });
+    const saveTpl = guard(async () => {
+      const drugs = current();
+      if (!drugs.length) throw new Error('ابتدا داروها را وارد کنید');
+      const name = prompt('نام الگو (مثلاً «فارنژیت بزرگسال»):');
+      if (!name) return;
+      await api('POST', '/v1/doctors/me/rx-templates', { name, diagnosis_code: dx[0]?.code ?? null, drugs, notes: notes.value });
+      toast('الگو ذخیره شد'); loadTemplates();
+    });
+
+    const loadRx = async () => {
+      const r = await api('GET', `/v1/prescriptions?consultation_id=${cid}`);
+      existing.replaceChildren(...r.items.map((rx) => h('div', { class: `banner ${rx.status === 'issued' ? 'info' : 'warn'} stack` },
+        h('div', {}, rx.status === 'issued' ? '✅ نسخه صادر و امضا شد' : '📝 پیش‌نویس (تا امضا نامعتبر است)', ' — ', rx.drugs.map((d) => `${d.name} ${d.dose ?? ''}`).join('، ')),
+        rx.diagnoses?.length ? h('div', { class: 'small' }, 'تشخیص: ', rx.diagnoses.map((d) => `${d.code} ${d.label_fa}`).join('، ')) : null,
+        rx.status === 'draft' ? safetyList(rx.safety) : rx.safety?.override_reason ? h('div', { class: 'small' }, `صدور با وجود هشدار؛ دلیل پزشک: ${rx.safety.override_reason}`) : null,
+        h('div', {}, rx.status === 'draft' ? h('button', { class: 'btn primary small', onclick: guard(async () => {
+          try {
+            await api('POST', `/v1/prescriptions/${rx.id}/sign`, {});
+          } catch (e) {
+            if (e.code !== 'safety_override_required') throw e;
+            const list = (e.body?.warnings ?? []).filter((w) => w.severity === 'high').map((w) => `• ${w.message}`).join('\n');
+            const reason = prompt(`هشدار ایمنی جدی:\n${list}\n\nاگر با آگاهی از این هشدار صدور را لازم می‌دانید، دلیل را بنویسید (در پرونده ثبت می‌شود):`);
+            if (!reason) return;
+            await api('POST', `/v1/prescriptions/${rx.id}/sign`, { override_reason: reason });
+          }
+          toast('نسخه امضا و صادر شد'); loadRx();
+        }) }, 'امضا و صدور') : h('a', { href: apiUrl(`/v1/prescriptions/${rx.id}/verify`), target: '_blank' }, 'بررسی اعتبار')))));
+    };
+    const saveDraft = guard(async () => {
+      const drugs = current();
+      if (!drugs.length) throw new Error('حداقل یک دارو وارد کنید');
+      await api('POST', '/v1/prescriptions', { consultation_id: cid, drugs, notes: notes.value, diagnoses: dx.map((d) => d.code) }, { 'Idempotency-Key': rxKey });
+      rxKey = crypto.randomUUID();
+      rows.replaceChildren(); addRow(); notes.value = ''; safetyBox.replaceChildren();
+      toast('پیش‌نویس ذخیره شد'); loadRx();
+    });
+    loadTemplates();
+    loadRx();
+    return h('div', { class: 'card stack' }, dl, h('h2', {}, 'نسخه الکترونیک'), existing,
+      h('div', {}, h('label', {}, 'تشخیص (ICD-10)'), dxChips, dxInput, dxResults),
+      h('div', { class: 'row' }, tplSel, h('button', { class: 'btn small', type: 'button', onclick: saveTpl }, '💾 ذخیره به‌عنوان الگو')),
+      h('div', {}, rows, h('button', { class: 'btn small', onclick: () => addRow() }, '+ دارو')),
+      safetyBox, notes,
+      h('p', { class: 'muted small' }, 'بررسی ایمنی (حساسیت ثبت‌شده، داروی تکراری، چند تداخل مهم) کمکی و محدود است و جای قضاوت پزشک را نمی‌گیرد.'),
+      h('div', { class: 'row' }, h('button', { class: 'btn', onclick: saveDraft }, 'ذخیره پیش‌نویس'), h('span', { class: 'spacer' }), endButton ?? ''));
+  };
+
   // ---------------------------------------------------------------- visit summary (SOAP)
   const SUMMARY_FIELDS = [
     ['subjective', 'S — شرح حال (گفته‌های بیمار)', 6],

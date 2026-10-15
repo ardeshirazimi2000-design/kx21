@@ -685,43 +685,17 @@ async function doctorPanel(cid, info, ended) {
           }, 'تأیید ارزیابی'))))) : null));
   }
 
-  // Prescription
-  const rows = h('div');
-  const addRow = () => rows.append(h('div', { class: 'drug-row' },
-    h('input', { type: 'text', placeholder: 'نام دارو', 'data-k': 'name' }), h('input', { type: 'text', placeholder: 'دوز', 'data-k': 'dose' }),
-    h('input', { type: 'text', placeholder: 'دفعات مصرف', 'data-k': 'frequency' }), h('input', { type: 'text', placeholder: 'مدت', 'data-k': 'duration' }),
-    h('button', { class: 'btn small', type: 'button', onclick: (e) => e.currentTarget.parentElement.remove() }, '✕')));
-  addRow();
-  const notes = h('textarea', { rows: 2, placeholder: 'توضیحات' });
-  const existing = h('div');
-  const rxKey = crypto.randomUUID();
-  const loadRx = async () => {
-    const r = await api('GET', `/v1/prescriptions?consultation_id=${cid}`);
-    existing.replaceChildren(...r.items.map((rx) => h('div', { class: 'banner ' + (rx.status === 'issued' ? 'info' : 'warn') },
-      rx.status === 'issued' ? '✅ نسخه صادر و امضا شد' : '📝 پیش‌نویس (تا امضا نامعتبر است)', ' — ',
-      rx.drugs.map((d) => `${d.name} ${d.dose ?? ''}`).join('، '), ' ',
-      rx.status === 'draft' ? h('button', {
-        class: 'btn primary small', onclick: guard(async () => { await api('POST', `/v1/prescriptions/${rx.id}/sign`, {}); toast('نسخه امضا و صادر شد'); loadRx(); }),
-      }, 'امضا و صدور') : h('a', { href: apiUrl(`/v1/prescriptions/${rx.id}/verify`), target: '_blank' }, 'بررسی اعتبار'))));
-  };
-  const saveDraft = guard(async () => {
-    const drugs = [...rows.children].map((r) => Object.fromEntries([...r.querySelectorAll('input')].map((i) => [i.dataset.k, i.value.trim()]))).filter((d) => d.name);
-    if (!drugs.length) return toast('حداقل یک دارو وارد کنید', true);
-    await api('POST', '/v1/prescriptions', { consultation_id: cid, drugs, notes: notes.value }, { 'Idempotency-Key': rxKey });
-    toast('پیش‌نویس ذخیره شد'); loadRx();
-  });
-  $app.append(h('div', { class: 'card stack' }, h('h2', {}, 'نسخه الکترونیک'), existing,
-    h('div', {}, rows, h('button', { class: 'btn small', onclick: addRow }, '+ دارو')), notes,
-    h('div', { class: 'row' }, h('button', { class: 'btn', onclick: saveDraft }, 'ذخیره پیش‌نویس'), h('span', { class: 'spacer' }),
-      ended ? null : h('button', {
-        class: 'btn danger', onclick: guard(async () => {
-          if (!confirm('ویزیت پایان یابد؟')) return;
-          await api('POST', `/v1/consultations/${cid}/end`, {});
-          toast('ویزیت پایان یافت؛ پیش‌نویس خلاصه آماده است'); route('room', cid);
-        }),
-      }, 'پایان ویزیت'))));
+  // Prescription (diagnosis codes, personal templates, live safety checks) + end of visit
+  $app.append(await V2.rxPanel(cid, {
+    endButton: ended ? null : h('button', {
+      class: 'btn danger', onclick: guard(async () => {
+        if (!confirm('ویزیت پایان یابد؟')) return;
+        await api('POST', `/v1/consultations/${cid}/end`, {});
+        toast('ویزیت پایان یافت؛ پیش‌نویس خلاصه آماده است'); route('room', cid);
+      }),
+    }, 'پایان ویزیت'),
+  }));
   if (!ended) $app.append(summary);
-  loadRx();
 }
 
 // ---------- prescriptions ----------

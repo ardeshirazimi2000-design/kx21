@@ -22,6 +22,7 @@ import * as payments from './modules/payments.js';
 import * as records from './modules/records.js';
 import * as summaries from './modules/summaries.js';
 import * as cxr from './modules/cxr.js';
+import * as rxTools from './modules/rx/routes.js';
 import { createLabOcr } from './modules/ai/lab-ocr.js';
 import { createIdentityService } from './modules/identity.js';
 import { createAssistant } from './modules/ai/assistant.js';
@@ -109,6 +110,7 @@ export function createApp(overrides = {}) {
   records.register(router, deps);
   summaries.register(router, deps);
   cxr.register(router, deps);
+  rxTools.register(router, deps);
 
   router.get('/healthz', async () => ({ body: { status: 'ok' } }));
   router.get('/v1/config', async () => ({

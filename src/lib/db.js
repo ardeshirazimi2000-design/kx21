@@ -342,6 +342,21 @@ CREATE TABLE IF NOT EXISTS cxr_analyses (
   created_at       TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_cxr_record ON cxr_analyses (record_id, created_at);
+
+-- each physician's own prescription templates ("my usual prescriptions")
+CREATE TABLE IF NOT EXISTS rx_templates (
+  id              TEXT PRIMARY KEY,
+  tenant_id       TEXT NOT NULL,
+  doctor_id       TEXT NOT NULL REFERENCES doctors(id),
+  name            TEXT NOT NULL,
+  diagnosis_code  TEXT,
+  drugs           TEXT NOT NULL,
+  notes           TEXT,
+  use_count       INTEGER NOT NULL DEFAULT 0,
+  created_at      TEXT NOT NULL,
+  updated_at      TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_rx_templates_doctor ON rx_templates (doctor_id, use_count DESC);
 `;
 
 export function openDb(path) {
@@ -368,6 +383,7 @@ const COLUMNS = {
   ],
   appointments: [['payment_due_at', 'TEXT']],
   otp_codes: [['payload', 'TEXT']], // pending registration (role, verified national id) until OTP is confirmed
+  prescriptions: [['diagnoses', 'TEXT'], ['safety', 'TEXT']], // ICD-10 codes; safety-check result + override reason at signing
 };
 function migrate(db) {
   for (const [table, cols] of Object.entries(COLUMNS)) {
