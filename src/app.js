@@ -21,6 +21,7 @@ import * as doctors from './modules/doctors.js';
 import * as payments from './modules/payments.js';
 import * as records from './modules/records.js';
 import * as summaries from './modules/summaries.js';
+import * as cxr from './modules/cxr.js';
 import { createLabOcr } from './modules/ai/lab-ocr.js';
 import { createIdentityService } from './modules/identity.js';
 import { createAssistant } from './modules/ai/assistant.js';
@@ -47,6 +48,8 @@ export function loadConfig(env = process.env) {
     llmModel: env.LLM_MODEL || 'llama-3.1-8b-instruct',
     llmApiKey: env.LLM_API_KEY || '',
     llmTimeoutMs: Number(env.LLM_TIMEOUT_MS || 8000),
+    // Chest X-ray pattern flags (local service from cxr/; research aid for physicians).
+    cxrUrl: env.CXR_URL || '',
     livekitUrl: env.LIVEKIT_URL || '',
     // WebRTC: the clinic's TURN relay (coturn, use-auth-secret) and optional extra STUN servers.
     turnUrls: (env.TURN_URLS || '').split(',').map((u) => u.trim()).filter(Boolean),
@@ -105,10 +108,11 @@ export function createApp(overrides = {}) {
   payments.register(router, deps);
   records.register(router, deps);
   summaries.register(router, deps);
+  cxr.register(router, deps);
 
   router.get('/healthz', async () => ({ body: { status: 'ok' } }));
   router.get('/v1/config', async () => ({
-    body: { dev_mode: config.devMode, llm: config.llmBaseUrl ? 'self-hosted' : 'template', livekit: !!config.livekitUrl },
+    body: { dev_mode: config.devMode, llm: config.llmBaseUrl ? 'self-hosted' : 'template', livekit: !!config.livekitUrl, cxr: !!config.cxrUrl },
   }));
 
   if (config.seed) seed({ db, config, domain });

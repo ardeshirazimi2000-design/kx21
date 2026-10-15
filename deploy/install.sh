@@ -19,6 +19,9 @@ PORT="${PORT:-3000}"
 DOMAIN="${DOMAIN:-}"
 EMAIL="${EMAIL:-}"
 ENABLE_TURN="${ENABLE_TURN:-1}"   # coturn relay for video visits (needed behind mobile-carrier NAT)
+ENABLE_CXR="${ENABLE_CXR:-1}"     # chest X-ray pattern flags for physicians (Python + onnxruntime, CPU, ~400 MB RAM)
+CXR_PORT=8601
+CXR_VENV=/opt/kx21-cxr
 
 say() { printf '\n\033[1;32m==> %s\033[0m\n' "$*"; }
 die() { printf '\n\033[1;31mERROR: %s\033[0m\n' "$*" >&2; exit 1; }
@@ -167,6 +170,51 @@ EOF
     systemctl restart coturn 2>/dev/null || echo "   WARNING: coturn did not start (journalctl -u coturn)"
     TURN_OK=1
   fi
+fi
+
+# ---------------------------------------------------------------- chest X-ray aid (optional)
+if [ "$ENABLE_CXR" = "1" ]; then
+  say "Setting up chest X-ray pattern service (research aid for physicians)"
+  CXR_OK=0
+  if command -v apt-get >/dev/null; then $PM python3 python3-venv python3-pip >/dev/null 2>&1 || true
+  else $PM python3 python3-pip >/dev/null 2>&1 || true; fi
+  if command -v python3 >/dev/null && { [ -x "$CXR_VENV/bin/python" ] || python3 -m venv "$CXR_VENV" >/dev/null 2>&1; }; then
+    "$CXR_VENV/bin/pip" install -q --upgrade pip >/dev/null 2>&1 || true
+    if "$CXR_VENV/bin/pip" install -q onnxruntime numpy pillow >/dev/null 2>&1; then
+      cat > /etc/systemd/system/kx21-cxr.service <<UNIT
+[Unit]
+Description=kx21 chest X-ray pattern service (local only)
+After=network.target
+
+[Service]
+User=kx21
+Group=kx21
+WorkingDirectory=$APP_DIR/cxr
+Environment=CXR_PORT=$CXR_PORT
+Environment=CXR_THREADS=2
+ExecStart=$CXR_VENV/bin/python $APP_DIR/cxr/cxr_service.py
+Restart=always
+RestartSec=5
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+MemoryMax=1500M
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+      systemctl daemon-reload
+      systemctl enable -q kx21-cxr
+      systemctl restart kx21-cxr
+      for _ in $(seq 1 30); do curl -fsS "http://127.0.0.1:$CXR_PORT/health" >/dev/null 2>&1 && { CXR_OK=1; break; }; sleep 1; done
+    fi
+  fi
+  if [ "$CXR_OK" = "1" ]; then upsert CXR_URL "http://127.0.0.1:$CXR_PORT"; echo "   chest X-ray service is running"
+  else sed -i '/^CXR_URL=/d' "$ENV_FILE"; echo "   WARNING: chest X-ray service not available (python3/onnxruntime); the app works without it"; fi
+else
+  systemctl disable --now kx21-cxr 2>/dev/null || true
+  sed -i '/^CXR_URL=/d' "$ENV_FILE"
 fi
 
 # ---------------------------------------------------------------- service

@@ -320,3 +320,9 @@ main.container { overflow-x: hidden; }
 .pre { white-space: pre-wrap; line-height: 1.9; background: var(--surface-2); border-radius: 10px; padding: 10px 12px; }
 details > summary { cursor: pointer; }
 @media print { .topbar, .tabs, .btn { display: none !important; } .card { box-shadow: none; border: 0; } }
+
+/* chest X-ray pattern flags */
+.cxr-img img { max-width: 100%; border-radius: 10px; display: block; }
+.cxr-img figure { margin: 0; }
+.ai-box { border: 1px dashed var(--border); border-radius: 12px; padding: 10px; }
+th { white-space: nowrap; }

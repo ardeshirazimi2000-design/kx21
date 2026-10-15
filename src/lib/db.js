@@ -324,6 +324,24 @@ CREATE TABLE IF NOT EXISTS visit_summaries (
   finalized_at     TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_visit_summaries_patient ON visit_summaries (patient_id, finalized_at DESC);
+
+-- chest X-ray pattern flags (research aid for the physician) + physician feedback for the pilot
+CREATE TABLE IF NOT EXISTS cxr_analyses (
+  id               TEXT PRIMARY KEY,
+  tenant_id        TEXT NOT NULL,
+  record_id        TEXT NOT NULL REFERENCES medical_records(id),
+  file_id          TEXT NOT NULL REFERENCES files(id),
+  doctor_id        TEXT NOT NULL REFERENCES doctors(id),
+  model            TEXT NOT NULL,
+  findings         TEXT NOT NULL,
+  quality          TEXT NOT NULL DEFAULT '[]',
+  overlay_files    TEXT NOT NULL DEFAULT '{}',
+  feedback         TEXT,
+  feedback_note    TEXT,
+  feedback_at      TEXT,
+  created_at       TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_cxr_record ON cxr_analyses (record_id, created_at);
 `;
 
 export function openDb(path) {

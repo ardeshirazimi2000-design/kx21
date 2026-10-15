@@ -896,6 +896,7 @@ VIEWS.stats = async () => {
     tile('رزرو با دستیار', s.appointments_by_ai), tile('ارجاع‌های باز', s.escalations_open)),
   h('div', { class: 'card' }, h('h2', {}, 'triage بر اساس سطح فوریت'),
     s.triage_by_level.length ? h('ul', { class: 'list' }, s.triage_by_level.map((t) => h('li', { class: 'row' }, urgencyPill(t.urgency_level), h('span', { class: 'spacer' }), fa(t.n)))) : h('div', { class: 'empty' }, '—')));
+  $app.append(await V2.cxrStats().catch(() => h('div')));
 };
 
 VIEWS.audit = async () => {

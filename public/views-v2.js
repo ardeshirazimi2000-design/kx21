@@ -463,8 +463,94 @@ export function installV2(x) {
   };
 
   // ---------------------------------------------------------------- doctor: records in the visit
+  // ---------------------------------------------------------------- chest X-ray pattern flags (research aid)
+  const TIER_FA = { strong: ['قابل توجه', 'danger'], moderate: ['احتمالی', 'warn'] };
+  function cxrView(a) {
+    const flagged = a.findings.filter((f) => f.tier !== 'none');
+    const imgBox = h('div', { class: 'cxr-img' });
+    const show = (f) => imgBox.replaceChildren(f?.overlay_url ? h('figure', {}, h('img', { src: fileUrl(f.overlay_url), alt: f.label }), h('figcaption', { class: 'muted small' }, `ناحیه‌ای که مدل برای «${f.label}» به آن توجه کرده (نقشه فعال‌سازی، نه مرز ضایعه)`)) : '');
+    const verdicts = {};
+    const fbBox = h('div', { class: 'stack' });
+    const renderFeedback = () => {
+      if (a.feedback) {
+        fbBox.replaceChildren(h('p', { class: 'muted small' }, `✓ نظر شما ثبت شد (${fmt.short(a.feedback_at)}). با تشکر؛ این نظرها دقت واقعی ابزار را مشخص می‌کند.`));
+        return;
+      }
+      const missed = new Set();
+      const others = a.findings.filter((f) => f.tier === 'none');
+      const useful = h('select', {}, h('option', { value: '' }, '—'), h('option', { value: 'useful' }, 'مفید بود'), h('option', { value: 'not_useful' }, 'مفید نبود'));
+      const note = h('input', { type: 'text', placeholder: 'یادداشت (اختیاری)' });
+      fbBox.replaceChildren(
+        h('b', {}, 'نظر شما (برای ارزیابی دقت ابزار در فاز آزمایشی)'),
+        ...flagged.map((f) => h('div', { class: 'row' }, h('span', { class: 'grow' }, f.label),
+          ...[['agree', 'موافقم'], ['disagree', 'مخالفم'], ['unsure', 'مطمئن نیستم']].map(([v, l]) => h('button', { type: 'button', class: 'choice', onclick: (e) => {
+            verdicts[f.key] = v;
+            e.currentTarget.parentElement.querySelectorAll('.choice').forEach((b) => b.classList.remove('on'));
+            e.currentTarget.classList.add('on');
+          } }, l)))),
+        h('details', {}, h('summary', { class: 'small' }, 'الگویی که مدل علامت نزد ولی شما در تصویر می‌بینید'),
+          h('div', { class: 'choices' }, others.map((f) => h('button', { type: 'button', class: 'choice', onclick: (e) => {
+            if (missed.has(f.key)) missed.delete(f.key); else missed.add(f.key);
+            e.currentTarget.classList.toggle('on');
+          } }, f.label)))),
+        h('div', { class: 'row' }, h('label', {}, 'در مجموع:'), useful, note),
+        h('button', { class: 'btn small', onclick: guard(async () => {
+          a = await api('POST', `/v1/cxr/${a.id}/feedback`, { verdicts, missed: [...missed], overall: useful.value || null, note: note.value });
+          renderFeedback();
+          toast('نظر شما ثبت شد');
+        }) }, 'ثبت نظر'));
+    };
+    renderFeedback();
+    show(flagged.find((f) => f.overlay_url));
+    return h('div', { class: 'ai-box stack' },
+      h('div', { class: 'banner warn small' }, '⚠️ ', a.disclaimer),
+      ...a.quality.map((q) => h('div', { class: 'banner danger small' }, q.message)),
+      flagged.length
+        ? h('div', {}, h('b', {}, 'الگوهای علامت‌خورده برای بررسی شما:'),
+          h('ul', { class: 'list' }, flagged.map((f) => h('li', { class: 'row' },
+            h('span', { class: `pill ${TIER_FA[f.tier][1]}` }, TIER_FA[f.tier][0]), h('span', { class: 'grow' }, f.label, h('span', { class: 'muted small ltr' }, ` ${f.key}`)),
+            h('span', { class: 'muted small' }, `امتیاز ${fa(Math.round(f.score * 100))}٪`),
+            f.overlay_url ? h('button', { class: 'btn small', onclick: () => show(f) }, 'نمایش ناحیه') : null))))
+        : h('p', {}, 'مدل الگوی برجسته‌ای علامت نزد. این به معنی طبیعی بودن تصویر نیست.'),
+      imgBox,
+      h('details', {}, h('summary', { class: 'small' }, 'امتیاز همه الگوها'),
+        h('table', {}, h('tbody', {}, a.findings.map((f) => h('tr', {}, h('td', {}, f.label), h('td', { class: 'ltr' }, f.score.toFixed(2))))))),
+      h('p', { class: 'muted small' }, `مدل: ${a.model} · ${fmt.short(a.created_at)}`),
+      fbBox);
+  }
+  function cxrBox(rec) {
+    const box = h('div', { class: 'stack' });
+    const images = rec.files.filter((f) => f.mime.startsWith('image/'));
+    if (!images.length) return null;
+    const list = h('div', { class: 'stack' });
+    api('GET', `/v1/records/${rec.id}/cxr`).then((r) => list.replaceChildren(...r.items.slice(0, 3).map(cxrView))).catch(() => {});
+    box.append(h('div', { class: 'row' }, ...images.map((f, i) => h('button', { class: 'btn small', onclick: guard(async (e) => {
+      if (!confirm('این تصویر، رادیوگرافی روبه‌روی (PA یا AP) قفسه سینه است؟\nنتیجه فقط یک ابزار کمکی پژوهشی برای شماست و به بیمار نمایش داده نمی‌شود.')) return;
+      const btn = e.currentTarget; btn.disabled = true; btn.textContent = '⏳ در حال تحلیل…';
+      try {
+        list.prepend(cxrView(await api('POST', `/v1/records/${rec.id}/cxr`, { file_id: f.id, confirm_frontal_cxr: true })));
+      } finally { btn.disabled = false; btn.textContent = `🫁 تحلیل الگوی قفسه سینه${images.length > 1 ? ` (تصویر ${fa(i + 1)})` : ''} — پژوهشی`; }
+    }) }, `🫁 تحلیل الگوی قفسه سینه${images.length > 1 ? ` (تصویر ${fa(i + 1)})` : ''} — پژوهشی`))), list);
+    return box;
+  }
+  // Admin: pilot accuracy of the chest X-ray aid, from physicians' agree/disagree feedback.
+  x.cxrStats = async () => {
+    const s = await api('GET', '/v1/admin/cxr-stats');
+    if (!s.enabled && !s.analyses) return h('div');
+    return h('div', { class: 'card stack' }, h('h2', {}, '🫁 فاز آزمایشی تحلیل عکس قفسه سینه'),
+      h('p', { class: 'muted' }, `${fa(s.analyses)} تحلیل · ${fa(s.reviewed)} مورد با نظر پزشک · «مفید بود»: ${fa(s.useful)}`),
+      s.items.length ? h('div', { style: 'overflow-x:auto' }, h('table', {},
+        h('thead', {}, h('tr', {}, ['الگو', 'علامت‌خورده', 'موافق', 'مخالف', 'نامطمئن', 'جاافتاده', 'توافق پزشک'].map((c) => h('th', {}, c)))),
+        h('tbody', {}, s.items.map((r) => h('tr', {}, h('td', {}, r.label), h('td', {}, fa(r.flagged)), h('td', {}, fa(r.agree)), h('td', {}, fa(r.disagree)),
+          h('td', {}, fa(r.unsure)), h('td', {}, fa(r.missed)), h('td', {}, r.agreement == null ? '—' : `${fa(r.agreement)}٪`)))))) : h('div', { class: 'empty' }, 'هنوز داده‌ای ثبت نشده است.'),
+      h('p', { class: 'muted small' }, '«توافق پزشک» = موافق ÷ (موافق + مخالف) برای الگوهای علامت‌خورده؛ «جاافتاده» = الگوهایی که پزشک دید و مدل علامت نزد. این اعداد برای تصمیم درباره ادامه استفاده و مستندات مجوز به کار می‌رود.'));
+  };
+  let cxrEnabled = null;
+  const cxrOn = async () => (cxrEnabled ??= (await api('GET', '/v1/config').catch(() => ({}))).cxr === true);
+
   x.doctorRecords = async (appointmentId) => {
     const r = await api('GET', `/v1/records?appointment_id=${appointmentId}`);
+    const cxrAvailable = await cxrOn();
     const card = h('div', { class: 'card' }, h('h2', {}, 'مدارک ارسالی بیمار'));
     if (!r.items.length) { card.append(h('p', { class: 'muted' }, 'بیمار هنوز مدرکی ارسال نکرده است.')); return card; }
     for (const rec of r.items) {
@@ -476,6 +562,7 @@ export function installV2(x) {
         rec.lab_rows.length ? h('table', {}, h('tbody', {}, rec.lab_rows.map((l) => h('tr', {}, h('td', {}, l.name), h('td', { class: 'ltr' }, `${l.value} ${l.unit}`), h('td', { class: 'ltr' }, l.ref))))) : null,
         rec.lab_rows.some((l) => l.ocr) ? h('p', { class: 'muted small' }, '📷 بخشی از مقادیر به‌طور خودکار از عکس برگه خوانده و توسط بیمار تأیید شده است؛ در صورت تردید با تصویر پیوست مقایسه کنید.') : null,
         rec.files.length ? h('div', { class: 'thumbs' }, rec.files.map(thumb)) : null,
+        cxrAvailable && rec.category === 'imaging' ? cxrBox(rec) : null,
         h('button', { class: 'btn small', onclick: guard(async (e) => {
           e.currentTarget.disabled = true;
           const u = await api('POST', `/v1/records/${rec.id}/ai-review`, {});

@@ -44,6 +44,8 @@ export function register(router, { db, platform, config, domain, limiter }) {
     doctor_opinion: r.doctor_opinion, opinion_at: r.opinion_at, created_at: r.created_at,
   });
 
+  domain.records = { load };
+
   router.get('/v1/records/categories', async () => ({
     body: { items: Object.entries(RECORD_CATEGORIES).map(([code, label]) => ({ code, label })) },
   }));
