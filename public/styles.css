@@ -315,3 +315,8 @@ td.ltr { direction: ltr; text-align: left; font-family: ui-monospace, monospace;
 .record table, .card table { display: block; overflow-x: auto; max-width: 100%; }
 .card { overflow-wrap: anywhere; }
 main.container { overflow-x: hidden; }
+
+/* visit summary */
+.pre { white-space: pre-wrap; line-height: 1.9; background: var(--surface-2); border-radius: 10px; padding: 10px 12px; }
+details > summary { cursor: pointer; }
+@media print { .topbar, .tabs, .btn { display: none !important; } .card { box-shadow: none; border: 0; } }

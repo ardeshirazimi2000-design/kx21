@@ -51,6 +51,7 @@ export function createAppointmentDomain({ db, platform, patientDomain, payments 
       doctor: doc && { id: doc.id, full_name: doc.full_name, specialty: doc.specialty, specialty_label: SPECIALTIES[doc.specialty] },
       consultation: consultation ?? null,
       payment_due_at: a.payment_due_at ?? null,
+      summary_ready: !!(consultation && db.get(`SELECT 1 FROM visit_summaries WHERE consultation_id = ? AND status = 'final'`, consultation.id)),
     };
     if (payments && (!forRole || forRole === 'patient' || forRole === 'admin')) {
       const p = db.get(`SELECT * FROM payments WHERE purpose = 'appointment' AND ref_id = ? ORDER BY created_at DESC LIMIT 1`, a.id);

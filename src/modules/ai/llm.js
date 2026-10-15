@@ -43,7 +43,26 @@ export function createLlm(config) {
     }
   }
 
-  return { enabled, generate };
+  // Free-form completion (e.g. rephrasing a visit summary). Returns null when disabled or failing.
+  async function complete({ system, user, maxTokens = 600 }) {
+    if (!enabled) return null;
+    try {
+      const res = await fetch(`${config.llmBaseUrl.replace(/\/$/, '')}/chat/completions`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...(config.llmApiKey ? { Authorization: `Bearer ${config.llmApiKey}` } : {}) },
+        body: JSON.stringify({ model: config.llmModel, temperature: 0.1, max_tokens: maxTokens, messages: [{ role: 'system', content: system }, { role: 'user', content: user }] }),
+        signal: AbortSignal.timeout(config.llmTimeoutMs),
+      });
+      if (!res.ok) throw new Error(`LLM HTTP ${res.status}`);
+      const text = (await res.json()).choices?.[0]?.message?.content?.trim();
+      return text ? { text, model_version: `${config.llmModel}` } : null;
+    } catch (e) {
+      console.warn('[llm] completion failed:', e.message);
+      return null;
+    }
+  }
+
+  return { enabled, generate, complete };
 }
 
 function templateAnswer(chunks) {

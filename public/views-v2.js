@@ -364,6 +364,104 @@ export function installV2(x) {
   }
   x.recordForm = recordForm;
 
+  // ---------------------------------------------------------------- visit summary (SOAP)
+  const SUMMARY_FIELDS = [
+    ['subjective', 'S — شرح حال (گفته‌های بیمار)', 6],
+    ['objective', 'O — یافته‌ها (علائم حیاتی، آزمایش، مدارک)', 6],
+    ['assessment', 'A — ارزیابی پزشک * (فقط توسط شما نوشته می‌شود)', 3],
+    ['plan', 'P — برنامه درمان و نسخه', 4],
+    ['advice', 'توصیه‌ها به بیمار', 3],
+    ['follow_up', 'پیگیری (مثلاً «دو هفته بعد ویزیت مجدد»)', 1],
+  ];
+  x.summaryPanel = async (cid, ended) => {
+    const card = h('div', { class: 'card stack' });
+    const render = (s) => {
+      card.replaceChildren(h('div', { class: 'row' }, h('h2', { class: 'grow' }, '📝 خلاصه ویزیت'),
+        h('span', { class: `pill ${s.status === 'final' ? 'ok' : 'warn'}` }, s.status === 'final' ? 'نهایی و ارسال‌شده' : s.status === 'draft' ? 'پیش‌نویس' : 'هنوز ایجاد نشده')));
+      if (s.status === 'final') {
+        for (const [k, label] of SUMMARY_FIELDS) if (s[k]) card.append(h('div', {}, h('label', {}, label.replace(' *', '').replace(/ \(فقط.*\)/, '')), h('div', { class: 'pre' }, s[k])));
+        card.append(h('div', {}, h('label', {}, 'متنی که بیمار دریافت کرد'), h('div', { class: 'pre muted' }, s.patient_summary)));
+        return;
+      }
+      if (!ended) {
+        // During the visit: only the physician's notes / assessment.
+        const a = h('textarea', { rows: 3, placeholder: 'یادداشت و ارزیابی شما؛ پس از پایان ویزیت بقیه خلاصه خودکار ساخته می‌شود' }, s.assessment ?? '');
+        card.append(h('p', { class: 'muted' }, 'با پایان ویزیت، پیش‌نویس خلاصه از تریاژ، مدارک، گفتگو و نسخه ساخته می‌شود و شما آن را ویرایش و تأیید می‌کنید.'),
+          h('label', {}, 'یادداشت / ارزیابی پزشک'), a,
+          h('button', { class: 'btn', onclick: guard(async () => { await api('PUT', `/v1/consultations/${cid}/summary`, { assessment: a.value }); toast('یادداشت ذخیره شد'); }) }, 'ذخیره یادداشت'));
+        return;
+      }
+      const inputs = {};
+      card.append(h('div', { class: 'banner info' }, 'پیش‌نویس خودکار از داده‌های ثبت‌شده ساخته شده است. پیش از ارسال بخوانید و اصلاح کنید؛ بخش «ارزیابی» را خودتان بنویسید.',
+        s.generator ? h('span', { class: 'muted small' }, ` (${s.generator})`) : null));
+      for (const [k, label, rows] of SUMMARY_FIELDS) {
+        inputs[k] = rows === 1 ? h('input', { type: 'text', value: s[k] ?? '' }) : h('textarea', { rows }, s[k] ?? '');
+        card.append(h('div', {}, h('label', {}, label, s.edited_fields?.includes(k) ? h('span', { class: 'muted small' }, ' · ویرایش‌شده') : null), inputs[k]));
+      }
+      const share = h('input', { type: 'checkbox', checked: s.share_assessment });
+      card.append(h('label', { class: 'check' }, share, h('span', {}, 'ارزیابی من در متن بیمار هم آورده شود')));
+      inputs.patient_summary = h('textarea', { rows: 8 }, s.patient_summary ?? '');
+      card.append(h('div', {}, h('label', {}, 'متنی که بیمار می‌بیند', s.edited_fields?.includes('patient_summary') ? h('span', { class: 'muted small' }, ' · ویرایش دستی (دیگر خودکار به‌روز نمی‌شود)') : h('span', { class: 'muted small' }, ' · با ذخیره، از روی موارد بالا به‌روز می‌شود')), inputs.patient_summary));
+      const body = () => ({ ...Object.fromEntries(Object.entries(inputs).filter(([k, el]) => el.value !== (s[k] ?? '')).map(([k, el]) => [k, el.value])), share_assessment: share.checked });
+      const save = async () => render(await api('PUT', `/v1/consultations/${cid}/summary`, body()));
+      card.append(h('div', { class: 'row' },
+        h('button', { class: 'btn', onclick: guard(async () => { await save(); toast('خلاصه ذخیره شد'); }) }, 'ذخیره'),
+        h('button', { class: 'btn', onclick: guard(async () => {
+          if (!confirm('پیش‌نویس از داده‌های فعلی دوباره ساخته شود؟ بخش‌هایی که خودتان ویرایش کرده‌اید حفظ می‌شوند.')) return;
+          await save();
+          render(await api('POST', `/v1/consultations/${cid}/summary/regenerate`, {}));
+          toast('پیش‌نویس به‌روز شد');
+        }) }, '↻ ساخت دوباره'),
+        h('span', { class: 'spacer' }),
+        h('button', { class: 'btn primary', onclick: guard(async () => {
+          await save();
+          let r;
+          try {
+            r = await api('POST', `/v1/consultations/${cid}/summary/finalize`, {});
+          } catch (e) {
+            if (e.code !== 'unsigned_prescription' || !confirm(`${e.message}\n\nبدون نسخه امضانشده ثبت شود؟`)) throw e;
+            r = await api('POST', `/v1/consultations/${cid}/summary/finalize`, { allow_unsigned: true });
+          }
+          render(r);
+          toast('خلاصه نهایی شد و برای بیمار ارسال شد');
+        }) }, '✓ تأیید و ارسال برای بیمار')));
+    };
+    render(await api('GET', `/v1/consultations/${cid}/summary`));
+    return card;
+  };
+
+  // Previous finalized summaries of this patient (treating doctor only).
+  x.summaryHistory = async (patientId, currentCid) => {
+    const r = await api('GET', `/v1/summaries?patient_id=${patientId}`);
+    const items = r.items.filter((s) => s.consultation_id !== currentCid);
+    if (!items.length) return h('div');
+    return h('div', { class: 'card' }, h('h2', {}, '🗂️ خلاصه ویزیت‌های قبلی'),
+      h('ul', { class: 'list' }, items.map((s) => h('li', {},
+        h('details', {}, h('summary', {}, h('b', {}, s.doctor_name ?? ''), ' ', h('span', { class: 'muted' }, `${s.specialty_label ?? ''} · ${fmt.short(s.finalized_at)}`)),
+          s.assessment ? h('div', {}, h('label', {}, 'ارزیابی'), h('div', { class: 'pre' }, s.assessment)) : null,
+          s.plan ? h('div', {}, h('label', {}, 'برنامه'), h('div', { class: 'pre' }, s.plan)) : null,
+          s.follow_up ? h('div', {}, h('label', {}, 'پیگیری'), h('div', {}, s.follow_up)) : null)))));
+  };
+
+  // Patient: the finalized plain-language summary.
+  VIEWS.summary = async (cid) => {
+    const back = h('button', { class: 'btn small', onclick: () => route('appointments') }, '→ بازگشت');
+    let s;
+    try {
+      s = await api('GET', `/v1/consultations/${cid}/summary`);
+    } catch {
+      x.$app.append(back, h('div', { class: 'card empty' }, 'خلاصه این ویزیت هنوز توسط پزشک نهایی نشده است.'));
+      return;
+    }
+    x.$app.append(h('div', { class: 'row', style: 'margin-bottom:10px' }, back),
+      h('div', { class: 'card stack' }, h('h2', {}, '📝 خلاصه ویزیت'),
+        h('p', { class: 'muted' }, `${s.doctor_name ?? ''}${s.specialty_label ? ` · ${s.specialty_label}` : ''} · ${fmt.short(s.finalized_at)}`),
+        h('div', { class: 'pre' }, s.patient_summary),
+        h('div', { class: 'row' },
+          h('button', { class: 'btn', onclick: () => route('prescriptions') }, '💊 نسخه‌ها'),
+          h('button', { class: 'btn', onclick: () => window.print() }, '🖨️ چاپ'))));
+  };
+
   // ---------------------------------------------------------------- doctor: records in the visit
   x.doctorRecords = async (appointmentId) => {
     const r = await api('GET', `/v1/records?appointment_id=${appointmentId}`);

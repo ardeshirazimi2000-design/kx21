@@ -296,6 +296,34 @@ CREATE TRIGGER IF NOT EXISTS audit_logs_no_update BEFORE UPDATE ON audit_logs
   BEGIN SELECT RAISE(ABORT, 'audit_logs is append-only'); END;
 CREATE TRIGGER IF NOT EXISTS audit_logs_no_delete BEFORE DELETE ON audit_logs
   BEGIN SELECT RAISE(ABORT, 'audit_logs is append-only'); END;
+
+-- visit summary (SOAP) — auto-drafted, edited and finalized by the physician
+CREATE TABLE IF NOT EXISTS visit_summaries (
+  id               TEXT PRIMARY KEY,
+  tenant_id        TEXT NOT NULL,
+  consultation_id  TEXT NOT NULL UNIQUE REFERENCES consultations(id),
+  appointment_id   TEXT NOT NULL,
+  patient_id       TEXT NOT NULL REFERENCES patients(id),
+  doctor_id        TEXT NOT NULL REFERENCES doctors(id),
+  status           TEXT NOT NULL DEFAULT 'draft' CHECK (status IN ('draft','final')),
+  complaint        TEXT,
+  subjective       TEXT,
+  objective        TEXT,
+  assessment       TEXT,                 -- physician only; never generated
+  plan             TEXT,
+  advice           TEXT,
+  follow_up        TEXT,
+  patient_summary  TEXT,
+  share_assessment INTEGER NOT NULL DEFAULT 0,
+  edited_fields    TEXT NOT NULL DEFAULT '[]',
+  generator        TEXT,
+  sources          TEXT,
+  generated_at     TEXT,
+  created_at       TEXT NOT NULL,
+  updated_at       TEXT NOT NULL,
+  finalized_at     TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_visit_summaries_patient ON visit_summaries (patient_id, finalized_at DESC);
 `;
 
 export function openDb(path) {

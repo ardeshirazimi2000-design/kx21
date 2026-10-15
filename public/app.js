@@ -544,7 +544,8 @@ function appointmentItem(a, role) {
       }),
     }, 'لغو'));
   }
-  if (a.status === 'completed' && role === 'doctor') actions.push(h('button', { class: 'btn small', onclick: () => route('room', a.consultation.id) }, 'پرونده ویزیت'));
+  if (a.status === 'completed' && role === 'doctor') actions.push(h('button', { class: 'btn small', onclick: () => route('room', a.consultation.id) }, a.summary_ready ? 'پرونده ویزیت' : '📝 خلاصه ویزیت (پیش‌نویس)'));
+  if (a.status === 'completed' && role === 'patient' && a.summary_ready) actions.push(h('button', { class: 'btn primary small', onclick: () => route('summary', a.consultation.id) }, '📝 خلاصه ویزیت'));
   if (role === 'patient' && ['pending', 'confirmed'].includes(a.status)) actions.push(h('button', { class: 'btn small', onclick: () => route('records') }, '📎 ارسال مدرک'));
   return h('li', {}, role === 'patient' ? V2.paymentBanner(a, () => route('appointments')) : null, h('div', { class: 'row' },
     h('div', { class: 'grow' },
@@ -609,7 +610,7 @@ VIEWS.room = async (cid) => {
   $app.append(
     h('div', { class: 'row', style: 'margin-bottom:10px' }, h('button', { class: 'btn small', onclick: () => route(isDoctor ? 'doctor-appointments' : 'appointments') }, '→ بازگشت'),
       h('b', {}, 'اتاق ویزیت'), ended ? h('span', { class: 'pill' }, 'پایان‌یافته') : h('span', { class: 'pill ok' }, 'فعال')),
-    ended ? null : media,
+    (ended ? null : media) ?? "",
     h('div', { class: 'card chat', style: 'height:auto' }, log, ended ? null : h('div', { class: 'chat-input' }, input, sendBtn)),
   );
   await poll();
@@ -659,7 +660,11 @@ function callPanel(cid, info, join, isDoctor) {
 }
 
 async function doctorPanel(cid, info, ended) {
+  // After the visit the summary comes first; during it, the notes box sits below the prescription.
+  const summary = await V2.summaryPanel(cid, ended).catch(() => h('div'));
+  if (ended) $app.append(summary);
   $app.append(await V2.doctorRecords(info.appointment_id).catch(() => h('div')));
+  $app.append(await V2.summaryHistory(info.patient_id, cid).catch(() => h('div')));
   const patient = await api('GET', `/v1/patients/${info.patient_id}`).catch(() => null);
   if (patient) {
     $app.append(h('div', { class: 'card' }, h('h2', {}, 'پرونده بیمار'),
@@ -712,9 +717,10 @@ async function doctorPanel(cid, info, ended) {
         class: 'btn danger', onclick: guard(async () => {
           if (!confirm('ویزیت پایان یابد؟')) return;
           await api('POST', `/v1/consultations/${cid}/end`, {});
-          toast('ویزیت پایان یافت؛ دستیار برای بیمار وارد حالت پیگیری شد'); route('room', cid);
+          toast('ویزیت پایان یافت؛ پیش‌نویس خلاصه آماده است'); route('room', cid);
         }),
       }, 'پایان ویزیت'))));
+  if (!ended) $app.append(summary);
   loadRx();
 }
 

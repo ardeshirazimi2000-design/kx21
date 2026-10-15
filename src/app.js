@@ -20,6 +20,7 @@ import * as files from './modules/files.js';
 import * as doctors from './modules/doctors.js';
 import * as payments from './modules/payments.js';
 import * as records from './modules/records.js';
+import * as summaries from './modules/summaries.js';
 import { createLabOcr } from './modules/ai/lab-ocr.js';
 import { createIdentityService } from './modules/identity.js';
 import { createAssistant } from './modules/ai/assistant.js';
@@ -103,6 +104,7 @@ export function createApp(overrides = {}) {
   doctors.register(router, deps);
   payments.register(router, deps);
   records.register(router, deps);
+  summaries.register(router, deps);
 
   router.get('/healthz', async () => ({ body: { status: 'ok' } }));
   router.get('/v1/config', async () => ({
