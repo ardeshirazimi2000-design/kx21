@@ -4,3 +4,4 @@ data/
 *.db-*
 .env
 __pycache__/
+*.whl
