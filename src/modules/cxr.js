@@ -110,7 +110,7 @@ export function register(router, { db, platform, config, domain, limiter }) {
 
   // Pilot statistics for the clinic (admin).
   router.get('/v1/admin/cxr-stats', async (ctx) => {
-    requireUser(ctx, 'admin');
+    domain.access.require(ctx, 'stats.view');
     const rows = db.all('SELECT findings, feedback FROM cxr_analyses WHERE tenant_id = ?', ctx.tenantId);
     const per = Object.fromEntries(Object.keys(CXR_LABELS).map((k) => [k, { key: k, label: CXR_LABELS[k], flagged: 0, agree: 0, disagree: 0, unsure: 0, missed: 0 }]));
     let reviewed = 0;

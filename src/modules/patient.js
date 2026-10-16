@@ -349,21 +349,22 @@ export function register(router, { db, keys, platform, domain }) {
   });
 
   router.post('/v1/admin/doctors', async (ctx) => {
-    requireUser(ctx, 'admin');
+    domain.access.require(ctx, 'users.manage');
     const r = domain.patient.createDoctor(ctx.tenantId, ctx.body);
     platform.audit(ctx, 'doctor.create', `doctor:${r.doctor_id}`);
     return { status: 201, body: r };
   });
 
   router.post('/v1/admin/staff', async (ctx) => {
-    requireUser(ctx, 'admin');
+    domain.access.require(ctx, 'users.manage');
     const phone = normalizePhone(ctx.body.phone);
     if (!phone) throw badRequest('شماره موبایل معتبر نیست', 'invalid_phone');
     if (!['operator', 'admin'].includes(ctx.body.role)) throw badRequest('نقش باید operator یا admin باشد');
     const id = uuid();
     try {
-      db.run('INSERT INTO users (id, tenant_id, role, phone, email, full_name, created_at) VALUES (?,?,?,?,?,?,?)',
-        id, ctx.tenantId, ctx.body.role, phone, ctx.body.email ?? null, ctx.body.full_name ?? null, nowIso());
+      const rid = ctx.body.staff_role_id && db.get('SELECT id FROM staff_roles WHERE id = ? AND tenant_id = ?', String(ctx.body.staff_role_id), ctx.tenantId)?.id;
+      db.run('INSERT INTO users (id, tenant_id, role, phone, email, full_name, created_at, staff_role_id) VALUES (?,?,?,?,?,?,?,?)',
+        id, ctx.tenantId, ctx.body.role, phone, ctx.body.email ?? null, ctx.body.full_name ?? null, nowIso(), rid ?? null);
     } catch (e) {
       if (isUniqueViolation(e)) throw conflict('کاربری با این شماره وجود دارد', 'duplicate');
       throw e;

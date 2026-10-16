@@ -398,6 +398,47 @@ CREATE TABLE IF NOT EXISTS erx_deleted (
   replacement   TEXT,
   PRIMARY KEY (catalog_id, erx_code)
 );
+
+-- staff roles = named permission sets (see modules/access.js)
+CREATE TABLE IF NOT EXISTS staff_roles (
+  id           TEXT PRIMARY KEY,
+  tenant_id    TEXT NOT NULL,
+  name         TEXT NOT NULL,
+  permissions  TEXT NOT NULL,
+  created_at   TEXT NOT NULL,
+  UNIQUE (tenant_id, name)
+);
+
+-- every login attempt (success and failure)
+CREATE TABLE IF NOT EXISTS login_events (
+  id          TEXT PRIMARY KEY,
+  tenant_id   TEXT NOT NULL,
+  user_id     TEXT,
+  phone       TEXT,
+  success     INTEGER NOT NULL,
+  method      TEXT NOT NULL,
+  reason      TEXT,
+  ip          TEXT,
+  user_agent  TEXT,
+  at          TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_login_events_user ON login_events (user_id, at DESC);
+CREATE INDEX IF NOT EXISTS idx_login_events_tenant ON login_events (tenant_id, at DESC);
+
+-- payouts (settlements) to doctors
+CREATE TABLE IF NOT EXISTS doctor_payouts (
+  id          TEXT PRIMARY KEY,
+  tenant_id   TEXT NOT NULL,
+  doctor_id   TEXT NOT NULL REFERENCES doctors(id),
+  amount      INTEGER NOT NULL,           -- Rial
+  paid_at     TEXT NOT NULL,
+  reference   TEXT,
+  sheba       TEXT,
+  note        TEXT,
+  created_by  TEXT,
+  created_at  TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_payouts_doctor ON doctor_payouts (doctor_id, paid_at DESC);
 `;
 
 export function openDb(path) {
@@ -415,16 +456,20 @@ const COLUMNS = {
     ['national_id_enc', 'BLOB'], ['national_id_hash', 'BLOB'],
     ['identity_verified_at', 'TEXT'], ['identity_source', 'TEXT'],
     ['registry_verified_at', 'TEXT'], ['birth_date', 'TEXT'], // civil-registry (PersonInfo) check: name is locked after it
+    ['staff_role_id', 'TEXT'], ['disabled_at', 'TEXT'], ['disabled_reason', 'TEXT'], // access control
   ],
   doctors: [
     ['status', "TEXT NOT NULL DEFAULT 'approved'"], // draft | pending_review | approved | rejected | suspended
     ['photo_file_id', 'TEXT'], ['license_card_file_id', 'TEXT'],
     ['education', 'TEXT'], ['experience_years', 'INTEGER'],
     ['review_reason', 'TEXT'], ['reviewed_by', 'TEXT'], ['reviewed_at', 'TEXT'], ['submitted_at', 'TEXT'],
+    ['sheba', 'TEXT'], // bank account (IBAN) for payouts
   ],
   appointments: [['payment_due_at', 'TEXT']],
   otp_codes: [['payload', 'TEXT']], // pending registration (role, verified national id) until OTP is confirmed
-  prescriptions: [['diagnoses', 'TEXT'], ['safety', 'TEXT']], // ICD-10 codes; safety-check result + override reason at signing
+  prescriptions: [['diagnoses', 'TEXT'], ['safety', 'TEXT']],
+  // Split of each payment, fixed at creation: commission percent, platform share, doctor share.
+  payments: [['doctor_id', 'TEXT'], ['commission_percent', 'REAL'], ['platform_amount', 'INTEGER'], ['doctor_amount', 'INTEGER']], // ICD-10 codes; safety-check result + override reason at signing
 };
 function migrate(db) {
   for (const [table, cols] of Object.entries(COLUMNS)) {

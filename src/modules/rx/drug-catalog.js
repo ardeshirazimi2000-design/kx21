@@ -183,7 +183,7 @@ export function register(router, { db, platform, domain }) {
 
   // Upload (raw .xlsx body) → staged version with a preview; nothing changes until activation.
   router.post('/v1/admin/drug-catalog', async (ctx) => {
-    requireUser(ctx, 'admin');
+    domain.access.require(ctx, 'drug_catalog.manage');
     const chunks = [];
     let size = 0;
     for await (const ch of ctx.req) {
@@ -216,13 +216,13 @@ export function register(router, { db, platform, domain }) {
   });
 
   router.get('/v1/admin/drug-catalog', async (ctx) => {
-    requireUser(ctx, 'admin');
+    domain.access.require(ctx, 'drug_catalog.manage');
     return { body: { items: db.all('SELECT * FROM drug_catalogs WHERE tenant_id = ? ORDER BY created_at DESC LIMIT 20', ctx.tenantId).map(view) } };
   });
 
   // Activate a staged version or roll back to an archived one.
   router.post('/v1/admin/drug-catalog/:id/activate', async (ctx) => {
-    requireUser(ctx, 'admin');
+    domain.access.require(ctx, 'drug_catalog.manage');
     const c = db.get('SELECT * FROM drug_catalogs WHERE id = ? AND tenant_id = ?', requireUuid(ctx.params.id, 'id'), ctx.tenantId);
     if (!c) throw notFound('فهرست دارو');
     db.tx(() => {
@@ -234,7 +234,7 @@ export function register(router, { db, platform, domain }) {
   });
 
   router.get('/v1/drug-catalog/search', async (ctx) => {
-    requireUser(ctx, 'doctor', 'admin');
+    if (requireUser(ctx).role !== 'doctor') domain.access.require(ctx, 'drug_catalog.manage');
     return { body: domain.drugCatalog.search(ctx.tenantId, String(ctx.query.q ?? '').slice(0, 80)) };
   });
 }

@@ -62,3 +62,28 @@ export function seed({ db, config, domain }) {
     });
   }
 }
+
+// Production: make sure the real administrator exists and that demo accounts (fake numbers)
+// can neither log in nor be booked. Their data is kept, only disabled.
+export function bootstrapProduction({ db, config }) {
+  const t = config.defaultTenant;
+  const admin = String(config.adminPhone ?? '').trim();
+  if (admin) {
+    const u = db.get('SELECT id, role FROM users WHERE tenant_id = ? AND phone = ?', t, admin);
+    if (!u) {
+      db.run('INSERT INTO users (id, tenant_id, role, phone, full_name, created_at) VALUES (?,?,?,?,?,?)', uuid(), t, 'admin', admin, 'مدیر سامانه', nowIso());
+    } else if (u.role !== 'admin') {
+      console.warn(`[bootstrap] ADMIN_PHONE ${admin} already belongs to a ${u.role} account; not changed`);
+    } else {
+      db.run('UPDATE users SET deleted_at = NULL WHERE id = ?', u.id);
+    }
+  }
+  const demo = [DEMO_ACCOUNTS.admin.phone, DEMO_ACCOUNTS.operator.phone, ...DEMO_ACCOUNTS.doctors.map((d) => d.phone)].filter((ph) => ph !== admin);
+  const now = nowIso();
+  for (const phone of demo) {
+    const u = db.get('SELECT id FROM users WHERE tenant_id = ? AND phone = ? AND deleted_at IS NULL', t, phone);
+    if (!u) continue;
+    db.run('UPDATE users SET deleted_at = ? WHERE id = ?', now, u.id);
+    db.run('UPDATE doctors SET deleted_at = ? WHERE user_id = ? AND deleted_at IS NULL', now, u.id);
+  }
+}

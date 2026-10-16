@@ -117,10 +117,24 @@ sed -i "s/^PORT=.*/PORT=$PORT/" "$ENV_FILE"
 # Optional integrations passed on the command line are stored in the env file, e.g.
 #   curl … | SAPI_TOKEN=… ZARINPAL_MERCHANT_ID=… bash
 upsert() { sed -i "/^$1=/d" "$ENV_FILE"; printf '%s=%s\n' "$1" "$2" >> "$ENV_FILE"; }
-for VAR in SAPI_TOKEN SAPI_BASE IDENTITY_INQUIRY_URL DRUG_API_BASE DRUG_API_TOKEN ZARINPAL_MERCHANT_ID ZARINPAL_SANDBOX PUBLIC_BASE_URL VISION_LLM_BASE_URL VISION_LLM_MODEL LLM_BASE_URL LLM_MODEL; do
+for VAR in SAPI_TOKEN SAPI_BASE IDENTITY_INQUIRY_URL SMS_PROVIDER SMS_API_KEY SMS_OTP_TEMPLATE SMS_MFA_TEMPLATE SMS_TEMPLATE_PARAM SMS_SENDER ADMIN_PHONE DRUG_API_BASE DRUG_API_TOKEN ZARINPAL_MERCHANT_ID ZARINPAL_SANDBOX PUBLIC_BASE_URL VISION_LLM_BASE_URL VISION_LLM_MODEL LLM_BASE_URL LLM_MODEL; do
   VAL="${!VAR:-}"; [ -n "$VAL" ] && upsert "$VAR" "$VAL" && echo "   set $VAR"
 done
 [ -n "$DOMAIN" ] && upsert PUBLIC_BASE_URL "https://$DOMAIN"
+# Real registration (PRODUCTION=1): codes only by SMS, Shahkar required, demo accounts disabled.
+envget() { grep -E "^$1=" "$ENV_FILE" | tail -1 | cut -d= -f2-; }
+if [ "${PRODUCTION:-}" = "1" ]; then
+  MISSING=""
+  for V in SMS_PROVIDER SMS_API_KEY SMS_OTP_TEMPLATE ADMIN_PHONE SAPI_TOKEN; do [ -n "$(envget $V)" ] || MISSING="$MISSING $V"; done
+  [ -z "$MISSING" ] || die "PRODUCTION=1 needs:$MISSING (pass them on the command line once; they are kept in $ENV_FILE)"
+  upsert NODE_ENV production
+  sed -i '/^SEED=/d' "$ENV_FILE"
+  [ -n "$(envget ZARINPAL_MERCHANT_ID)" ] || echo "   NOTE: no ZARINPAL_MERCHANT_ID — keep patient payments switched off in the admin tariffs page"
+  echo "   production mode: OTP by SMS ($(envget SMS_PROVIDER)), admin $(envget ADMIN_PHONE)"
+elif [ "${PRODUCTION:-}" = "0" ]; then
+  upsert NODE_ENV development
+  echo "   development (test) mode: codes shown on screen"
+fi
 # Behind Caddy only localhost may reach the app; without a domain it listens publicly.
 if [ -n "$DOMAIN" ]; then BIND=127.0.0.1; else BIND=0.0.0.0; fi
 sed -i "s/^HOST=.*/HOST=$BIND/" "$ENV_FILE"

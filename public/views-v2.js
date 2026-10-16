@@ -1,4 +1,4 @@
-import { jalaliPicker, todayJalali, formatJalaliDate } from './jalali.js';
+import { jalaliPicker, todayJalali, formatJalaliDate, toGregorian } from './jalali.js';
 // Views added for the second requirements document (app.docx):
 //   doctor self-onboarding (profile, photo, medical-council card, status/rejection reason),
 //   admin credential review, admin settings (tariffs) and payments, doctor directory and
@@ -205,8 +205,17 @@ export function installV2(x) {
     const s = await api('GET', '/v1/admin/settings');
     const inputs = Object.fromEntries(Object.keys(s.tariffs).map((k) => [k, h('input', { type: 'number', min: 0, step: 1000, value: Math.round(s.tariffs[k] / 10) })]));
     const enabled = h('input', { type: 'checkbox', checked: s.payments_enabled });
+    const commission = h('input', { type: 'number', min: 0, max: 100, step: 0.5, value: s.commission_percent ?? 0, dir: 'ltr' });
+    const commissionHint = h('p', { class: 'muted small' });
+    const showSplit = () => {
+      const v = Number(inputs.visit_video?.value || 0);
+      const pc = Number(commission.value || 0);
+      commissionHint.textContent = v ? `مثال: از ویزیت تصویری ${fa(v.toLocaleString('en-US'))} تومانی، سهم پلتفرم ${fa(Math.round(v * pc / 100).toLocaleString('en-US'))} و سهم پزشک ${fa(Math.round(v - v * pc / 100).toLocaleString('en-US'))} تومان.` : '';
+    };
+    commission.oninput = showSplit;
     const note = h('div', { class: 'banner warn' }, 'حالت آزمایشی: از بیماران هیچ هزینه‌ای گرفته نمی‌شود؛ نوبت‌ها بلافاصله قطعی و تریاژ رایگان است. مبالغ زیر حفظ می‌شوند.');
     const sync = () => { note.style.display = enabled.checked ? 'none' : ''; };
+    queueMicrotask(showSplit);
     enabled.onchange = sync; sync();
     x.$app.append(h('div', { class: 'card stack' },
       h('h2', {}, 'تعرفه خدمات'),
@@ -214,13 +223,250 @@ export function installV2(x) {
       note,
       h('p', { class: 'muted' }, 'مبالغ به تومان. صفر یعنی خدمت رایگان است. حداقل مبلغ قابل پرداخت در درگاه ۱٬۰۰۰ تومان است.'),
       h('div', { class: 'grid2' }, Object.entries(inputs).map(([k, el]) => h('div', {}, h('label', {}, s.labels[k]), el))),
+      h('div', {}, h('label', {}, 'سهم پلتفرم از هزینه ویزیت (درصد)'), commission, commissionHint,
+        h('p', { class: 'muted small' }, 'سهم پلتفرم و پزشک هنگام ایجاد هر پرداخت ثبت می‌شود؛ تغییر درصد روی پرداخت‌های قبلی اثری ندارد. هزینه تریاژ کامل به پلتفرم تعلق دارد.')),
       h('div', { class: `banner ${s.gateway === 'zarinpal' ? 'info' : 'warn'}` },
         s.gateway === 'zarinpal' ? `درگاه: زرین‌پال${s.sandbox ? ' (محیط آزمایشی sandbox)' : ''}` : 'درگاه زرین‌پال تنظیم نشده؛ پرداخت‌ها با درگاه آزمایشی شبیه‌سازی می‌شوند (ZARINPAL_MERCHANT_ID را روی سرور تنظیم کنید).'),
       h('button', { class: 'btn primary', onclick: guard(async () => {
         const tariffs = Object.fromEntries(Object.entries(inputs).map(([k, el]) => [k, Math.round(Number(el.value || 0)) * 10]));
-        await api('PUT', '/v1/admin/settings', { tariffs, payments_enabled: enabled.checked });
+        await api('PUT', '/v1/admin/settings', { tariffs, payments_enabled: enabled.checked, commission_percent: Number(commission.value || 0) });
         toast(enabled.checked ? 'تعرفه‌ها ذخیره شد' : 'ذخیره شد — پرداخت بیماران غیرفعال است');
       }) }, 'ذخیره تعرفه‌ها')));
+  };
+
+  // ---------------------------------------------------------------- accounting (clinic + doctor)
+  const T = (rial) => `${toman(rial ?? 0)} تومان`;
+  const STATE_FA = { earned: ['انجام‌شده', 'ok'], pending: ['در انتظار ویزیت', 'warn'], refund: ['بازگشت وجه', 'danger'] };
+  const CH_FA = { video: 'تصویری', audio: 'صوتی', chat: 'متنی' };
+  const tile = (label, value, cls = '') => h('div', { class: `card stat-tile ${cls}` }, h('div', { class: 'muted small' }, label), h('div', { class: 'stat' }, value));
+  const isoDay = (d) => d.toISOString().slice(0, 10);
+  // Period presets in Jalali months (start of the current Jalali month etc.).
+  function periodPicker(onChange, initial = 'month') {
+    const today = new Date();
+    const j = todayJalali();
+    const jStart = (jy, jm) => { const g = toGregorian(jy, jm, 1); return new Date(Date.UTC(g.gy, g.gm - 1, g.gd)); };
+    const prev = j.jm === 1 ? [j.jy - 1, 12] : [j.jy, j.jm - 1];
+    const presets = {
+      month: ['این ماه', isoDay(jStart(j.jy, j.jm)), isoDay(today)],
+      last: ['ماه قبل', isoDay(jStart(...prev)), isoDay(new Date(jStart(j.jy, j.jm) - 864e5))],
+      year: ['امسال', isoDay(jStart(j.jy, 1)), isoDay(today)],
+      all: ['همه', '', ''],
+    };
+    const box = h('div', { class: 'choices' });
+    const pick = (k) => {
+      box.querySelectorAll('.choice').forEach((b) => b.classList.toggle('on', b.dataset.k === k));
+      onChange({ from: presets[k][1], to: presets[k][2], label: presets[k][0] });
+    };
+    for (const [k, [label]] of Object.entries(presets)) box.append(h('button', { type: 'button', class: 'choice', 'data-k': k, onclick: () => pick(k) }, label));
+    queueMicrotask(() => pick(initial));
+    return box;
+  }
+  const qs = (p) => new URLSearchParams(Object.entries(p).filter(([, v]) => v)).toString();
+
+  VIEWS.accounting = async () => {
+    const me = x.getSession().user;
+    const canPay = (me.permissions ?? []).includes('accounting.payout');
+    const body = h('div', { class: 'stack' });
+    let period = { from: '', to: '' };
+    const load = guard(async () => {
+      const r = await api('GET', `/v1/admin/accounting?${qs({ from: period.from, to: period.to })}`);
+      const t = r.totals;
+      body.replaceChildren(
+        h('div', { class: 'grid2' },
+          tile('کل دریافتی (ویزیت + تریاژ)', T(t.gross_received)),
+          tile('درآمد پلتفرم (کمیسیون + تریاژ)', T(t.platform_income), 'ok'),
+          tile('سهم پزشکان از ویزیت‌های انجام‌شده', T(t.doctors_share_earned)),
+          tile('سهم پزشکان — ویزیت‌های پیش رو', T(t.doctors_share_pending)),
+          tile('تسویه‌شده با پزشکان در این بازه', T(t.payouts)),
+          tile('مانده بدهی به پزشکان (کل)', T(t.doctors_balance_all_time), t.doctors_balance_all_time ? 'warn' : ''),
+          tile(`بازگشت وجه در انتظار (${fa(t.refunds_due.count)} مورد)`, T(t.refunds_due.amount), t.refunds_due.count ? 'danger' : '')),
+        h('div', { class: 'card' }, h('h3', {}, 'ماهانه (تقویم شمسی)'),
+          r.months.length ? h('div', { style: 'overflow-x:auto' }, h('table', { class: 'nowrap' },
+            h('thead', {}, h('tr', {}, ['ماه', 'دریافتی', 'کمیسیون', 'تریاژ', 'سهم پزشکان', 'تسویه'].map((c) => h('th', {}, c)))),
+            h('tbody', {}, r.months.map((m) => h('tr', {}, h('td', {}, fa(m.month)), h('td', {}, toman(m.gross)), h('td', {}, toman(m.platform)), h('td', {}, toman(m.triage)), h('td', {}, toman(m.doctors)), h('td', {}, toman(m.payouts))))))) : h('div', { class: 'empty' }, '—')),
+        h('div', { class: 'card' }, h('h3', {}, 'حساب پزشکان (کل دوره)'),
+          r.doctors.length ? h('ul', { class: 'list' }, r.doctors.map((d) => h('li', { class: 'stack' },
+            h('div', { class: 'row' }, h('b', { class: 'grow' }, d.full_name), h('span', { class: `pill ${d.balance > 0 ? 'warn' : 'ok'}` }, `مانده: ${T(d.balance)}`)),
+            h('div', { class: 'muted small' }, `کارکرد: ${T(d.earned)} · در انتظار ویزیت: ${T(d.pending)} · تسویه‌شده: ${T(d.paid_out)} · شبا: ${d.sheba ?? 'ثبت نشده'}`),
+            h('div', { class: 'row' },
+              h('button', { class: 'btn small', onclick: () => doctorDetail(d) }, 'جزئیات'),
+              canPay && d.balance > 0 ? h('button', { class: 'btn small primary', onclick: () => payoutForm(d) }, 'ثبت تسویه') : null)))) : h('div', { class: 'empty' }, 'هنوز ویزیت پرداخت‌شده‌ای ثبت نشده است.')),
+        h('div', { class: 'row' }, h('button', { class: 'btn', onclick: guard(async () => {
+          const res = await fetch(apiUrl(`/v1/admin/accounting/export?${qs({ from: period.from, to: period.to })}`), { headers: { Authorization: `Bearer ${x.getSession().access_token}` } });
+          if (!res.ok) throw new Error('دریافت فایل ناموفق بود');
+          const a = h('a', { href: URL.createObjectURL(await res.blob()), download: `accounting-${period.from || 'all'}.csv` });
+          document.body.append(a); a.click(); a.remove();
+        }) }, '⬇️ خروجی اکسل (CSV)')));
+    });
+    const detailBox = h('div');
+    async function doctorDetail(d) {
+      const r = await api('GET', `/v1/admin/accounting/doctors/${d.doctor_id}?${qs({ from: period.from, to: period.to })}`);
+      detailBox.replaceChildren(h('div', { class: 'card stack' }, h('div', { class: 'row' }, h('h3', { class: 'grow' }, `جزئیات: ${r.full_name}`), h('button', { class: 'btn small', onclick: () => detailBox.replaceChildren() }, '✕')),
+        h('p', { class: 'small' }, `شبا: `, h('span', { class: 'ltr' }, r.sheba ?? 'ثبت نشده')),
+        visitsTable(r.items), payoutsList(r.payouts)));
+      detailBox.scrollIntoView({ behavior: 'smooth' });
+    }
+    function payoutForm(d) {
+      const amount = h('input', { type: 'number', min: 1, step: 1, value: Math.floor(d.balance / 10), dir: 'ltr' });
+      const ref = h('input', { type: 'text', dir: 'ltr', placeholder: 'شماره پیگیری پایا/ساتنا' });
+      const note = h('input', { type: 'text', placeholder: 'توضیح (اختیاری)' });
+      detailBox.replaceChildren(h('div', { class: 'card stack' }, h('h3', {}, `ثبت تسویه با ${d.full_name}`),
+        h('p', { class: 'muted small' }, `مانده قابل تسویه: ${T(d.balance)} · شبا: ${d.sheba ?? 'ثبت نشده'}. واریز را از طریق بانک انجام دهید و اینجا ثبت کنید.`),
+        h('div', { class: 'grid2' }, h('div', {}, h('label', {}, 'مبلغ (تومان)'), amount), h('div', {}, h('label', {}, 'مرجع واریز'), ref)), note,
+        h('div', { class: 'row' }, h('button', { class: 'btn primary', onclick: guard(async () => {
+          await api('POST', '/v1/admin/accounting/payouts', { doctor_id: d.doctor_id, amount: Math.round(Number(amount.value) * 10), reference: ref.value, note: note.value });
+          toast('تسویه ثبت شد و به پزشک اطلاع داده شد'); detailBox.replaceChildren(); load();
+        }) }, 'ثبت تسویه'), h('button', { class: 'btn', onclick: () => detailBox.replaceChildren() }, 'انصراف'))));
+      detailBox.scrollIntoView({ behavior: 'smooth' });
+    }
+    x.$app.append(h('div', { class: 'card stack' }, h('h2', {}, '💰 حسابداری کلینیک'),
+      periodPicker((p) => { period = p; load(); }),
+      h('p', { class: 'muted small' }, 'سهم پلتفرم و پزشک هنگام هر پرداخت ثبت شده است. سهم پزشک پس از انجام ویزیت «کارکرد» محسوب می‌شود؛ ویزیت لغوشده پس از پرداخت در «بازگشت وجه» می‌آید.')),
+    body, detailBox);
+  };
+
+  const visitsTable = (items) => (items.length ? h('div', { style: 'overflow-x:auto' }, h('table', { class: 'nowrap' },
+    h('thead', {}, h('tr', {}, ['ویزیت', 'بیمار', 'نوع', 'مبلغ', 'کمیسیون', 'سهم پزشک', 'وضعیت'].map((c) => h('th', {}, c)))),
+    h('tbody', {}, items.map((i) => h('tr', {}, h('td', {}, fmt.short(i.visit_at)), h('td', {}, i.patient_name ?? '—'), h('td', {}, CH_FA[i.channel] ?? i.channel),
+      h('td', {}, toman(i.amount)), h('td', {}, `${fa(i.commission_percent)}٪`), h('td', {}, toman(i.doctor_amount)),
+      h('td', {}, h('span', { class: `pill ${STATE_FA[i.state][1]}` }, STATE_FA[i.state][0]))))))) : h('div', { class: 'empty' }, 'ویزیت پرداخت‌شده‌ای در این بازه نیست.'));
+  const payoutsList = (list) => h('div', {}, h('h3', {}, 'تسویه‌ها'), list.length ? h('ul', { class: 'list' }, list.map((p) => h('li', { class: 'row' },
+    h('span', { class: 'grow' }, `${fmt.short(p.paid_at)} — ${T(p.amount)}`), h('span', { class: 'muted small ltr' }, p.reference ?? '')))) : h('div', { class: 'empty' }, '—'));
+
+  VIEWS['doctor-accounting'] = async () => {
+    const body = h('div', { class: 'stack' });
+    let period = {};
+    const sheba = h('input', { type: 'text', dir: 'ltr', placeholder: 'IR000000000000000000000000' });
+    const load = guard(async () => {
+      const r = await api('GET', `/v1/doctors/me/accounting?${qs({ from: period.from, to: period.to })}`);
+      sheba.value = r.sheba ?? '';
+      const o = r.overall;
+      body.replaceChildren(
+        h('div', { class: 'grid2' },
+          tile('مانده قابل تسویه', T(o.balance), o.balance ? 'warn' : 'ok'),
+          tile(`کارکرد ${period.label ?? ''} (سهم شما)`, T(r.period.net)),
+          tile('ویزیت‌های انجام‌شده در این بازه', fa(r.period.visits)),
+          tile('کمیسیون پلتفرم در این بازه', T(r.period.commission)),
+          tile(`ویزیت‌های پیش رو (${fa(r.period.pending_visits)} ویزیت پرداخت‌شده)`, T(r.period.pending_net)),
+          tile('کل تسویه‌شده', T(o.paid_out))),
+        h('div', { class: 'card' }, h('h3', {}, 'ویزیت‌ها'), visitsTable(r.items)),
+        h('div', { class: 'card' }, payoutsList(r.payouts)));
+    });
+    x.$app.append(
+      h('div', { class: 'card stack' }, h('h2', {}, '💰 حسابداری من'), periodPicker((p) => { period = p; load(); })),
+      body,
+      h('div', { class: 'card stack' }, h('h3', {}, 'حساب بانکی برای تسویه'),
+        h('div', { class: 'row' }, h('div', { class: 'grow' }, h('label', {}, 'شماره شبا (به نام خودتان)'), sheba),
+          h('button', { class: 'btn', onclick: guard(async () => { await api('PUT', '/v1/doctors/me/sheba', { sheba: sheba.value }); toast('شماره شبا ذخیره شد'); }) }, 'ذخیره'))));
+  };
+
+  // ---------------------------------------------------------------- users, roles & permissions
+  const ROLE_FA = { patient: 'بیمار', doctor: 'پزشک', operator: 'اپراتور', admin: 'مدیر' };
+  VIEWS.staff = async () => {
+    const [perms, roles] = await Promise.all([api('GET', '/v1/admin/permissions'), api('GET', '/v1/admin/roles')]);
+    const PERM_FA = Object.fromEntries(perms.items.map((p) => [p.key, p.label]));
+    const listBox = h('div', { class: 'stack' });
+    const q = h('input', { type: 'search', placeholder: 'جستجوی نام یا موبایل' });
+    const roleSel = h('select', {}, h('option', { value: '' }, 'همه'), Object.entries(ROLE_FA).map(([k, v]) => h('option', { value: k }, v)));
+    const loadUsers = guard(async () => {
+      const r = await api('GET', `/v1/admin/users?${qs({ q: q.value.trim(), role: roleSel.value })}`);
+      listBox.replaceChildren(h('p', { class: 'muted small' }, `${fa(r.total)} کاربر`), h('ul', { class: 'list' }, r.items.map((u) => {
+        const sr = ['admin', 'operator'].includes(u.role) ? h('select', { onchange: guard(async (e) => {
+          await api('PUT', `/v1/admin/users/${u.id}/staff-role`, { staff_role_id: e.target.value || null }); toast('نقش سازمانی به‌روز شد'); loadUsers();
+        }) }, h('option', { value: '' }, u.role === 'admin' ? 'مدیر کل (همه دسترسی‌ها)' : 'اپراتور (پیش‌فرض)'),
+        roles.items.map((r2) => h('option', { value: r2.id, selected: u.staff_role?.id === r2.id }, r2.name))) : null;
+        return h('li', { class: 'stack' },
+          h('div', { class: 'row' }, h('b', { class: 'grow' }, u.full_name ?? '—', ' ', h('span', { class: 'muted small ltr' }, u.phone)),
+            h('span', { class: 'pill' }, ROLE_FA[u.role]), u.disabled ? h('span', { class: 'pill danger' }, 'غیرفعال') : null),
+          h('div', { class: 'muted small' }, `آخرین ورود: ${u.last_login_at ? fmt.short(u.last_login_at) : '—'}${u.last_login_ip ? ` (${u.last_login_ip})` : ''} · عضویت: ${fmt.short(u.created_at)}`),
+          h('div', { class: 'row' }, sr,
+            h('button', { class: 'btn small', onclick: () => route('activity', u.id) }, 'سابقه ورود و فعالیت'),
+            u.disabled
+              ? h('button', { class: 'btn small', onclick: guard(async () => { await api('POST', `/v1/admin/users/${u.id}/enable`, {}); toast('فعال شد'); loadUsers(); }) }, 'فعال‌سازی')
+              : h('button', { class: 'btn small danger', onclick: guard(async () => {
+                const reason = prompt('دلیل غیرفعال‌سازی (اختیاری):');
+                if (reason === null) return;
+                await api('POST', `/v1/admin/users/${u.id}/disable`, { reason }); toast('غیرفعال شد؛ دسترسی فوراً قطع شد'); loadUsers();
+              }) }, 'غیرفعال‌سازی')));
+      })));
+    });
+    q.oninput = () => { clearTimeout(q.t); q.t = setTimeout(loadUsers, 300); };
+    roleSel.onchange = loadUsers;
+
+    const roleForm = (r = null) => {
+      const name = h('input', { type: 'text', value: r?.name ?? '', placeholder: 'مثلاً حسابدار، کارشناس پذیرش' });
+      const checks = perms.items.map((p) => h('label', { class: 'check' }, h('input', { type: 'checkbox', value: p.key, checked: r?.permissions.includes(p.key) }), h('span', {}, p.label)));
+      return h('div', { class: 'card stack' }, h('h3', {}, r ? `ویرایش نقش «${r.name}»` : 'نقش جدید'), name, ...checks,
+        h('div', { class: 'row' }, h('button', { class: 'btn primary', onclick: guard(async () => {
+          const permissions = checks.map((c) => c.querySelector('input')).filter((i) => i.checked).map((i) => i.value);
+          if (r) await api('PUT', `/v1/admin/roles/${r.id}`, { name: name.value, permissions });
+          else await api('POST', '/v1/admin/roles', { name: name.value, permissions });
+          toast('نقش ذخیره شد'); route('staff');
+        }) }, 'ذخیره'), r ? h('button', { class: 'btn danger', onclick: guard(async () => {
+          if (!confirm('این نقش حذف شود؟')) return;
+          await api('DELETE', `/v1/admin/roles/${r.id}`); toast('حذف شد'); route('staff');
+        }) }, 'حذف') : null));
+    };
+    const editBox = h('div');
+    x.$app.append(
+      h('div', { class: 'card stack' }, h('div', { class: 'row' }, h('h2', { class: 'grow' }, '👥 کاربران'), h('button', { class: 'btn small primary', onclick: () => route('staff-create') }, '+ افزودن پزشک/کادر')),
+        h('div', { class: 'row' }, h('div', { class: 'grow' }, q), roleSel), listBox),
+      h('div', { class: 'card stack' }, h('div', { class: 'row' }, h('h2', { class: 'grow' }, '🔐 نقش‌ها و دسترسی‌ها'), h('button', { class: 'btn small', onclick: () => editBox.replaceChildren(roleForm()) }, '+ نقش جدید')),
+        h('p', { class: 'muted small' }, 'مدیرِ بدون نقش سازمانی «مدیر کل» است و همه دسترسی‌ها را دارد. با دادن نقش به مدیر یا اپراتور، فقط بخش‌های همان نقش برایش نمایش داده می‌شود.'),
+        roles.items.length ? h('ul', { class: 'list' }, roles.items.map((r) => h('li', { class: 'stack' },
+          h('div', { class: 'row' }, h('b', { class: 'grow' }, r.name), h('span', { class: 'muted small' }, `${fa(r.users)} کاربر`), h('button', { class: 'btn small', onclick: () => editBox.replaceChildren(roleForm(r)) }, 'ویرایش')),
+          h('div', { class: 'muted small' }, r.permissions.map((p) => PERM_FA[p] ?? p).join('، '))))) : h('div', { class: 'empty' }, 'هنوز نقشی تعریف نشده است.'),
+        editBox));
+    loadUsers();
+  };
+
+  // ---------------------------------------------------------------- login history & activity
+  const ACTION_FA = {
+    'auth.login': 'ورود', 'auth.otp_requested': 'درخواست کد ورود', 'auth.mfa_challenge': 'تأیید دومرحله‌ای', 'patient.create': 'ثبت پروفایل',
+    'patient.update': 'ویرایش پروفایل', 'appointment.book': 'رزرو نوبت', 'appointment.cancel': 'لغو نوبت', 'payment.paid': 'پرداخت',
+    'prescription.issue': 'صدور نسخه', 'prescription.draft': 'پیش‌نویس نسخه', 'record.create': 'ارسال مدرک', 'record.opinion': 'نظر پزشک روی مدرک',
+    'consultation.end': 'پایان ویزیت', 'summary.finalize': 'نهایی‌کردن خلاصه ویزیت', 'user.disable': 'غیرفعال‌سازی کاربر', 'user.enable': 'فعال‌سازی کاربر',
+    'user.staff_role': 'تغییر نقش', 'role.create': 'ایجاد نقش', 'role.update': 'ویرایش نقش', 'accounting.payout': 'ثبت تسویه', 'settings.tariffs': 'تغییر تعرفه‌ها',
+    'settings.commission': 'تغییر کمیسیون', 'doctor.approve': 'تأیید پزشک', 'doctor.reject': 'رد مدارک پزشک', 'drug_catalog.activate': 'فعال‌سازی فهرست داروها',
+  };
+  const REASON_FA = { wrong_code: 'کد نادرست', account_disabled: 'حساب غیرفعال' };
+  const device = (ua) => (!ua ? '—' : /Android/i.test(ua) ? 'اندروید' : /iPhone|iPad/i.test(ua) ? 'iOS' : /Windows/i.test(ua) ? 'ویندوز' : /Mac OS/i.test(ua) ? 'مک' : /Linux/i.test(ua) ? 'لینوکس' : 'سایر');
+  const loginsTable = (items, showUser) => (items.length ? h('div', { style: 'overflow-x:auto' }, h('table', { class: 'nowrap' },
+    h('thead', {}, h('tr', {}, [...(showUser ? ['کاربر'] : []), 'زمان', 'نتیجه', 'روش', 'IP', 'دستگاه'].map((c) => h('th', {}, c)))),
+    h('tbody', {}, items.map((e) => h('tr', {}, ...(showUser ? [h('td', {}, e.user ? `${e.user.full_name ?? ''} ${e.user.phone}` : (e.phone ?? '—'))] : []),
+      h('td', {}, fmt.short(e.at)), h('td', {}, h('span', { class: `pill ${e.success ? 'ok' : 'danger'}` }, e.success ? 'موفق' : `ناموفق${e.reason ? ` (${REASON_FA[e.reason] ?? e.reason})` : ''}`)),
+      h('td', {}, e.method === 'mfa' ? 'دومرحله‌ای' : 'کد پیامکی'), h('td', { class: 'ltr' }, e.ip ?? '—'), h('td', {}, device(e.user_agent)))))))
+    : h('div', { class: 'empty' }, '—'));
+  const actionsTable = (items, showUser) => (items.length ? h('div', { style: 'overflow-x:auto' }, h('table', { class: 'nowrap' },
+    h('thead', {}, h('tr', {}, [...(showUser ? ['کاربر'] : []), 'زمان', 'فعالیت', 'مورد', 'IP'].map((c) => h('th', {}, c)))),
+    h('tbody', {}, items.map((a) => h('tr', {}, ...(showUser ? [h('td', {}, a.user ? `${a.user.full_name ?? ''} ${a.user.phone}` : '—')] : []),
+      h('td', {}, fmt.short(a.at)), h('td', {}, ACTION_FA[a.action] ?? h('span', { class: 'ltr' }, a.action)), h('td', { class: 'ltr small' }, a.resource), h('td', { class: 'ltr' }, a.ip ?? '—'))))))
+    : h('div', { class: 'empty' }, '—'));
+
+  VIEWS['my-activity'] = async () => {
+    const r = await api('GET', '/v1/me/activity');
+    x.$app.append(
+      h('div', { class: 'card stack' }, h('h2', {}, '🕘 سابقه ورود من'), h('p', { class: 'muted small' }, 'اگر ورودی را نمی‌شناسید، فوراً با پشتیبانی تماس بگیرید.'), loginsTable(r.logins, false)),
+      h('div', { class: 'card stack' }, h('h2', {}, 'فعالیت‌های من'), actionsTable(r.actions, false)));
+  };
+
+  VIEWS.activity = async (userId) => {
+    const kind = h('select', {}, h('option', { value: 'logins' }, 'ورودها'), h('option', { value: 'actions' }, 'فعالیت‌ها'));
+    const failed = h('input', { type: 'checkbox' });
+    const body = h('div', { class: 'stack' });
+    let period = {};
+    const load = guard(async () => {
+      const r = await api('GET', `/v1/admin/activity?${qs({ kind: kind.value, user_id: userId, failed: failed.checked && kind.value === 'logins' ? '1' : '', from: period.from, to: period.to })}`);
+      body.replaceChildren(
+        h('div', { class: 'grid2' }, tile('ورود موفق', fa(r.summary.successful_logins), 'ok'), tile('ورود ناموفق', fa(r.summary.failed_logins), r.summary.failed_logins ? 'danger' : ''), tile('کاربران فعال', fa(r.summary.users))),
+        h('div', { class: 'card' }, r.kind === 'logins' ? loginsTable(r.items, !userId) : actionsTable(r.items, !userId)));
+    });
+    kind.onchange = load; failed.onchange = load;
+    x.$app.append(h('div', { class: 'card stack' },
+      h('div', { class: 'row' }, h('h2', { class: 'grow' }, userId ? '🕘 سابقه ورود و فعالیت کاربر' : '🕘 سابقه ورود و فعالیت همه کاربران'),
+        userId ? h('button', { class: 'btn small', onclick: () => route('activity') }, 'همه کاربران') : null),
+      periodPicker((p) => { period = p; load(); }, 'all'),
+      h('div', { class: 'row' }, kind, h('label', { class: 'check' }, failed, h('span', {}, 'فقط ورودهای ناموفق')))), body);
   };
 
   // ---------------------------------------------------------------- admin: national drug coding (eRx-IRC)

@@ -65,12 +65,38 @@ export function createPaymentsDomain({ db, platform, config, fetchImpl = globalT
   const effectiveTariffs = (tenantId) => (paymentsEnabled(tenantId)
     ? getTariffs(tenantId) : Object.fromEntries(TARIFF_KEYS.map((k) => [k, 0])));
 
-  function create(ctx, { userId, purpose, refId = null, amount, description }) {
-    const id = uuid();
+  // Platform commission (percent of each visit fee); triage fees belong to the platform entirely.
+  function getCommission(tenantId) {
+    const row = db.get(`SELECT value FROM settings WHERE tenant_id = ? AND key = 'commission'`, tenantId);
+    const v = Number(parseJson(row?.value, {}).percent);
+    return Number.isFinite(v) && v >= 0 && v <= 100 ? v : 0;
+  }
+  function setCommission(ctx, percent) {
+    const n = Number(percent);
+    if (!Number.isFinite(n) || n < 0 || n > 100 || Math.round(n * 100) !== n * 100) throw badRequest('درصد سهم پلتفرم باید عددی بین ۰ تا ۱۰۰ باشد (حداکثر دو رقم اعشار)');
     db.run(
-      `INSERT INTO payments (id, tenant_id, user_id, purpose, ref_id, amount, status, gateway, description, created_at)
-       VALUES (?,?,?,?,?,?,'pending',?,?,?)`,
+      `INSERT INTO settings (tenant_id, key, value, updated_at, updated_by) VALUES (?, 'commission', ?, ?, ?)
+       ON CONFLICT (tenant_id, key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at, updated_by = excluded.updated_by`,
+      ctx.tenantId, JSON.stringify({ percent: n }), nowIso(), ctx.user.sub,
+    );
+    platform.audit(ctx, 'settings.commission', `tenant:${ctx.tenantId}`, { percent: n });
+    return n;
+  }
+  const split = (amount, percent) => {
+    const platformAmount = Math.round((amount * percent) / 100);
+    return { platform_amount: platformAmount, doctor_amount: amount - platformAmount };
+  };
+
+  function create(ctx, { userId, purpose, refId = null, amount, description, doctorId = null }) {
+    const id = uuid();
+    const percent = purpose === 'appointment' ? getCommission(ctx.tenantId) : 100;
+    const sp = purpose === 'appointment' ? split(amount, percent) : { platform_amount: amount, doctor_amount: 0 };
+    db.run(
+      `INSERT INTO payments (id, tenant_id, user_id, purpose, ref_id, amount, status, gateway, description, created_at,
+         doctor_id, commission_percent, platform_amount, doctor_amount)
+       VALUES (?,?,?,?,?,?,'pending',?,?,?,?,?,?,?)`,
       id, ctx.tenantId, userId, purpose, refId, amount, gateway ?? 'none', description, nowIso(),
+      doctorId, percent, sp.platform_amount, sp.doctor_amount,
     );
     return db.get('SELECT * FROM payments WHERE id = ?', id);
   }
@@ -79,6 +105,7 @@ export function createPaymentsDomain({ db, platform, config, fetchImpl = globalT
     id: p.id, purpose: p.purpose, ref_id: p.ref_id, amount: p.amount, amount_toman: Math.round(p.amount / 10),
     status: p.status, gateway: p.gateway, ref_number: p.ref_number, card_pan: p.card_pan,
     description: p.description, created_at: p.created_at, paid_at: p.paid_at,
+    commission_percent: p.commission_percent, platform_amount: p.platform_amount, doctor_amount: p.doctor_amount,
   });
 
   // Ask the gateway for an authority and return the URL the payer must open.
@@ -188,8 +215,9 @@ export function createPaymentsDomain({ db, platform, config, fetchImpl = globalT
   function forAppointment(ctx, { appointmentId, patientUserId, channel, doctorName }) {
     const fee = effectiveTariffs(ctx.tenantId)[`visit_${channel}`];
     if (!fee) return { status: 'confirmed', payment: null };
+    const doctorId = db.get('SELECT doctor_id FROM appointments WHERE id = ?', appointmentId)?.doctor_id ?? null;
     const payment = create(ctx, {
-      userId: patientUserId, purpose: 'appointment', refId: appointmentId, amount: fee,
+      userId: patientUserId, purpose: 'appointment', refId: appointmentId, amount: fee, doctorId,
       description: `هزینه ${TARIFF_LABELS[`visit_${channel}`]} با ${doctorName ?? 'پزشک'}`,
     });
     return { status: 'pending', payment, due_at: new Date(Date.now() + HOLD_MIN * 60000).toISOString() };
@@ -227,7 +255,7 @@ export function createPaymentsDomain({ db, platform, config, fetchImpl = globalT
   }
   if (!config.disableSweeper) setInterval(sweep, 60_000).unref();
 
-  return { getTariffs, setTariffs, paymentsEnabled, setPaymentsEnabled, effectiveTariffs, create, start, verify, view, forAppointment, triageAllowed, consumeTriage, triagePayment, triageFee, sweep, gateway, toman, HOLD_MIN };
+  return { getTariffs, setTariffs, getCommission, setCommission, split, paymentsEnabled, setPaymentsEnabled, effectiveTariffs, create, start, verify, view, forAppointment, triageAllowed, consumeTriage, triagePayment, triageFee, sweep, gateway, toman, HOLD_MIN };
 }
 
 const RESULT_PAGE = (ok, title, detail) => `<!doctype html><html lang="fa" dir="rtl"><head><meta charset="utf-8">
@@ -258,19 +286,20 @@ export function register(router, { db, platform, config, domain }) {
   });
 
   router.get('/v1/admin/settings', async (ctx) => {
-    requireUser(ctx, 'admin');
-    return { body: { tariffs: pay.getTariffs(ctx.tenantId), payments_enabled: pay.paymentsEnabled(ctx.tenantId), labels: TARIFF_LABELS, gateway: pay.gateway, sandbox: !!config.zarinpalSandbox } };
+    domain.access.require(ctx, 'tariffs.manage');
+    return { body: { tariffs: pay.getTariffs(ctx.tenantId), payments_enabled: pay.paymentsEnabled(ctx.tenantId), commission_percent: pay.getCommission(ctx.tenantId), labels: TARIFF_LABELS, gateway: pay.gateway, sandbox: !!config.zarinpalSandbox } };
   });
 
   router.put('/v1/admin/settings', async (ctx) => {
-    requireUser(ctx, 'admin');
+    domain.access.require(ctx, 'tariffs.manage');
     if (ctx.body.payments_enabled !== undefined) pay.setPaymentsEnabled(ctx, ctx.body.payments_enabled);
-    return { body: { tariffs: pay.setTariffs(ctx, ctx.body.tariffs ?? {}), payments_enabled: pay.paymentsEnabled(ctx.tenantId) } };
+    if (ctx.body.commission_percent !== undefined) pay.setCommission(ctx, ctx.body.commission_percent);
+    return { body: { tariffs: pay.setTariffs(ctx, ctx.body.tariffs ?? {}), payments_enabled: pay.paymentsEnabled(ctx.tenantId), commission_percent: pay.getCommission(ctx.tenantId) } };
   });
 
   router.get('/v1/payments', async (ctx) => {
     requireUser(ctx);
-    const rows = ctx.user.role === 'admin' && ctx.query.all
+    const rows = ctx.query.all && domain.access.can(ctx, 'payments.view')
       ? db.all('SELECT * FROM payments WHERE tenant_id = ? ORDER BY created_at DESC LIMIT 200', ctx.tenantId)
       : db.all('SELECT * FROM payments WHERE user_id = ? ORDER BY created_at DESC LIMIT 50', ctx.user.sub);
     return { body: { items: rows.map(pay.view) } };

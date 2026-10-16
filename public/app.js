@@ -128,9 +128,23 @@ const TABS = {
   patient: [['assistant', 'دستیار هوشمند'], ['doctors', 'پزشکان'], ['book', 'رزرو نوبت'], ['appointments', 'نوبت‌های من'], ['records', 'مدارک پزشکی'], ['prescriptions', 'نسخه‌ها'], ['inbox', 'پیام‌ها'], ['profile', 'پروفایل و حریم خصوصی']],
   doctor: [['doctor-appointments', 'نوبت‌ها'], ['calendar', 'تقویم'], ['doctor-rx', 'نسخه‌ها'], ['doctor-profile', 'پروفایل و مدارک'], ['inbox', 'اعلان‌ها']],
   doctor_pending: [['doctor-profile', 'پروفایل و مدارک'], ['inbox', 'اعلان‌ها']],
+  // Staff tabs are shown by permission (see TAB_PERMS); operator and admin share the same list.
   operator: [['escalations', 'درخواست‌های ارجاع'], ['stats', 'آمار']],
-  admin: [['admin-doctors', 'تأیید پزشکان'], ['settings', 'تعرفه‌ها'], ['drug-catalog', 'فهرست داروها'], ['payments', 'پرداخت‌ها'], ['escalations', 'درخواست‌های ارجاع'], ['stats', 'آمار'], ['audit', 'لاگ ممیزی'], ['staff', 'کاربران']],
+  admin: [['admin-doctors', 'تأیید پزشکان'], ['settings', 'تعرفه‌ها'], ['drug-catalog', 'فهرست داروها'], ['payments', 'پرداخت‌ها'], ['accounting', 'حسابداری'], ['escalations', 'درخواست‌های ارجاع'], ['stats', 'آمار'], ['audit', 'لاگ ممیزی'], ['activity', 'سابقه ورود و فعالیت'], ['staff', 'کاربران و نقش‌ها']],
 };
+TABS.doctor.splice(4, 0, ['doctor-accounting', 'حسابداری من']);
+for (const k of ['patient', 'doctor', 'doctor_pending']) TABS[k].push(['my-activity', 'سابقه ورود']);
+const TAB_PERMS = {
+  'admin-doctors': 'doctors.review', settings: 'tariffs.manage', 'drug-catalog': 'drug_catalog.manage', payments: 'payments.view',
+  accounting: 'accounting.view', escalations: 'escalations.handle', stats: 'stats.view', audit: 'audit.view', activity: 'activity.view', staff: 'users.manage',
+};
+function tabsFor(u) {
+  if (['admin', 'operator'].includes(u.role)) {
+    const perms = u.permissions ?? (u.role === 'admin' ? Object.values(TAB_PERMS) : ['escalations.handle', 'stats.view']);
+    return [...TABS.admin.filter(([id]) => perms.includes(TAB_PERMS[id])), ['my-activity', 'سابقه ورود من']];
+  }
+  return TABS[u.role === 'doctor' && u.doctor_status && u.doctor_status !== 'approved' ? 'doctor_pending' : u.role] ?? [];
+}
 
 function renderChrome() {
   $user.replaceChildren();
@@ -138,8 +152,7 @@ function renderChrome() {
   if (!session) return;
   const u = session.user;
   $user.append(h('span', {}, `${u.full_name || fa(u.phone)} · ${LABELS.role[u.role]}`), h('button', { class: 'btn small', onclick: logout }, 'خروج'));
-  const tabKey = u.role === 'doctor' && u.doctor_status && u.doctor_status !== 'approved' ? 'doctor_pending' : u.role;
-  for (const [id, label] of TABS[tabKey] ?? []) {
+  for (const [id, label] of tabsFor(u)) {
     $tabs.append(h('button', { 'aria-current': current.view === id ? 'page' : null, onclick: () => route(id) }, label));
   }
 }
@@ -167,12 +180,11 @@ VIEWS.home = async () => {
     try { await api('GET', '/v1/patients/me'); } catch (e) { if (e.code === 'profile_incomplete') return route('onboarding'); throw e; }
     return route('assistant');
   }
-  if (r === 'doctor') {
-    const me = await api('GET', '/v1/auth/me');
-    setSession({ ...session, user: { ...session.user, doctor_status: me.doctor_status, full_name: me.full_name } });
-    if (me.doctor_status !== 'approved') return route('doctor-profile');
-  }
-  route(TABS[r][0][0]);
+  const me = await api('GET', '/v1/auth/me');
+  setSession({ ...session, user: { ...session.user, doctor_status: me.doctor_status, full_name: me.full_name, permissions: me.permissions, staff_role: me.staff_role } });
+  if (r === 'doctor' && me.doctor_status !== 'approved') return route('doctor-profile');
+  const first = tabsFor(session.user)[0];
+  route(first ? first[0] : 'my-activity');
 };
 
 VIEWS.login = () => {
@@ -181,7 +193,9 @@ VIEWS.login = () => {
   let mfaToken = null;
   const box = h('div', { class: 'card narrow stack' });
   const hint = h('div', { class: 'muted' });
-  const showDevCode = (code) => { if (code) hint.replaceChildren(h('div', { class: 'banner info' }, `محیط آزمایشی — کد: ${fa(code)}`)); };
+  const showDevCode = (code, to = '') => hint.replaceChildren(code
+    ? h('div', { class: 'banner info' }, `محیط آزمایشی — کد: ${fa(code)}`)
+    : h('p', { class: 'muted' }, `کد تأیید ${to ? `به شماره ${fa(to)} ` : ''}پیامک شد.`));
   const footer = () => (IS_NATIVE ? h('button', { class: 'btn small', onclick: () => route('server') }, `سرور: ${API_BASE.replace(/^https?:\/\//, '')} — تغییر`) : installButton());
 
   // Start screen: two entries, as in the requirements.
@@ -209,7 +223,7 @@ VIEWS.login = () => {
       const r = await api('POST', '/v1/auth/otp/request', { phone, role, ...(nid ? { national_id: nid.value.trim() } : {}) });
       if (r.registration_required) { stepPhone(true); return; }
       stepCode(r.registration);
-      showDevCode(r.dev_code);
+      showDevCode(r.dev_code, phone);
     });
     box.replaceChildren(
       h('button', { class: 'btn small', type: 'button', onclick: stepRole }, '→ بازگشت'),
@@ -881,7 +895,7 @@ VIEWS.audit = async () => {
         h('td', { class: 'ltr' }, (a.trace_id || '').slice(0, 10)), h('td', { class: 'ltr' }, a.detail ? JSON.stringify(a.detail).slice(0, 160) : ''))))))));
 };
 
-VIEWS.staff = async () => {
+VIEWS['staff-create'] = async () => {
   const specs = (await api('GET', '/v1/specialties')).items;
   const f = { full_name: h('input', { type: 'text' }), phone: h('input', { type: 'tel', dir: 'ltr' }), email: h('input', { type: 'email', dir: 'ltr' }),
     specialty: h('select', {}, specs.map((s) => h('option', { value: s.code }, s.label))), license_no: h('input', { type: 'text', dir: 'ltr' }) };
@@ -964,10 +978,8 @@ async function loadConfig() {
   await loadConfig();
   const [view, arg] = location.hash.slice(1).split('/');
   if (!session) return route('login');
-  // Doctor approval can change while logged out of this device: refresh before drawing tabs.
-  if (session.user.role === 'doctor') {
-    const me = await api('GET', '/v1/auth/me').catch(() => null);
-    if (me) setSession({ ...session, user: { ...session.user, doctor_status: me.doctor_status, full_name: me.full_name } });
-  }
+  // Doctor approval and staff permissions can change while away: refresh before drawing tabs.
+  const me = await api('GET', '/v1/auth/me').catch(() => null);
+  if (me) setSession({ ...session, user: { ...session.user, doctor_status: me.doctor_status, full_name: me.full_name, permissions: me.permissions, staff_role: me.staff_role } });
   route(view && VIEWS[view] && !['login', 'server'].includes(view) ? view : 'home', arg);
 })();

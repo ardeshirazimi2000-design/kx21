@@ -41,6 +41,15 @@ export function register(router, { db, keys, platform, config, limiter, domain }
     return code;
   };
 
+  // Login history: every attempt with its outcome, address and device.
+  function logLogin(ctx, { userId = null, phone = null, success, method, reason = null }) {
+    db.run(
+      'INSERT INTO login_events (id, tenant_id, user_id, phone, success, method, reason, ip, user_agent, at) VALUES (?,?,?,?,?,?,?,?,?,?)',
+      uuid(), ctx.tenantId, userId, phone, success ? 1 : 0, method, reason, ctx.ip ?? null,
+      String(ctx.req?.headers?.['user-agent'] ?? '').slice(0, 300) || null, nowIso(),
+    );
+  }
+
   const consumeOtp = (ctx, target, purpose, code) => {
     const row = db.get(
       `SELECT * FROM otp_codes WHERE tenant_id = ? AND target = ? AND purpose = ? AND used_at IS NULL
@@ -54,11 +63,32 @@ export function register(router, { db, keys, platform, config, limiter, domain }
     }
     if (!safeEqualHex(row.code_hash, sha256(`${target}:${String(code).trim()}`))) {
       db.run('UPDATE otp_codes SET attempts = attempts + 1 WHERE id = ?', row.id);
+      const uid = target.startsWith('mfa:') ? target.slice(4) : db.get('SELECT id FROM users WHERE tenant_id = ? AND phone = ?', ctx.tenantId, target)?.id;
+      logLogin(ctx, { userId: uid ?? null, phone: target.startsWith('mfa:') ? null : target, success: false, method: purpose === 'mfa' ? 'mfa' : 'otp', reason: 'wrong_code' });
       throw invalid;
     }
     db.run('UPDATE otp_codes SET used_at = ? WHERE id = ?', nowIso(), row.id);
     return row.payload ? JSON.parse(row.payload) : null;
   };
+
+  // Codes go out through the SMS provider's approved template. In production without SMS the
+  // login is refused (codes are never shown on screen outside development).
+  async function deliverCode(ctx, phone, code, purpose) {
+    if (domain.sms?.enabled) {
+      try {
+        await domain.sms.sendOtp(phone, code, purpose);
+      } catch (e) {
+        console.error('[sms] otp failed:', e.message);
+        platform.audit(ctx, 'auth.sms_failed', `phone:${phone}`, { purpose });
+        throw new ApiError(503, 'sms_failed', 'ارسال پیامک ناموفق بود؛ چند لحظه بعد دوباره تلاش کنید');
+      }
+      db.run(`INSERT INTO notifications (id, tenant_id, user_id, channel, target, body, status, created_at) VALUES (?,?,?,?,?,?,?,?)`,
+        uuid(), ctx.tenantId, null, 'sms', phone, purpose === 'mfa' ? 'کد تأیید دومرحله‌ای (الگو)' : 'کد ورود (الگو)', 'sent', nowIso());
+      return;
+    }
+    if (!config.devMode) throw new ApiError(503, 'sms_unavailable', 'سرویس پیامک پیکربندی نشده است؛ ورود موقتاً ممکن نیست');
+    platform.notify(ctx, { channel: 'sms', target: phone, body: `${purpose === 'mfa' ? 'کد تأیید دومرحله‌ای' : 'کد ورود شما'}: ${code}` });
+  }
 
   const accessToken = (user) => {
     const claims = { typ: 'access', sub: user.id, tid: user.tenant_id, role: user.role };
@@ -82,8 +112,11 @@ export function register(router, { db, keys, platform, config, limiter, domain }
     if (!phone) throw badRequest('شماره موبایل معتبر نیست (مثال: 09121234567)', 'invalid_phone');
     // role = which entry the user chose on the start screen: 'patient' or 'doctor' (doctors and staff).
     const intent = ctx.body.role === 'doctor' ? 'doctor' : ctx.body.role === 'patient' ? 'patient' : null;
-    const existing = db.get('SELECT id, role, deleted_at FROM users WHERE tenant_id = ? AND phone = ?', ctx.tenantId, phone);
-    if (existing?.deleted_at) throw forbidden('این حساب غیرفعال شده است', 'account_disabled');
+    const existing = db.get('SELECT id, role, deleted_at, disabled_at FROM users WHERE tenant_id = ? AND phone = ?', ctx.tenantId, phone);
+    if (existing?.deleted_at || existing?.disabled_at) {
+      logLogin(ctx, { userId: existing.id, phone, success: false, method: 'otp', reason: 'account_disabled' });
+      throw forbidden('این حساب غیرفعال شده است', 'account_disabled');
+    }
     if (existing && intent) {
       const staff = existing.role !== 'patient';
       if (intent === 'patient' && staff) throw new ApiError(409, 'role_mismatch', 'این شماره به‌عنوان پزشک/کادر ثبت شده است؛ از گزینه «ورود پزشکان» استفاده کنید');
@@ -110,7 +143,7 @@ export function register(router, { db, keys, platform, config, limiter, domain }
     }
     limiter.hit(`otp:${ctx.tenantId}:${phone}`, 3, 10 * 60 * 1000);
     const code = issueOtp(ctx, phone, 'login', payload && { ...payload, nid: seal(keys, payload.nid).toString('base64') });
-    platform.notify(ctx, { channel: 'sms', target: phone, body: `کد ورود شما: ${code}` });
+    await deliverCode(ctx, phone, code, 'login');
     platform.audit(ctx, 'auth.otp_requested', `phone:${phone}`, { registration: !!payload });
     return {
       status: 202,
@@ -125,7 +158,7 @@ export function register(router, { db, keys, platform, config, limiter, domain }
     const reg = consumeOtp(ctx, phone, 'login', ctx.body.code);
 
     let user = db.get('SELECT * FROM users WHERE tenant_id = ? AND phone = ?', ctx.tenantId, phone);
-    if (user?.deleted_at) throw forbidden('این حساب غیرفعال شده است', 'account_disabled');
+    if (user?.deleted_at || user?.disabled_at) throw forbidden('این حساب غیرفعال شده است', 'account_disabled');
     let justRegistered = false;
     if (!user) {
       if (!reg) throw new ApiError(409, 'registration_required', 'ابتدا کد ملی را برای ثبت‌نام وارد کنید');
@@ -152,11 +185,9 @@ export function register(router, { db, keys, platform, config, limiter, domain }
 
     // A doctor who has just proved Shahkar + OTP gets in to complete the profile; every later login is 2-step.
     if (MFA_ROLES.has(user.role) && !justRegistered) {
-      // Second factor goes to a different channel (email; falls back to push in production).
+      // Second step: a separate, short-lived code (SMS template SMS_MFA_TEMPLATE when set).
       const code = issueOtp(ctx, `mfa:${user.id}`, 'mfa');
-      platform.notify(ctx, {
-        userId: user.id, channel: 'email', target: user.email || user.phone, body: `کد تأیید دومرحله‌ای: ${code}`,
-      });
+      await deliverCode(ctx, user.phone, code, 'mfa');
       platform.audit(ctx, 'auth.mfa_challenge', `user:${user.id}`);
       return {
         body: {
@@ -167,6 +198,7 @@ export function register(router, { db, keys, platform, config, limiter, domain }
       };
     }
     platform.audit(ctx, 'auth.login', `user:${user.id}`);
+    logLogin(ctx, { userId: user.id, phone: user.phone, success: true, method: 'otp' });
     return { body: session(user) };
   });
 
@@ -182,6 +214,7 @@ export function register(router, { db, keys, platform, config, limiter, domain }
     if (!user.mfa_enabled) db.run('UPDATE users SET mfa_enabled = 1 WHERE id = ?', user.id);
     ctx.user = { sub: user.id };
     platform.audit(ctx, 'auth.login', `user:${user.id}`, { mfa: true });
+    logLogin(ctx, { userId: user.id, phone: user.phone, success: true, method: 'mfa' });
     return { body: session(user) };
   });
 
@@ -199,7 +232,9 @@ export function register(router, { db, keys, platform, config, limiter, domain }
     const doc = db.get('SELECT id, status, review_reason FROM doctors WHERE user_id = ?', ctx.user.sub);
     return {
       body: {
-        ...user, person_info_enabled: domain.identity.personInfoEnabled, patient_id: ctx.user.pid ?? null, doctor_id: doc?.id ?? ctx.user.did ?? null,
+        ...user, person_info_enabled: domain.identity.personInfoEnabled,
+        permissions: domain.access.permissionsOf(user.id).perms, super_admin: domain.access.permissionsOf(user.id).superAdmin,
+        staff_role: domain.access.permissionsOf(user.id).staffRole, patient_id: ctx.user.pid ?? null, doctor_id: doc?.id ?? ctx.user.did ?? null,
         doctor_status: doc?.status ?? null, doctor_review_reason: doc?.review_reason ?? null,
       },
     };

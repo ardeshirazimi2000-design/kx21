@@ -119,7 +119,7 @@ export function register(router, { db, platform, domain }) {
 
   // ---------------- admin review ----------------
   router.get('/v1/admin/doctor-applications', async (ctx) => {
-    requireUser(ctx, 'admin');
+    domain.access.require(ctx, 'doctors.review');
     const status = ['pending_review', 'rejected', 'approved', 'draft', 'suspended'].includes(ctx.query.status) ? ctx.query.status : 'pending_review';
     const rows = db.all(
       `SELECT * FROM doctors WHERE tenant_id = ? AND status = ? AND deleted_at IS NULL ORDER BY COALESCE(submitted_at, '') DESC`,
@@ -129,7 +129,7 @@ export function register(router, { db, platform, domain }) {
   });
 
   router.get('/v1/admin/doctors/:id', async (ctx) => {
-    requireUser(ctx, 'admin');
+    domain.access.require(ctx, 'doctors.review');
     const d = db.get('SELECT * FROM doctors WHERE id = ? AND tenant_id = ?', requireUuid(ctx.params.id, 'id'), ctx.tenantId);
     if (!d) throw notFound('پزشک');
     platform.audit(ctx, 'doctor.review_read', `doctor:${d.id}`);
@@ -137,7 +137,7 @@ export function register(router, { db, platform, domain }) {
   });
 
   const decide = (approve) => async (ctx) => {
-    requireUser(ctx, 'admin');
+    domain.access.require(ctx, 'doctors.review');
     const d = db.get('SELECT * FROM doctors WHERE id = ? AND tenant_id = ?', requireUuid(ctx.params.id, 'id'), ctx.tenantId);
     if (!d) throw notFound('پزشک');
     const reason = String(ctx.body.reason ?? '').trim();

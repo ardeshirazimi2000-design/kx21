@@ -4,7 +4,7 @@
 import { EventEmitter } from 'node:events';
 import { uuid, nowIso } from './db.js';
 
-export function createPlatform({ db, config }) {
+export function createPlatform({ db, config, sms = null }) {
   const bus = new EventEmitter();
   bus.setMaxListeners(50);
 
@@ -37,8 +37,14 @@ export function createPlatform({ db, config }) {
     const id = uuid();
     db.run(
       'INSERT INTO notifications (id, tenant_id, user_id, channel, target, body, status, created_at) VALUES (?,?,?,?,?,?,?,?)',
-      id, ctx.tenantId, userId, channel, target, body, config.smsProvider ? 'queued' : 'delivered_mock', nowIso(),
+      id, ctx.tenantId, userId, channel, target, body, sms?.canSendText && channel === 'sms' ? 'queued' : 'delivered_mock', nowIso(),
     );
+    // Free-text SMS go out through the configured line; failures are recorded, never thrown.
+    if (sms?.canSendText && channel === 'sms' && /^09\d{9}$/.test(String(target))) {
+      sms.sendText(target, body)
+        .then(() => db.run(`UPDATE notifications SET status = 'sent' WHERE id = ?`, id))
+        .catch((e) => { db.run(`UPDATE notifications SET status = 'failed' WHERE id = ?`, id); console.error('[sms] notify failed:', e.message); });
+    }
     if (config.logNotifications) console.log(`[notify:${channel}] ${maskPhone(target)}: ${body}`);
     return id;
   }

@@ -117,7 +117,7 @@ export function register(router, { db, platform, limiter, domain }) {
   });
 
   // ---- Operator console ----
-  const requireStaff = (ctx) => requireUser(ctx, 'operator', 'admin');
+  const requireStaff = (ctx) => domain.access.require(ctx, 'escalations.handle');
 
   router.get('/v1/escalations', async (ctx) => {
     requireStaff(ctx);
@@ -190,14 +190,14 @@ export function register(router, { db, platform, limiter, domain }) {
 
   // ---- Admin ----
   router.get('/v1/admin/audit', async (ctx) => {
-    requireUser(ctx, 'admin');
+    domain.access.require(ctx, 'audit.view');
     const before = Number(ctx.query.before) || Number.MAX_SAFE_INTEGER;
     const rows = db.all('SELECT * FROM audit_logs WHERE tenant_id = ? AND id < ? ORDER BY id DESC LIMIT 100', ctx.tenantId, before);
     return { body: { items: rows.map((r) => ({ ...r, detail: parseJson(r.detail, null) })) } };
   });
 
   router.get('/v1/admin/stats', async (ctx) => {
-    requireUser(ctx, 'admin', 'operator');
+    domain.access.require(ctx, 'stats.view');
     const one = (sql, ...p) => Object.values(db.get(sql, ...p))[0];
     return {
       body: {

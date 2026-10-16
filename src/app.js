@@ -26,11 +26,14 @@ import * as rxTools from './modules/rx/routes.js';
 import { createDrugDirectory } from './modules/rx/drug-directory.js';
 import * as drugCatalog from './modules/rx/drug-catalog.js';
 import * as rxSuggest from './modules/rx/suggest.js';
+import * as access from './modules/access.js';
+import * as accounting from './modules/accounting.js';
 import { createLabOcr } from './modules/ai/lab-ocr.js';
 import { createIdentityService } from './modules/identity.js';
 import { createAssistant } from './modules/ai/assistant.js';
 import { createLlm } from './modules/ai/llm.js';
-import { seed } from './seed.js';
+import { seed, bootstrapProduction } from './seed.js';
+import { createSms } from './lib/sms.js';
 
 const PUBLIC_DIR = fileURLToPath(new URL('../public/', import.meta.url));
 const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8',
@@ -47,7 +50,10 @@ export function loadConfig(env = process.env) {
     masterSecret: env.MASTER_SECRET || 'dev-only-insecure-master-secret',
     defaultTenant: env.DEFAULT_TENANT_ID || '00000000-0000-4000-8000-000000000001',
     devMode,
-    seed: env.SEED !== 'false',
+    // Demo data only in development unless explicitly asked for.
+    seed: env.SEED ? env.SEED !== 'false' : env.NODE_ENV !== 'production',
+    // Production bootstrap: the real administrator's mobile number (demo accounts are disabled).
+    adminPhone: env.ADMIN_PHONE || '',
     llmBaseUrl: env.LLM_BASE_URL || '',
     llmModel: env.LLM_MODEL || 'llama-3.1-8b-instruct',
     llmApiKey: env.LLM_API_KEY || '',
@@ -80,6 +86,11 @@ export function loadConfig(env = process.env) {
     streamDelayMs: Number(env.STREAM_DELAY_MS ?? 12),
     logNotifications: env.LOG_NOTIFICATIONS !== 'false',
     smsProvider: env.SMS_PROVIDER || '',
+    smsApiKey: env.SMS_API_KEY || '',
+    smsOtpTemplate: env.SMS_OTP_TEMPLATE || '',
+    smsMfaTemplate: env.SMS_MFA_TEMPLATE || '',
+    smsTemplateParam: env.SMS_TEMPLATE_PARAM || 'Code',
+    smsSender: env.SMS_SENDER || '',
     // Origins of the native app WebViews (Capacitor Android / iOS) plus any extra web origins.
     corsOrigins: (env.CORS_ORIGINS || 'https://localhost,capacitor://localhost,http://localhost')
       .split(',').map((o) => o.trim()).filter(Boolean),
@@ -90,11 +101,12 @@ export function createApp(overrides = {}) {
   const config = { ...loadConfig(), ...overrides };
   const db = openDb(config.dbPath);
   const keys = createKeyring(config);
-  const platform = createPlatform({ db, config });
+  const sms = createSms(config);
+  const platform = createPlatform({ db, config, sms });
   const limiter = new RateLimiter();
   const router = new Router();
 
-  const domain = {};
+  const domain = { sms, access: access.createAccess({ db }) };
   if (!config.filesDir) config.filesDir = config.dbPath === ':memory:' ? join(tmpdir(), `kx21-files-${process.pid}-${Date.now()}`) : join(dirname(config.dbPath), 'files');
   domain.identity = createIdentityService(config);
   domain.files = files.createFilesDomain({ db, keys, config });
@@ -121,13 +133,17 @@ export function createApp(overrides = {}) {
   rxTools.register(router, deps);
   drugCatalog.register(router, deps);
   rxSuggest.register(router, deps);
+  access.register(router, deps);
+  access.registerActivity(router, deps);
+  accounting.register(router, deps);
 
   router.get('/healthz', async () => ({ body: { status: 'ok' } }));
   router.get('/v1/config', async () => ({
-    body: { dev_mode: config.devMode, llm: config.llmBaseUrl ? 'self-hosted' : 'template', livekit: !!config.livekitUrl, cxr: !!config.cxrUrl },
+    body: { dev_mode: config.devMode, sms: sms.enabled, llm: config.llmBaseUrl ? 'self-hosted' : 'template', livekit: !!config.livekitUrl, cxr: !!config.cxrUrl },
   }));
 
   if (config.seed) seed({ db, config, domain });
+  if (!config.devMode) bootstrapProduction({ db, config });
 
   async function serveStatic(req, res, pathname) {
     let rel = pathname === '/' ? 'index.html' : pathname.slice(1);
@@ -184,7 +200,10 @@ export function createApp(overrides = {}) {
         if (req.method === 'GET' && (await serveStatic(req, res, url.pathname))) return;
         throw new ApiError(404, 'not_found', 'مسیر پیدا نشد');
       }
-      const ip = req.socket.remoteAddress;
+      // Behind the local reverse proxy (Caddy) the client address comes in X-Forwarded-For.
+      const peer = req.socket.remoteAddress ?? '';
+      const fwd = String(req.headers['x-forwarded-for'] ?? '').split(',')[0].trim();
+      const ip = /^(127\.|::1$|::ffff:127\.)/.test(peer) && fwd ? fwd : peer;
       limiter.hit(`ip:${ip}`, 600, 60_000);
       const m = router.match(req.method, url.pathname);
       if (!m) throw new ApiError(404, 'not_found', 'مسیر پیدا نشد');
@@ -196,6 +215,10 @@ export function createApp(overrides = {}) {
         tenantId: headerTenant || config.defaultTenant, user: null, body: {},
       };
       auth.authenticate(ctx, keys);
+      // A disabled account loses access immediately, not when its token expires.
+      if (ctx.user && db.get('SELECT 1 FROM users WHERE id = ? AND (disabled_at IS NOT NULL OR deleted_at IS NOT NULL)', ctx.user.sub)) {
+        throw new ApiError(401, 'account_disabled', 'این حساب غیرفعال شده است');
+      }
       if (ctx.user && headerTenant && headerTenant !== ctx.user.tid) throw new ApiError(403, 'tenant_mismatch', 'tenant نامعتبر است');
       if (ctx.user) limiter.hit(`user:${ctx.user.sub}`, 300, 60_000);
       // File uploads stream the raw body to the handler; everything else is JSON.
