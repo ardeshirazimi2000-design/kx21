@@ -23,6 +23,7 @@ import * as records from './modules/records.js';
 import * as summaries from './modules/summaries.js';
 import * as cxr from './modules/cxr.js';
 import * as rxTools from './modules/rx/routes.js';
+import { createDrugDirectory } from './modules/rx/drug-directory.js';
 import { createLabOcr } from './modules/ai/lab-ocr.js';
 import { createIdentityService } from './modules/identity.js';
 import { createAssistant } from './modules/ai/assistant.js';
@@ -51,6 +52,9 @@ export function loadConfig(env = process.env) {
     llmTimeoutMs: Number(env.LLM_TIMEOUT_MS || 8000),
     // Chest X-ray pattern flags (local service from cxr/; research aid for physicians).
     cxrUrl: env.CXR_URL || '',
+    // Iranian drug directory (reference for prescribers), e.g. https://api.majidapi.ir/darooyab
+    drugApiBase: env.DRUG_API_BASE || '',
+    drugApiToken: env.DRUG_API_TOKEN || '',
     livekitUrl: env.LIVEKIT_URL || '',
     // WebRTC: the clinic's TURN relay (coturn, use-auth-secret) and optional extra STUN servers.
     turnUrls: (env.TURN_URLS || '').split(',').map((u) => u.trim()).filter(Boolean),
@@ -93,6 +97,7 @@ export function createApp(overrides = {}) {
   domain.identity = createIdentityService(config);
   domain.files = files.createFilesDomain({ db, keys, config });
   domain.labOcr = createLabOcr();
+  domain.drugDirectory = createDrugDirectory({ db, config });
   domain.patient = patient.createPatientDomain({ db, keys, files: () => domain.files });
   domain.payments = payments.createPaymentsDomain({ db, platform, config });
   domain.appointment = appointment.createAppointmentDomain({ db, platform, patientDomain: domain.patient, payments: domain.payments });

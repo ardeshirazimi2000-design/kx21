@@ -372,8 +372,48 @@ export function installV2(x) {
     s && !s.warnings?.length && !s.unrecognised?.length ? h('p', { class: 'muted small' }, '✓ هشداری در بررسی ایمنی (حساسیت، تکرار، تداخل‌های مهم) یافت نشد.') : null);
 
   x.rxPanel = async (cid, { endButton = null } = {}) => {
-    const drugNames = (await api('GET', '/v1/drugs').catch(() => ({ items: [] }))).items;
+    const drugsMeta = await api('GET', '/v1/drugs').catch(() => ({ items: [], directory: false }));
+    const drugNames = drugsMeta.items;
     const dl = h('datalist', { id: 'drug-names' }, drugNames.map((n) => h('option', { value: n })));
+    // Suggestions from the Iranian drug directory while typing (only the drug name is sent).
+    let sugTimer = null;
+    const suggest = (q) => {
+      if (!drugsMeta.directory) return;
+      clearTimeout(sugTimer);
+      sugTimer = setTimeout(async () => {
+        if (q.trim().length < 2) return;
+        const r = await api('GET', `/v1/drugs?q=${encodeURIComponent(q.trim())}`).catch(() => null);
+        if (!r) return;
+        const names = [...new Set([...r.items, ...(r.directory_items ?? []).map((d) => d.title)])].slice(0, 20);
+        dl.replaceChildren(...names.map((n) => h('option', { value: n })));
+      }, 350);
+    };
+    const infoBox = h('div', { class: 'stack' });
+    const showInfo = guard(async (name) => {
+      if (!name) throw new Error('ابتدا نام دارو را بنویسید');
+      infoBox.replaceChildren(h('p', { class: 'muted small' }, '⏳ جستجو در فهرست داروها…'));
+      const r = await api('GET', `/v1/drugs?q=${encodeURIComponent(name)}`);
+      const items = (r.directory_items ?? []).filter((d) => d.url);
+      if (!items.length) {
+        infoBox.replaceChildren(h('p', { class: 'muted small' }, r.directory_error ?? `برای «${name}» موردی در فهرست داروها پیدا نشد.`));
+        return;
+      }
+      const detail = h('div', { class: 'stack' });
+      const open = guard(async (it) => {
+        detail.replaceChildren(h('p', { class: 'muted small' }, '⏳ دریافت اطلاعات…'));
+        const d = await api('GET', `/v1/drugs/info?url=${encodeURIComponent(it.url)}`);
+        detail.replaceChildren(
+          h('div', { class: 'row' }, h('b', { class: 'grow' }, it.title, it.title_en ? h('span', { class: 'muted small ltr' }, ` ${it.title_en}`) : null),
+            h('span', { class: `pill ${it.safety_checked ? 'ok' : ''}` }, it.safety_checked ? 'در بررسی ایمنی خودکار' : 'خارج از بررسی ایمنی خودکار')),
+          ...d.sections.map((sec, i) => h('details', i < 2 ? { open: true } : {}, h('summary', {}, sec.label), h('div', { class: 'pre small' }, sec.text))),
+          h('p', { class: 'muted small' }, `منبع: ${d.source}. ${d.disclaimer}`));
+      });
+      infoBox.replaceChildren(h('div', { class: 'ai-box stack' },
+        h('div', { class: 'row' }, h('b', { class: 'grow' }, `ℹ️ اطلاعات دارو: ${name}`), h('button', { class: 'btn small', type: 'button', onclick: () => infoBox.replaceChildren() }, '✕')),
+        h('div', { class: 'choices' }, items.slice(0, 8).map((it) => h('button', { type: 'button', class: 'choice', onclick: () => open(it) }, it.title))),
+        detail));
+      if (items.length === 1) open(items[0]);
+    });
     let dx = [];
     const rows = h('div');
     const notes = h('textarea', { rows: 2, placeholder: 'توضیحات نسخه' });
@@ -393,10 +433,11 @@ export function installV2(x) {
     };
     const addRow = (d = {}) => {
       rows.append(h('div', { class: 'drug-row' },
-        h('input', { type: 'text', placeholder: 'نام دارو', 'data-k': 'name', list: 'drug-names', value: d.name ?? '', dir: 'auto', oninput: recheck }),
+        h('input', { type: 'text', placeholder: 'نام دارو', 'data-k': 'name', list: 'drug-names', value: d.name ?? '', dir: 'auto', oninput: (e) => { recheck(); suggest(e.target.value); } }),
         h('input', { type: 'text', placeholder: 'دوز', 'data-k': 'dose', value: d.dose ?? '' }),
         h('input', { type: 'text', placeholder: 'دفعات مصرف', 'data-k': 'frequency', value: d.frequency ?? '' }),
         h('input', { type: 'text', placeholder: 'مدت', 'data-k': 'duration', value: d.duration ?? '' }),
+        drugsMeta.directory ? h('button', { class: 'btn small', type: 'button', title: 'اطلاعات دارو', onclick: (e) => showInfo(e.currentTarget.parentElement.querySelector('[data-k=name]').value.trim()) }, 'ℹ️') : null,
         h('button', { class: 'btn small', type: 'button', onclick: (e) => { e.currentTarget.parentElement.remove(); recheck(); } }, '✕')));
     };
     addRow();
@@ -484,7 +525,7 @@ export function installV2(x) {
       h('div', {}, h('label', {}, 'تشخیص (ICD-10)'), dxChips, dxInput, dxResults),
       h('div', { class: 'row' }, tplSel, h('button', { class: 'btn small', type: 'button', onclick: saveTpl }, '💾 ذخیره به‌عنوان الگو')),
       h('div', {}, rows, h('button', { class: 'btn small', onclick: () => addRow() }, '+ دارو')),
-      safetyBox, notes,
+      infoBox, safetyBox, notes,
       h('p', { class: 'muted small' }, 'بررسی ایمنی (حساسیت ثبت‌شده، داروی تکراری، چند تداخل مهم) کمکی و محدود است و جای قضاوت پزشک را نمی‌گیرد.'),
       h('div', { class: 'row' }, h('button', { class: 'btn', onclick: saveDraft }, 'ذخیره پیش‌نویس'), h('span', { class: 'spacer' }), endButton ?? ''));
   };

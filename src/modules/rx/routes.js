@@ -4,19 +4,45 @@ import { badRequest, notFound, requireUuid } from '../../lib/http.js';
 import { uuid, nowIso, parseJson } from '../../lib/db.js';
 import { requireUser } from '../auth.js';
 import { searchIcd, icdByCode, ICD10_VERSION } from './icd10.js';
-import { drugSuggestions, DRUG_KB_VERSION } from './drug-kb.js';
+import { drugSuggestions, identifyDrug, DRUG_KB_VERSION } from './drug-kb.js';
 
 const MAX_TEMPLATES = 200;
 
-export function register(router, { db, platform }) {
+export function register(router, { db, platform, domain, limiter }) {
   router.get('/v1/icd10', async (ctx) => {
     requireUser(ctx, 'doctor');
     return { body: { version: ICD10_VERSION, items: searchIcd(String(ctx.query.q ?? '').slice(0, 60)) } };
   });
 
+  // Without q: names known to the safety checks (for autocomplete). With q: also the external
+  // drug directory, marked with whether the safety checks recognise each name.
   router.get('/v1/drugs', async (ctx) => {
     requireUser(ctx, 'doctor');
-    return { body: { version: DRUG_KB_VERSION, items: drugSuggestions() } };
+    const q = String(ctx.query.q ?? '').trim();
+    if (!q) return { body: { version: DRUG_KB_VERSION, items: drugSuggestions(), directory: domain.drugDirectory.enabled } };
+    limiter.hit(`drugs:${ctx.user.sub}`, 120, 60_000);
+    const local = drugSuggestions().filter((n) => n.toLowerCase().includes(q.toLowerCase())).slice(0, 8);
+    let remote = [];
+    let remoteError = null;
+    try {
+      remote = await domain.drugDirectory.search(q);
+    } catch (e) {
+      remoteError = e.message;
+    }
+    return {
+      body: {
+        version: DRUG_KB_VERSION, items: local, directory: domain.drugDirectory.enabled, directory_error: remoteError,
+        directory_items: remote.map((r) => ({ ...r, safety_checked: !!(identifyDrug(r.title) || (r.title_en && identifyDrug(r.title_en))) })),
+      },
+    };
+  });
+
+  // Monograph from the drug directory — reference text for the prescriber, with its source.
+  router.get('/v1/drugs/info', async (ctx) => {
+    requireUser(ctx, 'doctor');
+    limiter.hit(`drugs:${ctx.user.sub}`, 120, 60_000);
+    const r = await domain.drugDirectory.info(ctx.query.url);
+    return { body: { ...r, source: 'داروياب (darooyab.ir) از طریق سرویس واسط', disclaimer: 'متن مرجع عمومی؛ پیش از تصمیم درمانی با منابع معتبر بالینی تطبیق دهید. در بررسی ایمنی خودکار استفاده نمی‌شود.' } };
   });
 
   const clean = (b) => {

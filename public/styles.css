@@ -326,3 +326,5 @@ details > summary { cursor: pointer; }
 .cxr-img figure { margin: 0; }
 .ai-box { border: 1px dashed var(--border); border-radius: 12px; padding: 10px; }
 th { white-space: nowrap; }
+
+@media (min-width: 641px) { .drug-row:has(> button:nth-of-type(2)) { grid-template-columns: 2fr 1fr 1fr 1fr auto auto; } }

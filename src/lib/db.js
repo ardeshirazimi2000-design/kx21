@@ -357,6 +357,13 @@ CREATE TABLE IF NOT EXISTS rx_templates (
   updated_at      TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_rx_templates_doctor ON rx_templates (doctor_id, use_count DESC);
+
+-- cache of the external drug directory (only drug names are sent out)
+CREATE TABLE IF NOT EXISTS drug_api_cache (
+  key         TEXT PRIMARY KEY,
+  value       TEXT NOT NULL,
+  fetched_at  TEXT NOT NULL
+);
 `;
 
 export function openDb(path) {
