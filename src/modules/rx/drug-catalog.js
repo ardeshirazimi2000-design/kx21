@@ -9,6 +9,7 @@ import { readXlsx } from '../../lib/xlsx.js';
 import { normalizeFa } from '../../lib/fa.js';
 import { requireUser } from '../auth.js';
 import { identifyDrug, DRUGS } from './drug-kb.js';
+import { matchPersian, buildIndex } from './fa-translit.js';
 
 const MAX_UPLOAD = 25 * 1024 * 1024;
 const FORMS = ['TABLET', 'CAPSULE', 'INJECTION', 'SYRUP', 'SUSPENSION', 'SOLUTION', 'CREAM', 'OINTMENT', 'DROPS', 'SPRAY', 'SUPPOSITORY',
@@ -104,35 +105,54 @@ const normQ = (s) => String(s ?? '').toUpperCase().replace(/[^A-Z0-9./% -]+/g, '
 export function createDrugCatalog({ db }) {
   const active = (tenantId) => db.get(`SELECT * FROM drug_catalogs WHERE tenant_id = ? AND status = 'active'`, tenantId);
 
-  // Persian input ("آموکسی") → English generic names via the local drug KB aliases.
-  function persianToGeneric(q) {
+  // Persian input: (1) the curated aliases of the local drug KB (e.g. آسپرین → ASA / ACETYLSALICYLIC
+  // ACID), then (2) phonetic matching against every generic name of the catalogue (متفورمین → METFORMIN).
+  function kbEnglishNames(q) {
     const n = normalizeFa(q);
-    if (!/[؀-ۿ]/.test(n) || n.length < 3) return [];
-    return [...new Set(DRUGS.filter((d) => d.names.some((x) => normalizeFa(x).startsWith(n) || normalizeFa(x).includes(` ${n}`))).map((d) => d.generic.toUpperCase()))].slice(0, 3);
+    if (n.length < 3) return [];
+    const hits = DRUGS.filter((d) => d.names.some((x) => normalizeFa(x).startsWith(n) || normalizeFa(x).includes(` ${n}`)));
+    return [...new Set(hits.flatMap((d) => d.names.filter((x) => /^[a-z0-9 ./-]+$/i.test(x)).map((x) => x.toUpperCase())))].slice(0, 8);
   }
+  const indexCache = new Map();
+  const indexFor = (catalogId) => {
+    if (!indexCache.has(catalogId)) {
+      indexCache.clear();
+      indexCache.set(catalogId, buildIndex(db.all('SELECT DISTINCT generic_name FROM erx_items WHERE catalog_id = ?', catalogId).map((r) => r.generic_name)));
+    }
+    return indexCache.get(catalogId);
+  };
 
   function search(tenantId, q, limit = 20) {
     const cat = active(tenantId);
     if (!cat) return { catalog: null, items: [] };
-    const queries = [normQ(q), ...persianToGeneric(q)].filter((x) => x.length >= 2);
     const seen = new Set();
     const out = [];
-    for (const query of queries) {
+    const take = (rows) => { for (const r of rows) if (!seen.has(r.erx_code)) { seen.add(r.erx_code); out.push(r); } };
+    const byGeneric = (where, arg, n) => db.all(
+      `SELECT * FROM erx_items WHERE catalog_id = ? AND ${where} ORDER BY (brand IS NULL) DESC, length(title) LIMIT ?`, cat.id, arg, n,
+    );
+    let matchedBy = 'text';
+    if (/[؀-ۿ]/.test(q)) {
+      matchedBy = 'persian';
+      // Single-ingredient products before combinations (آسپرین → ASA before ASA / CLOPIDOGREL).
+      const kbRows = kbEnglishNames(q).flatMap((name) => byGeneric('generic_name LIKE ?', `${name}%`, 6));
+      take(kbRows.sort((a, b) => (a.generic_name.includes('/') - b.generic_name.includes('/')) || (a.title.length - b.title.length)));
+      for (const g of matchPersian(q, indexFor(cat.id), 5)) take(byGeneric('generic_name = ?', g, 5));
+    } else {
+      const query = normQ(q);
       if (/^\d{4,6}$/.test(query)) {
-        const r = db.get('SELECT * FROM erx_items WHERE catalog_id = ? AND erx_code = ?', cat.id, query);
-        if (r && !seen.has(r.erx_code)) { seen.add(r.erx_code); out.push(r); }
-        continue;
+        take(db.all('SELECT * FROM erx_items WHERE catalog_id = ? AND erx_code = ?', cat.id, query));
+      } else if (query.length >= 2) {
+        const toks = query.split(' ').filter(Boolean).slice(0, 5);
+        take(db.all(
+          `SELECT * FROM erx_items WHERE catalog_id = ? ${toks.map(() => 'AND title LIKE ?').join(' ')}
+           ORDER BY (generic_name LIKE ?) DESC, (brand IS NULL) DESC, length(title) LIMIT ?`,
+          cat.id, ...toks.map((t) => `%${t}%`), `${toks[0]}%`, limit,
+        ));
       }
-      const toks = query.split(' ').filter(Boolean).slice(0, 5);
-      const rows = db.all(
-        `SELECT * FROM erx_items WHERE catalog_id = ? ${toks.map(() => 'AND title LIKE ?').join(' ')}
-         ORDER BY (generic_name LIKE ?) DESC, (brand IS NULL) DESC, length(title) LIMIT ?`,
-        cat.id, ...toks.map((t) => `%${t}%`), `${toks[0]}%`, limit,
-      );
-      for (const r of rows) if (!seen.has(r.erx_code)) { seen.add(r.erx_code); out.push(r); }
     }
     return {
-      catalog: { id: cat.id, filename: cat.filename, activated_at: cat.activated_at },
+      catalog: { id: cat.id, filename: cat.filename, activated_at: cat.activated_at }, matched_by: matchedBy,
       items: out.slice(0, limit).map((r) => ({
         erx_code: r.erx_code, title: r.title, generic_name: r.generic_name, brand: r.brand, form: r.form, packs: r.packs,
         safety_checked: !!identifyDrug(r.generic_name),
