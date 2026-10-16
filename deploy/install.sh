@@ -124,6 +124,8 @@ done
 # Real registration (PRODUCTION=1): codes only by SMS, Shahkar required, demo accounts disabled.
 envget() { grep -E "^$1=" "$ENV_FILE" | tail -1 | cut -d= -f2-; }
 if [ "${PRODUCTION:-}" = "1" ]; then
+  # The api.ir token (already used for Shahkar) can send the codes too: default to it.
+  if [ -z "$(envget SMS_PROVIDER)" ] && [ -n "$(envget SAPI_TOKEN)" ]; then upsert SMS_PROVIDER apiir; echo "   SMS_PROVIDER=apiir (codes via api.ir with the existing SAPI_TOKEN)"; fi
   MISSING=""
   NEED="SMS_PROVIDER ADMIN_PHONE SAPI_TOKEN"; [ "$(envget SMS_PROVIDER)" = "apiir" ] || NEED="$NEED SMS_API_KEY SMS_OTP_TEMPLATE"
   for V in $NEED; do [ -n "$(envget $V)" ] || MISSING="$MISSING $V"; done
