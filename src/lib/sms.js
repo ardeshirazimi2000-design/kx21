@@ -2,15 +2,22 @@
 // sent through a pre-approved "verify" template; free-text messages need a dedicated line.
 //   SMS_PROVIDER=kavenegar  SMS_API_KEY=…  SMS_OTP_TEMPLATE=<template name>   [SMS_SENDER=<line>]
 //   SMS_PROVIDER=smsir      SMS_API_KEY=…  SMS_OTP_TEMPLATE=<template id>     [SMS_SENDER=<line>] [SMS_TEMPLATE_PARAM=Code]
+//   SMS_PROVIDER=apiir      (uses SAPI_TOKEN, the same api.ir token as Shahkar)   [SMS_OTP_TEMPLATE=1]
+//     api.ir SmsOTP sends the code by text message with template number SMS_OTP_TEMPLATE (default 1);
+//     SMS_APIIR_SERVICE=CallOTP instead reads the code to the user in a phone call (voice).
 // The phone number and the code are the only data sent.
 
 export class SmsError extends Error {}
 
 export function createSms(config, fetchImpl = globalThis.fetch) {
   const provider = String(config.smsProvider ?? '').toLowerCase();
-  const key = config.smsApiKey;
-  const enabled = !!(provider && key && config.smsOtpTemplate);
-  const canSendText = enabled && !!config.smsSender;
+  const clean = (t) => String(t ?? '').trim().replace(/^["']|["']$/g, '').replace(/^bearer\s+/i, '').trim();
+  const key = clean(config.smsApiKey || (provider === 'apiir' ? config.sapiToken : ''));
+  const enabled = provider === 'apiir' ? !!key : !!(provider && key && config.smsOtpTemplate);
+  const canSendText = enabled && provider !== 'apiir' && !!config.smsSender;
+  const apiirService = String(config.smsApiirService || 'SmsOTP').replace(/[^A-Za-z0-9]/g, '');
+  // How the user receives the code: a text message, or a phone call reading it out.
+  const delivery = provider === 'apiir' && /call/i.test(apiirService) ? 'voice' : 'sms';
 
   async function call(url, init) {
     let res;
@@ -40,9 +47,26 @@ export function createSms(config, fetchImpl = globalThis.fetch) {
     return { id: String(r.body?.data?.messageId ?? r.body?.data?.packId ?? '') };
   }
 
+  async function apiir(payload) {
+    const base = String(config.sapiBase || 'https://s.api.ir/api/sw1').replace(/\/$/, '');
+    const r = await call(`${base}/${apiirService}`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'application/json', Authorization: `Bearer ${key}` }, body: JSON.stringify(payload),
+    });
+    const b = r.body;
+    // Same envelope as the Shahkar service: {data, success, code, message}.
+    const ok = r.status >= 200 && r.status < 300 && b && b.success !== false && (b.code === undefined || b.code === 0);
+    if (!ok) throw new SmsError(`api.ir ${r.status} ${b?.code ?? ''}: ${b?.message ?? ''}`.trim());
+    return { id: String(b?.data?.id ?? b?.data ?? '') };
+  }
+
   /** One-time code through the approved template (purpose 'login' | 'mfa'). */
   async function sendOtp(mobile, code, purpose = 'login') {
     if (!enabled) throw new SmsError('sms not configured');
+    if (provider === 'apiir') {
+      if (/call/i.test(apiirService)) return apiir({ code: String(code), number: mobile });
+      const tpl = Number((purpose === 'mfa' && config.smsMfaTemplate) || config.smsOtpTemplate || 1);
+      return apiir({ code: String(code), mobile, template: Number.isFinite(tpl) ? tpl : 1 });
+    }
     const template = purpose === 'mfa' && config.smsMfaTemplate ? config.smsMfaTemplate : config.smsOtpTemplate;
     if (provider === 'kavenegar') return kavenegar('verify/lookup.json', { receptor: mobile, token: code, template });
     if (provider === 'smsir') {
@@ -59,5 +83,5 @@ export function createSms(config, fetchImpl = globalThis.fetch) {
     throw new SmsError(`unknown SMS_PROVIDER ${provider}`);
   }
 
-  return { enabled, canSendText, provider, sendOtp, sendText };
+  return { enabled, canSendText, provider, delivery, sendOtp, sendText };
 }

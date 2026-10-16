@@ -193,9 +193,11 @@ VIEWS.login = () => {
   let mfaToken = null;
   const box = h('div', { class: 'card narrow stack' });
   const hint = h('div', { class: 'muted' });
-  const showDevCode = (code, to = '') => hint.replaceChildren(code
+  const showDevCode = (code, to = '', delivery = 'sms') => hint.replaceChildren(code
     ? h('div', { class: 'banner info' }, `محیط آزمایشی — کد: ${fa(code)}`)
-    : h('p', { class: 'muted' }, `کد تأیید ${to ? `به شماره ${fa(to)} ` : ''}پیامک شد.`));
+    : h('p', { class: 'muted' }, delivery === 'voice'
+      ? `تا لحظاتی دیگر با شماره ${fa(to)} تماس گرفته می‌شود و کد تأیید خوانده می‌شود.`
+      : `کد تأیید ${to ? `به شماره ${fa(to)} ` : ''}پیامک شد.`));
   const footer = () => (IS_NATIVE ? h('button', { class: 'btn small', onclick: () => route('server') }, `سرور: ${API_BASE.replace(/^https?:\/\//, '')} — تغییر`) : installButton());
 
   // Start screen: two entries, as in the requirements.
@@ -223,7 +225,7 @@ VIEWS.login = () => {
       const r = await api('POST', '/v1/auth/otp/request', { phone, role, ...(nid ? { national_id: nid.value.trim() } : {}) });
       if (r.registration_required) { stepPhone(true); return; }
       stepCode(r.registration);
-      showDevCode(r.dev_code, phone);
+      showDevCode(r.dev_code, phone, r.delivery);
     });
     box.replaceChildren(
       h('button', { class: 'btn small', type: 'button', onclick: stepRole }, '→ بازگشت'),
@@ -245,7 +247,7 @@ VIEWS.login = () => {
     const submit = guard(async (e) => {
       e.preventDefault();
       const r = await api('POST', '/v1/auth/otp/verify', { phone, code: input.value });
-      if (r.mfa_required) { mfaToken = r.mfa_token; stepMfa(); showDevCode(r.dev_code); return; }
+      if (r.mfa_required) { mfaToken = r.mfa_token; stepMfa(); showDevCode(r.dev_code, phone, r.delivery); return; }
       done(r);
     });
     box.replaceChildren(

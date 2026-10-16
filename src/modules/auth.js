@@ -147,7 +147,7 @@ export function register(router, { db, keys, platform, config, limiter, domain }
     platform.audit(ctx, 'auth.otp_requested', `phone:${phone}`, { registration: !!payload });
     return {
       status: 202,
-      body: { sent: true, registration: !!payload, identity_verified: !!payload, expires_in: OTP_TTL_MS / 1000, ...(config.devMode ? { dev_code: code } : {}) },
+      body: { sent: true, delivery: domain.sms?.enabled ? domain.sms.delivery : 'sms', registration: !!payload, identity_verified: !!payload, expires_in: OTP_TTL_MS / 1000, ...(config.devMode ? { dev_code: code } : {}) },
     };
   });
 
@@ -191,7 +191,7 @@ export function register(router, { db, keys, platform, config, limiter, domain }
       platform.audit(ctx, 'auth.mfa_challenge', `user:${user.id}`);
       return {
         body: {
-          mfa_required: true,
+          mfa_required: true, delivery: domain.sms?.enabled ? domain.sms.delivery : 'sms',
           mfa_token: signJwt(keys, { typ: 'mfa', sub: user.id, tid: user.tenant_id }, MFA_TTL_S),
           ...(config.devMode ? { dev_code: code } : {}),
         },

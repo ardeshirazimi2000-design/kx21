@@ -117,7 +117,7 @@ sed -i "s/^PORT=.*/PORT=$PORT/" "$ENV_FILE"
 # Optional integrations passed on the command line are stored in the env file, e.g.
 #   curl … | SAPI_TOKEN=… ZARINPAL_MERCHANT_ID=… bash
 upsert() { sed -i "/^$1=/d" "$ENV_FILE"; printf '%s=%s\n' "$1" "$2" >> "$ENV_FILE"; }
-for VAR in SAPI_TOKEN SAPI_BASE IDENTITY_INQUIRY_URL SMS_PROVIDER SMS_API_KEY SMS_OTP_TEMPLATE SMS_MFA_TEMPLATE SMS_TEMPLATE_PARAM SMS_SENDER ADMIN_PHONE DRUG_API_BASE DRUG_API_TOKEN ZARINPAL_MERCHANT_ID ZARINPAL_SANDBOX PUBLIC_BASE_URL VISION_LLM_BASE_URL VISION_LLM_MODEL LLM_BASE_URL LLM_MODEL; do
+for VAR in SAPI_TOKEN SAPI_BASE IDENTITY_INQUIRY_URL SMS_PROVIDER SMS_API_KEY SMS_OTP_TEMPLATE SMS_MFA_TEMPLATE SMS_TEMPLATE_PARAM SMS_SENDER SMS_APIIR_SERVICE ADMIN_PHONE DRUG_API_BASE DRUG_API_TOKEN ZARINPAL_MERCHANT_ID ZARINPAL_SANDBOX PUBLIC_BASE_URL VISION_LLM_BASE_URL VISION_LLM_MODEL LLM_BASE_URL LLM_MODEL; do
   VAL="${!VAR:-}"; [ -n "$VAL" ] && upsert "$VAR" "$VAL" && echo "   set $VAR"
 done
 [ -n "$DOMAIN" ] && upsert PUBLIC_BASE_URL "https://$DOMAIN"
@@ -125,7 +125,8 @@ done
 envget() { grep -E "^$1=" "$ENV_FILE" | tail -1 | cut -d= -f2-; }
 if [ "${PRODUCTION:-}" = "1" ]; then
   MISSING=""
-  for V in SMS_PROVIDER SMS_API_KEY SMS_OTP_TEMPLATE ADMIN_PHONE SAPI_TOKEN; do [ -n "$(envget $V)" ] || MISSING="$MISSING $V"; done
+  NEED="SMS_PROVIDER ADMIN_PHONE SAPI_TOKEN"; [ "$(envget SMS_PROVIDER)" = "apiir" ] || NEED="$NEED SMS_API_KEY SMS_OTP_TEMPLATE"
+  for V in $NEED; do [ -n "$(envget $V)" ] || MISSING="$MISSING $V"; done
   [ -z "$MISSING" ] || die "PRODUCTION=1 needs:$MISSING (pass them on the command line once; they are kept in $ENV_FILE)"
   upsert NODE_ENV production
   sed -i '/^SEED=/d' "$ENV_FILE"

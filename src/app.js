@@ -91,6 +91,7 @@ export function loadConfig(env = process.env) {
     smsMfaTemplate: env.SMS_MFA_TEMPLATE || '',
     smsTemplateParam: env.SMS_TEMPLATE_PARAM || 'Code',
     smsSender: env.SMS_SENDER || '',
+    smsApiirService: env.SMS_APIIR_SERVICE || 'SmsOTP',
     // Origins of the native app WebViews (Capacitor Android / iOS) plus any extra web origins.
     corsOrigins: (env.CORS_ORIGINS || 'https://localhost,capacitor://localhost,http://localhost')
       .split(',').map((o) => o.trim()).filter(Boolean),

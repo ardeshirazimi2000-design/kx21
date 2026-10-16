@@ -195,6 +195,7 @@ curl -fsSL https://raw.githubusercontent.com/ardeshirazimi2000-design/kx21/claud
   PRODUCTION=1 ADMIN_PHONE=09xxxxxxxxx SMS_PROVIDER=kavenegar SMS_API_KEY='…' SMS_OTP_TEMPLATE='clinic-otp' bash
 ```
 - کد ورود فقط با پیامک (الگوی تأییدشده) ارسال می‌شود و دیگر روی صفحه نمایش داده نمی‌شود؛ ثبت‌نام بدون شاهکار ممکن نیست.
+- با **api.ir** (همان توکن شاهکار): `PRODUCTION=1 ADMIN_PHONE=09xxxxxxxxx SMS_PROVIDER=apiir` — پیامک با سرویس SmsOTP (الگوی شماره `SMS_OTP_TEMPLATE`، پیش‌فرض ۱)؛ برای اعلام کد با تماس صوتی: `SMS_APIIR_SERVICE=CallOTP`.
 - حساب‌های نمایشی غیرفعال می‌شوند و `ADMIN_PHONE` مدیر کل می‌شود. آزمایش ارسال: `node scripts/check-sms.js 09xxxxxxxxx`.
 - بازگشت به حالت آزمایشی: `PRODUCTION=0`.
 
