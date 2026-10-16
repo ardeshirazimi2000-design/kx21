@@ -25,6 +25,7 @@ import * as cxr from './modules/cxr.js';
 import * as rxTools from './modules/rx/routes.js';
 import { createDrugDirectory } from './modules/rx/drug-directory.js';
 import * as drugCatalog from './modules/rx/drug-catalog.js';
+import * as rxSuggest from './modules/rx/suggest.js';
 import { createLabOcr } from './modules/ai/lab-ocr.js';
 import { createIdentityService } from './modules/identity.js';
 import { createAssistant } from './modules/ai/assistant.js';
@@ -119,6 +120,7 @@ export function createApp(overrides = {}) {
   cxr.register(router, deps);
   rxTools.register(router, deps);
   drugCatalog.register(router, deps);
+  rxSuggest.register(router, deps);
 
   router.get('/healthz', async () => ({ body: { status: 'ok' } }));
   router.get('/v1/config', async () => ({

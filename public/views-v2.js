@@ -560,6 +560,40 @@ export function installV2(x) {
       toast('الگو ذخیره شد'); loadTemplates();
     });
 
+    // "From my formulary": the physician's own templates / earlier prescriptions for the chosen diagnosis.
+    const sugBox = h('div', { class: 'stack' });
+    const applySuggestion = (it, dxUsed) => {
+      if (current().length && !confirm('داروهای فعلی فرم با این پیشنهاد جایگزین شوند؟')) return;
+      rows.replaceChildren(); it.drugs.forEach(addRow);
+      if (it.notes) notes.value = it.notes;
+      sugBox.replaceChildren(h('p', { class: 'muted small' }, `✓ «${it.label}» در فرم قرار گرفت؛ پیش از ذخیره دوز، مدت و مناسب بودن برای این بیمار را بررسی کنید.`));
+      recheck();
+      api('POST', '/v1/prescriptions/suggest/applied', { consultation_id: cid, sources: it.sources, diagnosis_code: it.diagnosis_code ?? dxUsed, had_warnings: it.warnings.length > 0 }).catch(() => {});
+    };
+    const suggestRx = guard(async () => {
+      sugBox.replaceChildren(h('p', { class: 'muted small' }, '⏳ جستجو در نسخه‌ها و الگوهای خودتان…'));
+      const r = await api('POST', '/v1/prescriptions/suggest', { consultation_id: cid, diagnoses: dx.map((d) => d.code) });
+      const fromA = r.from_assessment.length ? h('div', { class: 'stack' },
+        h('span', { class: 'small' }, 'کدهای یافت‌شده در «ارزیابی» شما — برای استفاده تأیید کنید:'),
+        h('div', { class: 'choices' }, r.from_assessment.map((it) => h('button', { type: 'button', class: 'choice', onclick: () => {
+          if (!dx.some((d) => d.code === it.code)) dx.push(it);
+          renderDx(); loadTemplates(); suggestRx();
+        } }, h('b', { class: 'ltr' }, it.code), ` ${it.label_fa} +`)))) : null;
+      sugBox.replaceChildren(h('div', { class: 'ai-box stack' },
+        h('div', { class: 'row' }, h('b', { class: 'grow' }, `💡 پیشنهاد از نسخه‌های خودتان${r.diagnoses.length ? ` برای ${r.diagnoses.map((d) => d.code).join('، ')}` : ''}`),
+          h('button', { class: 'btn small', type: 'button', onclick: () => sugBox.replaceChildren() }, '✕')),
+        fromA,
+        r.hint ? h('p', { class: 'muted small' }, r.hint) : null,
+        ...r.items.map((it) => h('div', { class: `banner ${it.blocked ? 'danger' : 'info'} stack` },
+          h('div', { class: 'row' }, h('b', { class: 'grow' }, it.label),
+            h('span', { class: 'muted small' }, `${it.sources.includes('template') ? 'الگوی شما' : 'نسخه‌های قبلی شما'} · ${it.times_used ? `${fa(it.times_used)} بار` : 'هنوز استفاده نشده'}`)),
+          h('div', { class: 'small ltr', style: 'white-space:pre-line' }, it.drugs.map((d) => [d.name, d.dose, d.frequency, d.duration].filter(Boolean).join(' — ')).join('\n')),
+          ...it.warnings.map((w) => h('div', { class: 'small' }, `⚠️ ${w.message}`)),
+          h('div', {}, h('button', { class: `btn small ${it.blocked ? '' : 'primary'}`, type: 'button', onclick: () => applySuggestion(it, r.diagnoses[0]?.code) },
+            it.blocked ? 'اعمال (با وجود هشدار جدی)' : 'اعمال در فرم')))),
+        h('p', { class: 'muted small' }, 'پیشنهادها فقط از الگوها و نسخه‌های صادرشده خود شما برای همین تشخیص است و برای این بیمار از نظر حساسیت، تکرار و تداخل‌های مهم بررسی شده؛ تصمیم و ویرایش نهایی با شماست.')));
+    });
+
     const loadRx = async () => {
       const r = await api('GET', `/v1/prescriptions?consultation_id=${cid}`);
       existing.replaceChildren(...r.items.map((rx) => h('div', { class: `banner ${rx.status === 'issued' ? 'info' : 'warn'} stack` },
@@ -591,7 +625,8 @@ export function installV2(x) {
     loadRx();
     return h('div', { class: 'card stack' }, dl, h('h2', {}, 'نسخه الکترونیک'), existing,
       h('div', {}, h('label', {}, 'تشخیص (ICD-10)'), dxChips, dxInput, dxResults),
-      h('div', { class: 'row' }, tplSel, h('button', { class: 'btn small', type: 'button', onclick: saveTpl }, '💾 ذخیره به‌عنوان الگو')),
+      h('div', { class: 'row' }, h('button', { class: 'btn small', type: 'button', onclick: suggestRx }, '💡 پیشنهاد از نسخه‌های من'), tplSel, h('button', { class: 'btn small', type: 'button', onclick: saveTpl }, '💾 ذخیره به‌عنوان الگو')),
+      sugBox,
       h('div', {}, rows, h('button', { class: 'btn small', onclick: () => addRow() }, '+ دارو')),
       infoBox, safetyBox, notes,
       h('p', { class: 'muted small' }, 'بررسی ایمنی (حساسیت ثبت‌شده، داروی تکراری، چند تداخل مهم) کمکی و محدود است و جای قضاوت پزشک را نمی‌گیرد.'),
