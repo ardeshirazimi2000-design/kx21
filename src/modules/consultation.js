@@ -179,7 +179,10 @@ export function register(router, { db, keys, platform, config, domain }) {
     return drugs.map((d) => {
       if (!d || typeof d.name !== 'string' || !d.name.trim()) throw badRequest('نام دارو الزامی است');
       const pick = (k) => (d[k] == null ? null : String(d[k]).slice(0, 200));
-      return { name: d.name.trim().slice(0, 200), dose: pick('dose'), frequency: pick('frequency'), duration: pick('duration'), instructions: pick('instructions') };
+      return {
+        name: d.name.trim().slice(0, 200), dose: pick('dose'), frequency: pick('frequency'), duration: pick('duration'), instructions: pick('instructions'),
+        ...(d.erx_code ? { erx_code: String(d.erx_code).trim().slice(0, 12) } : {}),
+      };
     });
   };
 
@@ -236,6 +239,12 @@ export function register(router, { db, keys, platform, config, domain }) {
     const c = loadConsultation(ctx, consultationId);
     if (!c.isDoctor) throw forbidden();
     const items = validateDrugs(drugs);
+    // Official national code (eRx): must exist in the active catalogue; the official title is kept.
+    for (const it of items) {
+      if (!it.erx_code) continue;
+      const r = domain.drugCatalog.resolve(ctx.tenantId, it.erx_code);
+      it.erx_title = r.title;
+    }
     const dx = validateDiagnoses(diagnoses);
     const key = `${ctx.user.did}:${idempotencyKey}`;
     const prior = db.get('SELECT * FROM prescriptions WHERE tenant_id = ? AND idempotency_key = ?', ctx.tenantId, key);

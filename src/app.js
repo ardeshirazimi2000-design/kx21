@@ -24,6 +24,7 @@ import * as summaries from './modules/summaries.js';
 import * as cxr from './modules/cxr.js';
 import * as rxTools from './modules/rx/routes.js';
 import { createDrugDirectory } from './modules/rx/drug-directory.js';
+import * as drugCatalog from './modules/rx/drug-catalog.js';
 import { createLabOcr } from './modules/ai/lab-ocr.js';
 import { createIdentityService } from './modules/identity.js';
 import { createAssistant } from './modules/ai/assistant.js';
@@ -98,6 +99,7 @@ export function createApp(overrides = {}) {
   domain.files = files.createFilesDomain({ db, keys, config });
   domain.labOcr = createLabOcr();
   domain.drugDirectory = createDrugDirectory({ db, config });
+  domain.drugCatalog = drugCatalog.createDrugCatalog({ db });
   domain.patient = patient.createPatientDomain({ db, keys, files: () => domain.files });
   domain.payments = payments.createPaymentsDomain({ db, platform, config });
   domain.appointment = appointment.createAppointmentDomain({ db, platform, patientDomain: domain.patient, payments: domain.payments });
@@ -116,6 +118,7 @@ export function createApp(overrides = {}) {
   summaries.register(router, deps);
   cxr.register(router, deps);
   rxTools.register(router, deps);
+  drugCatalog.register(router, deps);
 
   router.get('/healthz', async () => ({ body: { status: 'ok' } }));
   router.get('/v1/config', async () => ({
@@ -195,7 +198,7 @@ export function createApp(overrides = {}) {
       if (ctx.user) limiter.hit(`user:${ctx.user.sub}`, 300, 60_000);
       // File uploads stream the raw body to the handler; everything else is JSON.
       const ctype = String(req.headers['content-type'] ?? '');
-      ctx.body = /^(image\/|application\/(pdf|octet-stream))/.test(ctype) ? {} : await readJson(req);
+      ctx.body = /^(image\/|application\/(pdf|octet-stream|vnd\.openxmlformats))/.test(ctype) ? {} : await readJson(req);
       if (ctx.body === null || typeof ctx.body !== 'object' || Array.isArray(ctx.body)) throw new ApiError(422, 'invalid_json', 'بدنه باید شیء JSON باشد');
 
       const out = await m.handler(ctx);

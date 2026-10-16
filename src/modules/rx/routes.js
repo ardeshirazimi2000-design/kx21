@@ -54,6 +54,7 @@ export function register(router, { db, platform, domain, limiter }) {
     const pick = (d, k) => (d[k] == null || d[k] === '' ? null : String(d[k]).slice(0, 200));
     const drugs = b.drugs.filter((d) => d && String(d.name ?? '').trim()).map((d) => ({
       name: String(d.name).trim().slice(0, 200), dose: pick(d, 'dose'), frequency: pick(d, 'frequency'), duration: pick(d, 'duration'), instructions: pick(d, 'instructions'),
+      ...(d.erx_code && /^\d{1,10}$/.test(String(d.erx_code)) ? { erx_code: String(d.erx_code) } : {}),
     }));
     if (!drugs.length) throw badRequest('الگو باید حداقل یک دارو داشته باشد');
     return { name, code, drugs, notes: b.notes ? String(b.notes).slice(0, 2000) : null };

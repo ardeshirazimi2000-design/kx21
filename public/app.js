@@ -129,7 +129,7 @@ const TABS = {
   doctor: [['doctor-appointments', 'نوبت‌ها'], ['calendar', 'تقویم'], ['doctor-rx', 'نسخه‌ها'], ['doctor-profile', 'پروفایل و مدارک'], ['inbox', 'اعلان‌ها']],
   doctor_pending: [['doctor-profile', 'پروفایل و مدارک'], ['inbox', 'اعلان‌ها']],
   operator: [['escalations', 'درخواست‌های ارجاع'], ['stats', 'آمار']],
-  admin: [['admin-doctors', 'تأیید پزشکان'], ['settings', 'تعرفه‌ها'], ['payments', 'پرداخت‌ها'], ['escalations', 'درخواست‌های ارجاع'], ['stats', 'آمار'], ['audit', 'لاگ ممیزی'], ['staff', 'کاربران']],
+  admin: [['admin-doctors', 'تأیید پزشکان'], ['settings', 'تعرفه‌ها'], ['drug-catalog', 'فهرست داروها'], ['payments', 'پرداخت‌ها'], ['escalations', 'درخواست‌های ارجاع'], ['stats', 'آمار'], ['audit', 'لاگ ممیزی'], ['staff', 'کاربران']],
 };
 
 function renderChrome() {

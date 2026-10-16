@@ -364,6 +364,40 @@ CREATE TABLE IF NOT EXISTS drug_api_cache (
   value       TEXT NOT NULL,
   fetched_at  TEXT NOT NULL
 );
+
+-- national drug coding (eRx-IRC) uploaded by the admin; versions kept for rollback
+CREATE TABLE IF NOT EXISTS drug_catalogs (
+  id            TEXT PRIMARY KEY,
+  tenant_id     TEXT NOT NULL,
+  filename      TEXT NOT NULL,
+  sha256        TEXT NOT NULL,
+  status        TEXT NOT NULL CHECK (status IN ('staged','active','archived')),
+  summary       TEXT NOT NULL,
+  issues        TEXT NOT NULL DEFAULT '[]',
+  created_by    TEXT,
+  created_at    TEXT NOT NULL,
+  activated_at  TEXT
+);
+CREATE TABLE IF NOT EXISTS erx_items (
+  catalog_id    TEXT NOT NULL REFERENCES drug_catalogs(id),
+  erx_code      TEXT NOT NULL,
+  title         TEXT NOT NULL,
+  generic_code  TEXT,
+  generic_name  TEXT NOT NULL,
+  brand         TEXT,
+  form          TEXT,
+  action        TEXT,
+  packs         INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY (catalog_id, erx_code)
+);
+CREATE INDEX IF NOT EXISTS idx_erx_generic ON erx_items (catalog_id, generic_name);
+CREATE TABLE IF NOT EXISTS erx_deleted (
+  catalog_id    TEXT NOT NULL,
+  erx_code      TEXT NOT NULL,
+  title         TEXT,
+  replacement   TEXT,
+  PRIMARY KEY (catalog_id, erx_code)
+);
 `;
 
 export function openDb(path) {

@@ -223,6 +223,59 @@ export function installV2(x) {
       }) }, 'ذخیره تعرفه‌ها')));
   };
 
+  // ---------------------------------------------------------------- admin: national drug coding (eRx-IRC)
+  VIEWS['drug-catalog'] = async () => {
+    const r = await api('GET', '/v1/admin/drug-catalog');
+    const st = { active: ['فعال', 'ok'], staged: ['آماده فعال‌سازی', 'warn'], archived: ['بایگانی', ''] };
+    const preview = h('div', { class: 'stack' });
+    const summaryView = (c) => {
+      const s = c.summary;
+      return h('div', { class: 'stack' },
+        h('div', { class: 'grid2' },
+          h('div', {}, h('label', {}, 'داروهای نسخه‌نویسی (کد eRx)'), fa(s.prescribing_rows ?? 0)),
+          h('div', {}, h('label', {}, 'نام ژنریک'), fa(s.generic_names ?? 0)),
+          h('div', {}, h('label', {}, 'ردیف‌های نسخه‌پیچی (IRC)'), fa(s.dispensing_rows ?? 0)),
+          h('div', {}, h('label', {}, 'کدهای حذف‌شده'), fa(s.deleted ?? 0)),
+          h('div', {}, h('label', {}, 'تغییرات این نسخه'), Object.entries(s.actions ?? {}).map(([k, v]) => `${k}: ${fa(v)}`).join(' · ') || '—'),
+          h('div', {}, h('label', {}, 'ژنریک‌های تحت بررسی ایمنی'), `${fa(s.safety_covered_generics ?? 0)} از ${fa(s.generic_names ?? 0)}`)),
+        c.issues?.length ? h('div', { class: 'banner warn small' }, `${fa(c.issues.length)} ردیف نامعتبر کنار گذاشته شد: `, c.issues.slice(0, 5).join('؛ ')) : null,
+        s.duplicates ? h('p', { class: 'muted small' }, `${fa(s.duplicates)} کد تکراری نادیده گرفته شد.`) : null);
+    };
+    const input = h('input', { type: 'file', accept: '.xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+    input.onchange = guard(async () => {
+      const file = input.files[0];
+      if (!file) return;
+      preview.replaceChildren(h('p', { class: 'muted' }, '⏳ در حال خواندن و بررسی فایل…'));
+      const s = x.getSession();
+      const res = await fetch(apiUrl(`/v1/admin/drug-catalog?filename=${encodeURIComponent(file.name)}`), {
+        method: 'POST', headers: { Authorization: `Bearer ${s.access_token}`, 'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }, body: file,
+      });
+      const c = await res.json().catch(() => ({}));
+      input.value = '';
+      if (!res.ok) { preview.replaceChildren(h('div', { class: 'banner danger' }, c.message ?? 'بارگذاری ناموفق بود')); return; }
+      preview.replaceChildren(h('div', { class: 'card stack' }, h('h3', {}, `پیش‌نمایش: ${c.filename}`), summaryView(c),
+        h('details', {}, h('summary', {}, 'نمونه ردیف‌ها'), h('div', { style: 'overflow-x:auto' }, h('table', {}, h('tbody', {}, c.sample.map((x) => h('tr', {}, h('td', { class: 'ltr' }, x.erx_code), h('td', { class: 'ltr' }, x.title))))))),
+        h('div', { class: 'row' }, h('button', { class: 'btn primary', onclick: guard(async () => {
+          await api('POST', `/v1/admin/drug-catalog/${c.id}/activate`, {});
+          toast('فهرست داروها فعال شد'); route('drug-catalog');
+        }) }, '✓ فعال‌سازی این فهرست'), h('span', { class: 'muted small' }, 'تا فعال‌سازی، فهرست قبلی استفاده می‌شود.'))));
+    });
+    const activeOne = r.items.find((c) => c.status === 'active');
+    x.$app.append(
+      h('div', { class: 'card stack' }, h('h2', {}, '💊 فهرست رسمی داروها (کدینگ eRx-IRC سازمان غذا و دارو)'),
+        h('p', { class: 'muted' }, 'فایل اکسل «کدینگ نسخه نویسی و نسخه پیچی داروهای شیمیایی» ابلاغی را (پس از باز کردن فایل فشرده) بارگذاری کنید. پزشکان داروها را با کد رسمی eRx انتخاب می‌کنند و کدهای حذف‌شده با کد جایگزین رد می‌شوند. داده فقط روی همین سرور نگهداری می‌شود.'),
+        activeOne ? h('div', { class: 'banner info' }, `فهرست فعال: ${activeOne.filename} — ${fmt.short(activeOne.activated_at)}`) : h('div', { class: 'banner warn' }, 'هنوز فهرستی فعال نشده است؛ پزشکان فعلاً نام دارو را آزاد می‌نویسند.'),
+        activeOne ? summaryView(activeOne) : null,
+        h('div', {}, h('label', {}, 'بارگذاری نسخه جدید (xlsx)'), input), preview),
+      h('div', { class: 'card' }, h('h2', {}, 'نسخه‌ها'),
+        r.items.length ? h('ul', { class: 'list' }, r.items.map((c) => h('li', { class: 'row' },
+          h('span', { class: `pill ${st[c.status][1]}` }, st[c.status][0]), h('span', { class: 'grow' }, c.filename, h('br'), h('span', { class: 'muted small' }, `${fmt.short(c.created_at)} · ${fa(c.summary.prescribing_rows ?? 0)} دارو`)),
+          c.status !== 'active' ? h('button', { class: 'btn small', onclick: guard(async () => {
+            if (!confirm(c.status === 'archived' ? 'به این نسخه برگردیم؟' : 'این نسخه فعال شود؟')) return;
+            await api('POST', `/v1/admin/drug-catalog/${c.id}/activate`, {}); toast('فعال شد'); route('drug-catalog');
+          }) }, c.status === 'archived' ? 'بازگشت به این نسخه' : 'فعال‌سازی') : null))) : h('div', { class: 'empty' }, '—')));
+  };
+
   VIEWS.payments = async () => {
     const r = await api('GET', '/v1/payments?all=1');
     const st = { pending: ['در انتظار', 'warn'], paid: ['پرداخت‌شده', 'ok'], failed: ['ناموفق', ''], expired: ['منقضی', ''], refund_required: ['نیاز به بازگشت وجه', 'danger'], refunded: ['بازگشت داده شد', 'info'] };
@@ -377,16 +430,21 @@ export function installV2(x) {
     const dl = h('datalist', { id: 'drug-names' }, drugNames.map((n) => h('option', { value: n })));
     // Suggestions from the Iranian drug directory while typing (only the drug name is sent).
     let sugTimer = null;
+    // Official national coding (eRx) when the admin has activated it; title → code.
+    const erxByTitle = new Map();
     const suggest = (q) => {
-      if (!drugsMeta.directory) return;
       clearTimeout(sugTimer);
       sugTimer = setTimeout(async () => {
         if (q.trim().length < 2) return;
-        const r = await api('GET', `/v1/drugs?q=${encodeURIComponent(q.trim())}`).catch(() => null);
-        if (!r) return;
-        const names = [...new Set([...r.items, ...(r.directory_items ?? []).map((d) => d.title)])].slice(0, 20);
-        dl.replaceChildren(...names.map((n) => h('option', { value: n })));
-      }, 350);
+        const [cat, dir] = await Promise.all([
+          api('GET', `/v1/drug-catalog/search?q=${encodeURIComponent(q.trim())}`).catch(() => null),
+          drugsMeta.directory ? api('GET', `/v1/drugs?q=${encodeURIComponent(q.trim())}`).catch(() => null) : null,
+        ]);
+        for (const it of cat?.items ?? []) erxByTitle.set(it.title, it);
+        const opts = [...(cat?.items ?? []).map((it) => [it.title, `eRx ${it.erx_code}${it.safety_checked ? '' : ' · خارج از بررسی ایمنی'}`])];
+        for (const n of [...(dir?.items ?? []), ...(dir?.directory_items ?? []).map((d) => d.title)]) if (!opts.some(([v]) => v === n)) opts.push([n, '']);
+        if (opts.length) dl.replaceChildren(...opts.slice(0, 25).map(([v, l]) => h('option', { value: v, label: l || v })));
+      }, 300);
     };
     const infoBox = h('div', { class: 'stack' });
     const showInfo = guard(async (name) => {
@@ -421,7 +479,11 @@ export function installV2(x) {
     const existing = h('div', { class: 'stack' });
     let rxKey = crypto.randomUUID();
     let timer = null;
-    const current = () => [...rows.children].map((r) => Object.fromEntries([...r.querySelectorAll('input')].map((i) => [i.dataset.k, i.value.trim()]))).filter((d) => d.name);
+    const current = () => [...rows.children].map((r) => {
+      const d = Object.fromEntries([...r.querySelectorAll('input')].map((i) => [i.dataset.k, i.value.trim()]));
+      const erx = erxByTitle.get(d.name)?.erx_code ?? r.dataset.erx;
+      return erx && (erxByTitle.get(d.name) || r.dataset.erxTitle === d.name) ? { ...d, erx_code: erx } : d;
+    }).filter((d) => d.name);
     const recheck = () => {
       clearTimeout(timer);
       timer = setTimeout(async () => {
@@ -432,13 +494,19 @@ export function installV2(x) {
       }, 500);
     };
     const addRow = (d = {}) => {
-      rows.append(h('div', { class: 'drug-row' },
-        h('input', { type: 'text', placeholder: 'نام دارو', 'data-k': 'name', list: 'drug-names', value: d.name ?? '', dir: 'auto', oninput: (e) => { recheck(); suggest(e.target.value); } }),
+      const tag = h('span', { class: 'muted small erx-tag ltr' }, d.erx_code ? `eRx ${d.erx_code}` : '');
+      rows.append(h('div', { class: 'drug-row', 'data-erx': d.erx_code ?? '', 'data-erx-title': d.erx_code ? d.name ?? '' : '' },
+        h('input', { type: 'text', placeholder: 'نام یا کد eRx دارو', 'data-k': 'name', list: 'drug-names', value: d.name ?? '', dir: 'auto', oninput: (e) => {
+          recheck(); suggest(e.target.value);
+          const it = erxByTitle.get(e.target.value.trim());
+          tag.textContent = it ? `eRx ${it.erx_code}` : '';
+        } }),
         h('input', { type: 'text', placeholder: 'دوز', 'data-k': 'dose', value: d.dose ?? '' }),
         h('input', { type: 'text', placeholder: 'دفعات مصرف', 'data-k': 'frequency', value: d.frequency ?? '' }),
         h('input', { type: 'text', placeholder: 'مدت', 'data-k': 'duration', value: d.duration ?? '' }),
         drugsMeta.directory ? h('button', { class: 'btn small', type: 'button', title: 'اطلاعات دارو', onclick: (e) => showInfo(e.currentTarget.parentElement.querySelector('[data-k=name]').value.trim()) }, 'ℹ️') : null,
-        h('button', { class: 'btn small', type: 'button', onclick: (e) => { e.currentTarget.parentElement.remove(); recheck(); } }, '✕')));
+        h('button', { class: 'btn small', type: 'button', onclick: (e) => { e.currentTarget.parentElement.remove(); recheck(); } }, '✕'),
+        tag));
     };
     addRow();
 
@@ -495,7 +563,7 @@ export function installV2(x) {
     const loadRx = async () => {
       const r = await api('GET', `/v1/prescriptions?consultation_id=${cid}`);
       existing.replaceChildren(...r.items.map((rx) => h('div', { class: `banner ${rx.status === 'issued' ? 'info' : 'warn'} stack` },
-        h('div', {}, rx.status === 'issued' ? '✅ نسخه صادر و امضا شد' : '📝 پیش‌نویس (تا امضا نامعتبر است)', ' — ', rx.drugs.map((d) => `${d.name} ${d.dose ?? ''}`).join('، ')),
+        h('div', {}, rx.status === 'issued' ? '✅ نسخه صادر و امضا شد' : '📝 پیش‌نویس (تا امضا نامعتبر است)', ' — ', rx.drugs.map((d) => `${d.name} ${d.dose ?? ''}${d.erx_code ? ` (eRx ${d.erx_code})` : ''}`).join('، ')),
         rx.diagnoses?.length ? h('div', { class: 'small' }, 'تشخیص: ', rx.diagnoses.map((d) => `${d.code} ${d.label_fa}`).join('، ')) : null,
         rx.status === 'draft' ? safetyList(rx.safety) : rx.safety?.override_reason ? h('div', { class: 'small' }, `صدور با وجود هشدار؛ دلیل پزشک: ${rx.safety.override_reason}`) : null,
         h('div', {}, rx.status === 'draft' ? h('button', { class: 'btn primary small', onclick: guard(async () => {
