@@ -146,6 +146,8 @@ export function IntegrationsPage() {
         )}
       </Card>
 
+      <AiSettings />
+
       <Card title="رویدادهای دریافتی از سامانه جلسات" className="mt">
         <table className="table">
           <thead>
@@ -214,5 +216,81 @@ export function IntegrationsPage() {
         </div>
       </Card>
     </>
+  );
+}
+
+/** Optional AI model for the smart search (any OpenAI-compatible API, ideally on the organisation's own server). */
+function AiSettings() {
+  const r = useApi<any>('/integrations/ai');
+  const [f, setF] = useState({ baseUrl: '', apiKey: '', embeddingModel: '', chatModel: '', isActive: true });
+  const [test, setTest] = useState<any>(null);
+  const act = useAction();
+  useEffect(() => {
+    if (r.data) setF({ baseUrl: r.data.baseUrl, apiKey: '', embeddingModel: r.data.embeddingModel, chatModel: r.data.chatModel, isActive: r.data.baseUrl ? r.data.isActive : true });
+  }, [r.data]);
+  const s = r.data?.stats;
+  return (
+    <Card title="هوش مصنوعی (جستجوی هوشمند)" className="mt">
+      <p className="small muted">
+        جستجوی هوشمند بدون این تنظیم هم کار می‌کند. با اتصال به یک مدل سازگار با OpenAI (ترجیحاً روی سرور خود سازمان، مثلاً Ollama با مدل چندزبانه bge-m3 برای
+        embedding و یک مدل گفتگوی فارسی‌دان)، موضوع جستجو با واژه‌های هم‌معنی گسترش می‌یابد، نتایج از نظر معنایی رتبه‌بندی می‌شوند و خلاصه هوشمند فعال می‌شود. متن
+        نامه‌های طبقه‌بندی‌شده هرگز به مدل فرستاده نمی‌شود.
+      </p>
+      <ErrorBox error={act.error} />
+      <div className="grid grid-2">
+        <Field label="نشانی API" hint="مثلاً http://ollama:11434/v1">
+          <input className="input ltr" value={f.baseUrl} onChange={(e) => setF({ ...f, baseUrl: e.target.value })} />
+        </Field>
+        <Field label="کلید API" hint={r.data?.hasApiKey ? 'ثبت شده؛ برای تغییر مقدار تازه وارد کنید' : 'اگر سرویس کلید نمی‌خواهد خالی بگذارید'}>
+          <input className="input ltr" type="password" value={f.apiKey} onChange={(e) => setF({ ...f, apiKey: e.target.value })} autoComplete="new-password" />
+        </Field>
+        <Field label="مدل embedding (رتبه‌بندی معنایی)">
+          <input className="input ltr" value={f.embeddingModel} onChange={(e) => setF({ ...f, embeddingModel: e.target.value })} placeholder="bge-m3" />
+        </Field>
+        <Field label="مدل گفتگو (گسترش موضوع و خلاصه)">
+          <input className="input ltr" value={f.chatModel} onChange={(e) => setF({ ...f, chatModel: e.target.value })} placeholder="qwen2.5:7b" />
+        </Field>
+      </div>
+      <div className="row gap wrap">
+        <label className="check">
+          <input type="checkbox" checked={f.isActive} onChange={(e) => setF({ ...f, isActive: e.target.checked })} />
+          فعال
+        </label>
+        <Button
+          busy={act.busy}
+          onClick={() =>
+            act.run(async () => {
+              await put('/integrations/ai', { ...f, apiKey: f.apiKey ? f.apiKey : undefined, embeddingModel: f.embeddingModel || null, chatModel: f.chatModel || null });
+              setTest(null);
+              await r.reload();
+            })
+          }
+        >
+          ذخیره
+        </Button>
+        {r.data?.baseUrl && (
+          <Button variant="secondary" busy={act.busy} onClick={() => act.run(async () => setTest(await post('/integrations/ai/test')))}>
+            آزمایش اتصال
+          </Button>
+        )}
+        {r.data?.hasApiKey && (
+          <Button variant="ghost" busy={act.busy} onClick={() => act.run(async () => (await put('/integrations/ai', { ...f, apiKey: null }), await r.reload()))}>
+            حذف کلید
+          </Button>
+        )}
+      </div>
+      {test && (
+        <ul className="list mt small">
+          {test.embedding && <li>embedding: {test.embedding.ok ? <Badge tone="success">موفق ({fa(test.embedding.dimensions)} بُعد)</Badge> : <Badge tone="danger">{test.embedding.error}</Badge>}</li>}
+          {test.chat && <li>گفتگو: {test.chat.ok ? <Badge tone="success">موفق</Badge> : <Badge tone="danger">{test.chat.error}</Badge>}</li>}
+        </ul>
+      )}
+      {s && (
+        <p className="small muted mt">
+          نمایه جستجو: {fa(s.indexed)} از {fa(s.letters)} نامه{s.embedded ? ` · بردار معنایی: ${fa(s.embedded)} نامه` : ''}. نامه‌های تازه در جستجوی بعدی یا اجرای زمان‌بندی‌شده
+          نمایه می‌شوند.
+        </p>
+      )}
+    </Card>
   );
 }

@@ -10,6 +10,7 @@ import { one, pool, query, tx, type Db } from '../db/pool.js';
 import { audit } from '../lib/audit.js';
 import { decryptText } from '../lib/crypto.js';
 import { badRequest, HttpError } from '../lib/errors.js';
+import { htmlToText } from '../lib/html.js';
 import { logger } from '../lib/logger.js';
 import { getFile } from '../lib/storage.js';
 import { enqueue, registerHandler } from '../services/jobs.js';
@@ -347,8 +348,9 @@ export async function createInvitationLetters(input: { meetingId: string; invite
       );
       if (live) continue;
       const letter = await one(
-        `INSERT INTO letters (kind, tracking_code, subject, body, external_party, external_org, source, priority, status, owner_unit_id, created_by)
-         VALUES ('outgoing',$1,$2,$3,$4,$5,'meeting','normal','draft',$6,$7) RETURNING id`,
+        `INSERT INTO letters (kind, tracking_code, subject, body, external_party, external_org, source, priority, status, owner_unit_id, created_by, template_id)
+         VALUES ('outgoing',$1,$2,$3,$4,$5,'meeting','normal','draft',$6,$7,
+                 (SELECT id FROM letter_templates WHERE is_default AND is_active AND 'outgoing' = ANY(kinds))) RETURNING id`,
         [
           await newTrackingCode(db),
           `دعوت به جلسه کمیسیون ${m.commission_name}${m.number ? ` (جلسه ${m.number})` : ''}`,
@@ -414,7 +416,7 @@ export async function referLetterToMeeting(
   const v = await meetingsRequest('POST', '/referrals', {
     commissionId: input.commissionId,
     title: letter.subject,
-    description: [input.note, letter.body].filter(Boolean).join('\n\n').slice(0, 20000) || null,
+    description: [input.note, letter.body_format === 'html' && letter.body ? htmlToText(letter.body) : letter.body].filter(Boolean).join('\n\n').slice(0, 20000) || null,
     externalRef: `letter:${letter.id}`,
     externalNumber: letter.number,
     externalDate: letter.registered_at ? new Date(letter.registered_at).toISOString().slice(0, 10) : null,

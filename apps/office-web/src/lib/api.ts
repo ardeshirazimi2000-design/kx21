@@ -138,7 +138,6 @@ export async function openFile(path: string) {
   setTimeout(() => URL.revokeObjectURL(url), 60_000);
 }
 
-/** Authenticated SVG/text fetch (barcode, QR). */
 /** Object URL of an authenticated file (images shown inline); the caller revokes it. */
 export async function blobUrl(path: string): Promise<string> {
   const s = getSession();
@@ -148,6 +147,7 @@ export async function blobUrl(path: string): Promise<string> {
   return URL.createObjectURL(await res.blob());
 }
 
+/** Authenticated SVG/text fetch (barcode, QR). */
 export async function fetchText(path: string): Promise<string> {
   const s = getSession();
   const res = await fetch(`/api${path}`, { headers: s ? { authorization: `Bearer ${s.accessToken}` } : {} });

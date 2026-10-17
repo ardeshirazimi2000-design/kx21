@@ -33,6 +33,8 @@ schemas = {
             "externalNumber": str_, "externalDate": date, "source": enum("manual", "email", "scan", "api"), "deliveryMethod": str_,
             "priority": enum("low", "normal", "high", "urgent"), "confidentiality": {"type": "integer", "minimum": 0, "maximum": 2}, "ownerUnitId": uuid,
             "replyToId": uuid, "dueDate": date, "recipients": arr(ref("Recipient")), "register": bool_, "workflow": {"type": "string", "description": "workflow definition key to start"},
+            "bodyFormat": {**enum("text", "html"), "description": "html: body from the letter editor, sanitised server-side"}, "templateId": uuid,
+            "signatoryId": {**uuid, "description": "designated signatory (needs letter.sign); only they can sign"},
         },
     },
     "WorkflowStep": S(
@@ -96,9 +98,20 @@ E = [
     ("get", "/api/users/{id}/signature", "Correspondence", "تصویر نمونه امضای کاربر", None, None),
     ("post", "/api/users/{id}/signature", "Correspondence", "ثبت یا جایگزینی نمونه امضا (PNG/JPEG، حداکثر ۱ مگابایت) [خود کاربر یا signatures.manage]", None, None),
     ("delete", "/api/users/{id}/signature", "Correspondence", "حذف نمونه امضا", None, None),
+    ("get", "/api/letter-templates", "Correspondence", "قالب‌ها و سربرگ‌های نامه (?all=1 غیرفعال‌ها هم [templates.manage])", None, None),
+    ("post", "/api/letter-templates", "Correspondence", "قالب جدید [templates.manage]", S(name=str_, description=str_, kinds=arr(enum("outgoing", "internal")), unitId=uuid, pageSize=enum("A4", "A5"), headerText=str_, orgName=str_, orgSubtitle=str_, footerText=str_, showLogo=bool_, marginTop=int_, marginBottom=int_, marginSide=int_, fontSize={"type": "number"}, showQr=bool_, bodyHtml=str_, isDefault=bool_, isActive=bool_), "bodyHtml is sanitised to the letter editor's HTML subset."),
+    ("get", "/api/letter-templates/{id}", "Correspondence", "قالب نامه", None, None),
+    ("patch", "/api/letter-templates/{id}", "Correspondence", "ویرایش قالب [templates.manage]", S(name=str_, isDefault=bool_, isActive=bool_, bodyHtml=str_), "Same fields as POST; omitted fields keep their value, null clears optional text."),
+    ("delete", "/api/letter-templates/{id}", "Correspondence", "حذف قالب (قالب استفاده‌شده فقط غیرفعال می‌شود) [templates.manage]", None, "Returns { outcome: deleted | deactivated }."),
+    ("post", "/api/letter-templates/{id}/{image}", "Correspondence", "بارگذاری لوگو (image=logo، حداکثر ۲ مگابایت) یا تصویر کامل سربرگ (image=background، حداکثر ۵ مگابایت) [templates.manage]", None, None),
+    ("get", "/api/letter-templates/{id}/{image}", "Correspondence", "تصویر لوگو یا سربرگ قالب", None, None),
+    ("delete", "/api/letter-templates/{id}/{image}", "Correspondence", "حذف لوگو یا تصویر سربرگ [templates.manage]", None, None),
     ("post", "/api/letters/{id}/send", "Correspondence", "ثبت ارسال نامه صادره", S(deliveryMethod=str_, requireSignature=bool_), None),
     ("post", "/api/letters/{id}/archive", "Correspondence", "بایگانی نامه", S(folderId=uuid), None),
     ("post", "/api/letters/{id}/cancel", "Correspondence", "ابطال", S(reason=str_), None),
+    ("get", "/api/search", "Correspondence", "جستجوی هوشمند موضوعی (BM25 فارسی، با گسترش و رتبه‌بندی معنایی در صورت تنظیم هوش مصنوعی)", None, "Query: q (required), kind, from, to, cancelled=0|1, page (≤10), pageSize (≤50). Returns items with relevance (0–100), matched terms and snippet segments, plus keywords, expanded and ai flags. Only letters visible to the user."),
+    ("get", "/api/letters/{id}/related", "Correspondence", "نامه‌های مرتبط (پیرو/عطف، همان جلسه، موضوع مشابه)", None, "Each item has reasons (thread | meeting | subject) and similarity (%)."),
+    ("post", "/api/search/summary", "Correspondence", "خلاصه هوشمند نامه‌های انتخاب‌شده درباره موضوع", S(q=str_, letterIds=arr(uuid)), "Up to 12 letters; classified letters (confidentiality > 0) are never sent to the AI. 400 if no chat model is configured."),
     ("get", "/api/verify/{code}", "Correspondence", "صحت‌سنجی عمومی نامه (QR)", None, "Public. Confidential letters reveal only number, date and signature validity."),
 
     ("get", "/api/workflows", "Workflow", "آخرین نسخه هر فرایند", None, None),
@@ -139,6 +152,9 @@ E = [
     ("post", "/api/integrations/meetings/sync", "Integration", "همگام‌سازی جلسات و رویدادها", None, None),
     ("get", "/api/integrations/meetings/inbox", "Integration", "رویدادهای دریافتی", None, None),
     ("post", "/api/integrations/meetings/webhook", "Integration", "دریافت رویداد از سامانه جلسات (امضای HMAC)", ref("EventEnvelope"), "Public; verified with `x-kx-signature: t=<unix>,v1=<hex HMAC-SHA256(secret, t + '.' + rawBody)>` (5-minute tolerance). Idempotent by event id."),
+    ("get", "/api/integrations/ai", "Integration", "تنظیمات هوش مصنوعی جستجوی هوشمند و آمار نمایه", None, "The API key is never returned (hasApiKey only)."),
+    ("put", "/api/integrations/ai", "Integration", "تنظیم ارائه‌دهنده سازگار با OpenAI", S(baseUrl=str_, apiKey=str_, embeddingModel=str_, chatModel=str_, isActive=bool_), "apiKey omitted keeps the stored key; null or empty removes it. At least one model is required."),
+    ("post", "/api/integrations/ai/test", "Integration", "آزمایش مدل‌های embedding و گفتگو", None, None),
     ("put", "/api/integrations/intake", "Integration", "درگاه دریافت نامه؛ rotateKey کلید جدید برمی‌گرداند", S(isActive=bool_, defaultUnitId=uuid, rotateKey=bool_), None),
     ("post", "/api/intake/letters", "Integration", "ثبت نامه وارده از ایمیل/اسکن/سامانه دیگر (X-Api-Key)", S(subject=str_, body=str_, externalOrg=str_, externalParty=str_, externalNumber=str_, externalDate=date, source=enum("email", "scan", "api"), externalRef=str_, attachments=arr(S(fileName=str_, contentBase64=str_))), None),
     ("get", "/api/meetings", "Meetings", "جلسات (کش سامانه جلسات) [meetings.view]", None, None),
@@ -170,13 +186,13 @@ for method, path, tag, summary, body, notes in E:
         op["requestBody"] = {"required": True, "content": {"application/json": {"schema": body}}}
     if path.endswith("/attachments") or path.endswith("/versions") or path == "/api/archive/documents" and method == "post":
         op["requestBody"] = {"required": True, "content": multipart_file(groupId=uuid, title=str_, folderId=uuid, note=str_)}
-    if path == "/api/users/{id}/signature" and method == "post":
+    if path in ("/api/users/{id}/signature", "/api/letter-templates/{id}/{image}") and method == "post":
         op["requestBody"] = {"required": True, "content": multipart_file()}
     if path in ("/api/auth/login", "/api/auth/refresh", "/api/auth/mfa/verify"):
         op["responses"]["200"] = {"description": "OK", "content": {"application/json": {"schema": ref("Tokens")}}}
     if method == "get" and path in ("/api/letters", "/api/users", "/api/archive/documents", "/api/notifications", "/api/audit", "/api/meetings", "/api/resolutions"):
         op["responses"]["200"] = {"description": "OK", "content": {"application/json": {"schema": ref("Paged")}}}
-    params = [{"name": seg[1:-1], "in": "path", "required": True, "schema": uuid if seg in ("{id}", "{attId}") else str_} for seg in path.split("/") if seg.startswith("{")]
+    params = [{"name": seg[1:-1], "in": "path", "required": True, "schema": enum("logo", "background") if seg == "{image}" else uuid if seg in ("{id}", "{attId}", "{sigId}") else str_} for seg in path.split("/") if seg.startswith("{")]
     if params:
         op["parameters"] = params
     paths.setdefault(path, {})[method] = op

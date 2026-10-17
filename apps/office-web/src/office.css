@@ -48,3 +48,124 @@
 .letter-signatures { display: flex; flex-wrap: wrap; gap: 32px; justify-content: flex-end; margin-top: 24px; }
 .letter-signature { text-align: center; min-width: 180px; }
 .letter-signature img { display: block; margin: 0 auto 4px; }
+
+/* Org structure: collapsible tree with connector lines, and a top-down chart. */
+.org-tree ul { list-style: none; margin: 0; padding: 0; }
+.org-tree ul ul { padding-right: 22px; margin-right: 9px; border-right: 1px dashed var(--border); }
+.org-tree li { position: relative; }
+.org-tree ul ul > li::before { content: ''; position: absolute; right: -22px; top: 17px; width: 18px; border-top: 1px dashed var(--border); }
+.org-node { display: flex; align-items: center; gap: 2px; border-radius: 8px; }
+.org-node.active { background: var(--primary-soft, #e0f2f1); }
+.org-node.inactive { opacity: 0.6; }
+.org-toggle { width: 22px; height: 26px; border: 0; background: none; cursor: pointer; color: var(--muted); font: inherit; padding: 0; }
+.org-toggle:disabled { cursor: default; }
+.org-label { flex: 1; text-align: right; border: 0; background: none; padding: 5px 6px; border-radius: 8px; cursor: pointer; font: inherit; color: inherit; }
+.org-label:hover { background: var(--surface-2); }
+.org-positions .org-pos { display: inline-block; padding: 3px 6px; font-size: 0.9rem; }
+.org-positions .org-pos::before { content: '👤 '; font-size: 0.8rem; }
+.org-chart { overflow-x: auto; padding-bottom: 8px; }
+.org-chart ul { display: flex; justify-content: center; list-style: none; margin: 0; padding: 18px 0 0; position: relative; }
+.org-chart > ul { padding-top: 0; }
+.org-chart li { position: relative; padding: 18px 6px 0; display: flex; flex-direction: column; align-items: center; }
+.org-chart > ul > li { padding-top: 0; }
+.org-chart > ul > li::before, .org-chart > ul > li::after { display: none; }
+.org-chart li::before, .org-chart li::after { content: ''; position: absolute; top: 0; width: 50%; height: 18px; border-top: 1px solid var(--border); }
+/* RTL: ::before is the right half and carries the vertical line down to the box; ::after is the left half. */
+.org-chart li::before { right: 0; border-left: 1px solid var(--border); }
+.org-chart li::after { left: 0; }
+.org-chart li:first-child::before { border-top: 0; }
+.org-chart li:last-child::after { border-top: 0; }
+.org-chart li:only-child::after { display: none; }
+.org-chart li:only-child::before { border-top: 0; }
+.org-chart ul ul::before { content: ''; position: absolute; top: 0; right: 50%; height: 18px; border-right: 1px solid var(--border); }
+.org-box { display: flex; flex-direction: column; gap: 2px; min-width: 130px; max-width: 200px; padding: 8px 10px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); cursor: pointer; font: inherit; color: inherit; text-align: center; }
+.org-box:hover { border-color: var(--primary); }
+.org-box.active { border-color: var(--primary); box-shadow: 0 0 0 2px var(--primary-soft, #e0f2f1); }
+.org-box.inactive { opacity: 0.6; }
+
+/* Letter on its letterhead (editor, preview, print and PDF). Paper is always white, whatever the theme. */
+.paper-wrap { overflow-x: auto; padding: 16px 0; background: var(--surface-2); border-radius: 12px; }
+.paper { position: relative; margin: 0 auto; box-sizing: border-box; background: #fff no-repeat top center / 100% 100%; color: #111; line-height: 2;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.12); display: flex; flex-direction: column; font-family: var(--font); -webkit-box-decoration-break: clone; box-decoration-break: clone;
+  -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+.paper-watermark { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-size: 72pt; font-weight: 700;
+  color: rgba(180, 0, 0, 0.07); transform: rotate(-30deg); pointer-events: none; user-select: none; }
+.paper-head { display: grid; grid-template-columns: 1fr auto 1fr; align-items: start; gap: 8px; border-bottom: 1.5px solid #222; padding-bottom: 6px; margin-bottom: 14px; }
+.paper-head-over { display: flex; justify-content: flex-end; border: 0; }
+.paper-org { display: flex; flex-direction: column; align-items: center; justify-self: start; text-align: center; gap: 2px; max-width: 70mm; font-size: 0.85em; line-height: 1.6; }
+.paper-org img { height: 22mm; width: auto; }
+/* The chamber logo is drawn white for the dark sidebar; on paper it prints dark. */
+.paper-org img.paper-default-logo { filter: brightness(0); }
+.paper-bismillah { text-align: center; font-weight: 600; }
+.paper-number { justify-self: end; display: grid; grid-template-columns: auto auto; gap: 0 8px; margin: 0; font-size: 0.85em; line-height: 1.9; align-self: end; }
+.paper-number dt { font-weight: 600; }
+.paper-number dd { margin: 0; min-width: 28mm; }
+.paper-to { font-weight: 700; margin-bottom: 6px; }
+.paper-subject { font-weight: 700; margin-bottom: 12px; }
+.paper-subject span { font-weight: 400; }
+.paper-body { flex: 1; }
+.paper-body .letter-text { white-space: pre-wrap; }
+.paper-signatures { display: flex; flex-wrap: wrap; gap: 24px; justify-content: flex-end; margin-top: 16px; page-break-inside: avoid; break-inside: avoid; }
+.paper-signature { display: flex; flex-direction: column; align-items: center; min-width: 50mm; text-align: center; line-height: 1.7; }
+.paper-signature img { max-height: 25mm; width: auto; }
+.paper-signature-space { height: 18mm; }
+.paper-cc { margin-top: 12px; font-size: 0.85em; line-height: 1.8; break-inside: avoid; }
+.paper-foot { display: flex; justify-content: space-between; align-items: flex-end; gap: 12px; margin-top: 16px; border-top: 1px solid #999; padding-top: 6px; font-size: 0.75em; line-height: 1.7; break-inside: avoid; }
+.paper-foot-text { white-space: pre-wrap; }
+.paper-qr { display: flex; flex-direction: column; align-items: center; gap: 2px; }
+.paper-qr > div { width: 20mm; height: 20mm; }
+.paper-qr svg { width: 100%; height: 100%; }
+.paper-editing .paper-body { outline: 1px dashed #c7d2d6; outline-offset: 4px; border-radius: 2px; }
+
+/* Rich-text letter content (editor and stored HTML). */
+.letter-html p { margin: 0; min-height: 1em; }
+.letter-html h1, .letter-html h2, .letter-html h3 { margin: 0.4em 0; line-height: 1.5; }
+.letter-html h1 { font-size: 1.5em; }
+.letter-html h2 { font-size: 1.3em; }
+.letter-html h3 { font-size: 1.12em; }
+.letter-html ul, .letter-html ol { margin: 0.2em 0; padding-right: 1.6em; padding-left: 0; }
+.letter-html ol { list-style-type: persian; }
+.letter-html table { border-collapse: collapse; width: 100%; margin: 0.5em 0; }
+.letter-html th, .letter-html td { border: 1px solid #555; padding: 2px 6px; vertical-align: top; }
+.letter-html th { background: #f0f0f0; }
+.letter-html hr { border: 0; border-top: 1px solid #555; margin: 0.6em 0; }
+.letter-html a { color: inherit; }
+.letter-body .letter-html, .letter-body .letter-text { white-space: normal; }
+.letter-body .letter-text { white-space: pre-wrap; }
+
+.editor { display: flex; flex-direction: column; }
+.editor-toolbar { position: sticky; top: 0; z-index: 2; display: flex; flex-wrap: wrap; align-items: center; gap: 2px; padding: 6px; margin-bottom: 8px;
+  background: var(--surface); border: 1px solid var(--border); border-radius: 10px; }
+.editor-toolbar .sep { width: 1px; height: 22px; background: var(--border); margin: 0 4px; }
+.editor-toolbar .tb { min-width: 30px; height: 30px; padding: 0 6px; border: 1px solid transparent; border-radius: 6px; background: none; color: var(--text); cursor: pointer; font: inherit; font-size: 0.9rem; display: inline-flex; align-items: center; justify-content: center; position: relative; }
+.editor-toolbar .tb:hover:not(:disabled) { background: var(--surface-2); }
+.editor-toolbar .tb.on { background: var(--primary-soft, #e0f2f1); border-color: var(--primary); color: var(--primary); }
+.editor-toolbar .tb:disabled { opacity: 0.4; cursor: default; }
+.editor-toolbar .tb-select { height: 30px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface); color: var(--text); font: inherit; font-size: 0.85rem; padding: 0 4px; }
+.editor-toolbar .tb-color input { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
+.editor-area { min-height: 90mm; outline: none; }
+.editor-area .tableWrapper { overflow-x: auto; }
+.editor-area .selectedCell { background: rgba(0, 120, 200, 0.12); }
+
+/* Print the letter page only, edge to edge: the paper's padding is the page margin. */
+@media print {
+  .print-letter .paper-wrap { padding: 0; background: none; overflow: visible; }
+  .print-letter .paper { box-shadow: none; margin: 0; }
+}
+.print-bar { position: sticky; top: 0; z-index: 5; display: flex; align-items: center; gap: 8px; padding: 10px 16px; background: var(--surface); border-bottom: 1px solid var(--border); }
+
+/* Smart search */
+.smart-layout { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 16px; align-items: start; }
+@media (max-width: 1000px) { .smart-layout { grid-template-columns: 1fr; } }
+.smart-q { font-size: 1.05rem; }
+.smart-hit { margin-bottom: 12px; }
+.smart-title { font-weight: 600; font-size: 1.02rem; }
+.smart-relevance { width: 90px; height: 6px; border-radius: 3px; background: var(--surface-2); overflow: hidden; flex: none; }
+.smart-relevance span { display: block; height: 100%; background: var(--primary); border-radius: 3px; }
+.smart-snippet { margin: 8px 0; line-height: 1.9; color: var(--text); }
+.smart-snippet mark { background: rgba(255, 196, 0, 0.35); color: inherit; border-radius: 3px; padding: 0 2px; }
+.smart-summary { white-space: pre-wrap; line-height: 1.9; }
+.chip { display: inline-block; padding: 1px 10px; border-radius: 999px; background: var(--surface-2); border: 1px solid var(--border); font-size: 0.82rem; }
+.chip-btn { cursor: pointer; font: inherit; font-size: 0.82rem; color: var(--text); }
+.chip-btn:hover { border-color: var(--primary); color: var(--primary); }
+.related-list li { padding: 6px 0; }
