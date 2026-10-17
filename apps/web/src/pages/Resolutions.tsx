@@ -2,7 +2,7 @@ import { RESOLUTION_STATUS_LABELS, RESOLUTION_STATUSES } from '@kx/shared';
 import { useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { PriorityBadge, ResolutionBadge } from '../components/status';
-import { Button, Card, dateFa, dateTimeFa, Empty, ErrorBox, Field, fa, Loading, PageHeader, Pager, Progress } from '../components/ui';
+import { Badge, Button, Card, dateFa, dateTimeFa, Empty, ErrorBox, Field, fa, Loading, PageHeader, Pager, Progress } from '../components/ui';
 import { download, patch, post, upload } from '../lib/api';
 import { useApi } from '../lib/hooks';
 
@@ -198,7 +198,7 @@ export function ResolutionDetailPage() {
           <ul className="list small">
             {r.updates.map((u: any) => (
               <li key={u.id}>
-                <strong>{u.full_name}</strong> <span className="muted">{dateTimeFa(u.created_at)}</span> —{' '}
+                <strong>{u.full_name}</strong> {u.source === 'integration' && <Badge tone="info">سامانه خارجی</Badge>} <span className="muted">{dateTimeFa(u.created_at)}</span> —{' '}
                 {u.kind === 'progress' ? `پیشرفت ${fa(u.progress)}٪` : u.kind === 'approve' ? 'تأیید انجام' : u.kind === 'return' ? 'برگشت' : 'یادداشت'}
                 {u.note && <div className="pre">{u.note}</div>}
               </li>

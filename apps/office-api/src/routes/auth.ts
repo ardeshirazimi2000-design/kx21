@@ -1,4 +1,5 @@
 import bcrypt from 'bcryptjs';
+import { qrSvg } from '../lib/barcode.js';
 import { Router } from 'express';
 import rateLimit from 'express-rate-limit';
 import { z } from 'zod';
@@ -107,7 +108,8 @@ authRouter.post('/mfa/setup', authenticate, async (req, res) => {
   const u = currentUser(req);
   const secret = generateSecret();
   await query('UPDATE users SET mfa_secret_enc = $2, mfa_enabled = false WHERE id = $1', [u.id, encryptText(secret)]);
-  res.json({ secret, otpauthUrl: otpauthUrl(secret, u.fullName) });
+  const url = otpauthUrl(secret, u.fullName);
+  res.json({ secret, otpauthUrl: url, qrSvg: await qrSvg(url) });
 });
 
 authRouter.post('/mfa/enable', authenticate, async (req, res) => {

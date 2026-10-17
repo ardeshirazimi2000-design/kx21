@@ -1,0 +1,45 @@
+/* Office automation additions on top of the shared design system. */
+.letter-number { font-weight: 700; direction: ltr; unicode-bidi: plaintext; }
+.mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; direction: ltr; unicode-bidi: plaintext; }
+.kv { display: grid; grid-template-columns: max-content 1fr; gap: 6px 16px; margin: 0; }
+.kv dt { color: var(--muted); }
+.kv dd { margin: 0; }
+.letter-body { white-space: pre-wrap; line-height: 2; background: var(--surface-2); border: 1px solid var(--border); border-radius: 8px; padding: 16px 20px; }
+.timeline { list-style: none; padding: 0; margin: 0; }
+.timeline li { position: relative; padding: 0 22px 14px 0; border-right: 2px solid var(--border); }
+.timeline li::before { content: ''; position: absolute; right: -7px; top: 4px; width: 12px; height: 12px; border-radius: 50%; background: var(--surface); border: 2px solid var(--primary); }
+.timeline li.active::before { background: var(--warning, #d97706); border-color: var(--warning, #d97706); }
+.timeline li.ok::before { background: var(--success, #15803d); border-color: var(--success, #15803d); }
+.timeline li.bad::before { background: var(--danger, #b91c1c); border-color: var(--danger, #b91c1c); }
+.timeline li:last-child { border-right-color: transparent; }
+.tree { list-style: none; margin: 0; padding: 0; }
+.tree ul { list-style: none; margin: 0; padding-right: 16px; }
+.tree button { background: none; border: 0; padding: 4px 6px; border-radius: 6px; cursor: pointer; font: inherit; color: inherit; text-align: right; width: 100%; }
+.tree button:hover { background: var(--surface-2); }
+.tree button.active { background: var(--primary-soft, #e0f2f1); color: var(--primary); font-weight: 600; }
+.perm-matrix th, .perm-matrix td { text-align: center; }
+.perm-matrix td:first-child, .perm-matrix th:first-child { text-align: right; }
+.codes { display: flex; gap: 16px; align-items: center; flex-wrap: wrap; }
+.codes img, .codes svg { background: #fff; }
+.verify { max-width: 640px; margin: 40px auto; padding: 0 16px; }
+.bar-chart { display: flex; align-items: flex-end; gap: 8px; height: 160px; padding-top: 8px; }
+.bar-chart .bar { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 4px; min-width: 24px; }
+.bar-chart .bar > div { width: 100%; display: flex; flex-direction: column-reverse; border-radius: 4px 4px 0 0; overflow: hidden; }
+.bar-chart .bar span { font-size: 0.75rem; color: var(--muted); white-space: nowrap; }
+.seg-incoming { background: #0f766e; }
+.seg-outgoing { background: #7c3aed; }
+.seg-internal { background: #94a3b8; }
+.legend { display: flex; gap: 12px; font-size: 0.85rem; }
+.legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-left: 4px; }
+
+/* Printable letter (letterhead with number, date, barcode and QR). */
+.print-only { display: none; }
+@media print {
+  .sidebar, .topbar, .no-print, .page-head .row { display: none !important; }
+  .shell { display: block; }
+  .content { padding: 0; }
+  .card { box-shadow: none; border: 0; }
+  .print-only { display: block; }
+  .letterhead { display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 2px solid #000; padding-bottom: 8px; margin-bottom: 16px; }
+  .letter-body { background: none; border: 0; padding: 0; }
+}
