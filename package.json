@@ -1,20 +1,26 @@
 {
   "name": "kx21",
   "private": true,
-  "description": "سامانه مکانیزه کمیسیون‌های تخصصی اتاق بازرگانی (Web + API + Mobile)",
+  "description": "سامانه کمیسیون‌های تخصصی و اتوماسیون اداری اتاق بازرگانی (Web + API + Mobile)",
   "workspaces": [
     "packages/shared",
     "apps/api",
-    "apps/web"
+    "apps/web",
+    "apps/office-api",
+    "apps/office-web"
   ],
   "scripts": {
-    "build": "npm run build -w @kx/shared && npm run build -w @kx/api && npm run build -w @kx/web",
+    "build": "npm run build -w @kx/shared && npm run build -w @kx/api && npm run build -w @kx/web && npm run build -w @kx/office-api && npm run build -w @kx/office-web",
     "typecheck": "npm run typecheck --workspaces --if-present",
     "test": "npm run test --workspaces --if-present",
     "dev:api": "npm run dev -w @kx/api",
     "dev:web": "npm run dev -w @kx/web",
     "db:migrate": "npm run migrate -w @kx/api",
-    "db:seed": "npm run seed -w @kx/api"
+    "db:seed": "npm run seed -w @kx/api",
+    "dev:office-api": "npm run dev -w @kx/office-api",
+    "dev:office-web": "npm run dev -w @kx/office-web",
+    "office:migrate": "npm run migrate -w @kx/office-api",
+    "office:seed": "npm run seed -w @kx/office-api"
   },
   "engines": {
     "node": ">=22"

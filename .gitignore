@@ -12,3 +12,6 @@ apps/mobile/ios/
 apps/mobile/android/
 .DS_Store
 .test-uploads/
+.test-uploads-e2e/
+.test-storage/
+storage/
