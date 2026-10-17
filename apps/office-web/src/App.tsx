@@ -109,22 +109,35 @@ function Shell({ children }: { children: ReactNode }) {
         </Link>
         <nav className="nav">
           {item('/', 'داشبورد')}
-          {item('/cartable', 'کارتابل', count(cartable.data?.length))}
-          {item('/letters', 'مکاتبات')}
-          {item('/letters/new', 'نامه جدید')}
-          {(can('archive.read') || can('archive.manage')) && item('/archive', 'بایگانی')}
-          {item('/resolutions', 'مصوبات کمیسیون‌ها')}
-          {can('meetings.view') && item('/meetings', 'جلسات کمیسیون‌ها')}
-          {item('/notifications', 'اعلان‌ها', count(unread.data?.total))}
-          {can('reports.view') && item('/reports', 'گزارش‌ها')}
-          {admin && <div className="nav-group" style={{ cursor: 'default' }}>مدیریت</div>}
-          {can('workflow.manage') && item('/workflows', 'گردش‌های کار')}
-          {can('org.manage') && item('/org', 'ساختار سازمانی')}
-          {can('users.manage') && item('/users', 'کاربران')}
-          {can('roles.manage') && item('/roles', 'نقش‌ها و مجوزها')}
-          {can('notifications.manage') && item('/notification-templates', 'قالب‌های اعلان')}
-          {can('integration.manage') && item('/integrations', 'یکپارچه‌سازی')}
-          {can('audit.view') && item('/audit', 'رویدادنگاری')}
+          <NavGroup id="letters" title="مکاتبات" paths={['/cartable', '/letters', '/archive']}>
+            {item('/cartable', 'کارتابل', count(cartable.data?.length))}
+            {item('/letters', 'مکاتبات')}
+            {item('/letters/new', 'نامه جدید')}
+            {(can('archive.read') || can('archive.manage')) && item('/archive', 'بایگانی')}
+          </NavGroup>
+          <NavGroup id="commissions" title="کمیسیون‌ها" paths={['/resolutions', '/meetings']}>
+            {item('/resolutions', 'مصوبات کمیسیون‌ها')}
+            {can('meetings.view') && item('/meetings', 'جلسات کمیسیون‌ها')}
+          </NavGroup>
+          <NavGroup id="reports" title="اعلان و گزارش" paths={['/notifications', '/reports']}>
+            {item('/notifications', 'اعلان‌ها', count(unread.data?.total))}
+            {can('reports.view') && item('/reports', 'گزارش‌ها')}
+          </NavGroup>
+          {admin && (
+            <NavGroup
+              id="admin"
+              title="مدیریت"
+              paths={['/workflows', '/org', '/users', '/roles', '/notification-templates', '/integrations', '/audit']}
+            >
+              {can('workflow.manage') && item('/workflows', 'گردش‌های کار')}
+              {can('org.manage') && item('/org', 'ساختار سازمانی')}
+              {can('users.manage') && item('/users', 'کاربران')}
+              {can('roles.manage') && item('/roles', 'نقش‌ها و مجوزها')}
+              {can('notifications.manage') && item('/notification-templates', 'قالب‌های اعلان')}
+              {can('integration.manage') && item('/integrations', 'یکپارچه‌سازی')}
+              {can('audit.view') && item('/audit', 'رویدادنگاری')}
+            </NavGroup>
+          )}
         </nav>
       </aside>
       <div className="main">
@@ -152,6 +165,50 @@ function Shell({ children }: { children: ReactNode }) {
           </button>
         </header>
         <main className="content">{children}</main>
+      </div>
+    </div>
+  );
+}
+
+const NAV_KEY = 'oa.nav.collapsed';
+const readCollapsed = (): string[] => {
+  try {
+    return JSON.parse(localStorage.getItem(NAV_KEY) ?? '[]');
+  } catch {
+    return [];
+  }
+};
+
+/** Collapsible sidebar group; the group holding the current page always opens. */
+function NavGroup({ id, title, paths, children }: { id: string; title: string; paths: string[]; children: ReactNode }) {
+  const loc = useLocation();
+  const holdsCurrent = paths.some((p) => loc.pathname === p || loc.pathname.startsWith(`${p}/`));
+  const [open, setOpen] = useState(() => holdsCurrent || !readCollapsed().includes(id));
+  useEffect(() => {
+    if (holdsCurrent) setOpen(true);
+  }, [holdsCurrent]);
+  const toggle = () => {
+    const next = !open;
+    setOpen(next);
+    try {
+      const set = new Set(readCollapsed());
+      if (next) set.delete(id);
+      else set.add(id);
+      localStorage.setItem(NAV_KEY, JSON.stringify([...set]));
+    } catch {
+      /* storage unavailable */
+    }
+  };
+  return (
+    <div className={`nav-section ${open ? 'open' : ''}`}>
+      <button type="button" className="nav-group" aria-expanded={open} aria-controls={`nav-${id}`} onClick={toggle}>
+        <span>{title}</span>
+        <svg className="nav-chevron" width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+          <path d="M4 6l4 4 4-4" />
+        </svg>
+      </button>
+      <div id={`nav-${id}`} className="nav-items" hidden={!open}>
+        {children}
       </div>
     </div>
   );
