@@ -2,6 +2,8 @@ import {
   ATTENDANCE_STATUS_LABELS,
   ATTENDANCE_STATUSES,
   MEETING_TYPE_LABELS,
+  MEETING_TYPES,
+  isEditable,
   roleLabel,
   VOTE_OPTION_LABELS,
   formatJalaliLong,
@@ -14,8 +16,8 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { DocKind, UploadFiles, ViewButton } from '../components/docs';
 import { AgendaBadge, AttendanceBadge, MeetingStatusBadge, MinutesBadge, ResolutionBadge } from '../components/status';
-import { Badge, Button, Card, dateFa, dateTimeFa, Empty, ErrorBox, Field, fa, JalaliDateInput, Loading, Modal, PageHeader, Tabs } from '../components/ui';
-import { ApiError, del, download, get, post, upload } from '../lib/api';
+import { Badge, Button, Card, dateFa, dateTimeFa, Empty, ErrorBox, Field, fa, JalaliDateInput, JalaliDateTimeInput, Loading, Modal, PageHeader, Tabs } from '../components/ui';
+import { ApiError, del, download, get, patch, post, upload } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { useApi, useRoles, useSocket } from '../lib/hooks';
 
@@ -26,6 +28,7 @@ export function MeetingRoomPage() {
   const { data: m, error, reload, setData } = useApi(`/meetings/${id}`);
   const [tab, setTab] = useState<Tab>('agenda');
   const [actionError, setActionError] = useState<ApiError | null>(null);
+  const [editing, setEditing] = useState(false);
   const [flash, setFlash] = useState<Set<string>>(new Set());
   const timer = useRef<number | undefined>(undefined);
   const reloadSoon = () => {
@@ -132,6 +135,11 @@ export function MeetingRoomPage() {
                 پایان جلسه
               </Button>
             )}
+            {can('meeting.manage') && isEditable(m.status) && (
+              <Button variant="secondary" onClick={() => setEditing(true)}>
+                ویرایش / جابه‌جایی جلسه
+              </Button>
+            )}
             {can('meeting.manage') && act('cancel') && (
               <Button
                 variant="ghost"
@@ -148,6 +156,7 @@ export function MeetingRoomPage() {
         }
       />
       <ErrorBox error={actionError} />
+      {editing && <EditMeetingModal m={m} onClose={() => setEditing(false)} onSaved={() => { setEditing(false); void reload(); }} />}
       {m.status === 'cancelled' && <div className="alert alert-danger">این جلسه لغو شده است. دلیل: {m.cancel_reason}</div>}
       {m.my.delegateFor && (
         <div className="alert alert-info">
@@ -1220,5 +1229,80 @@ function WebinarCard({ m, onJoined }: { m: any; onJoined: () => Promise<void> })
         </p>
       )}
     </Card>
+  );
+}
+
+// ─────────────────────────────── Edit / reschedule ───────────────────────────────
+
+/** Change title, time, duration, type or place; invitees are notified when time or place change. */
+function EditMeetingModal({ m, onClose, onSaved }: { m: any; onClose: () => void; onSaved: () => void }) {
+  const [form, setForm] = useState({
+    title: m.title as string,
+    scheduledAt: m.scheduled_at as string,
+    durationMinutes: (m.duration_minutes ?? 90) as number,
+    type: m.type as MeetingType,
+    location: (m.location ?? '') as string,
+    onlineLink: (m.online_link ?? '') as string,
+  });
+  const [err, setErr] = useState<Error | null>(null);
+  const [busy, setBusy] = useState(false);
+  const invited = !['draft', 'scheduled'].includes(m.status);
+  const timeChanged = new Date(form.scheduledAt).getTime() !== new Date(m.scheduled_at).getTime() || form.location !== (m.location ?? '') || form.type !== m.type || form.onlineLink !== (m.online_link ?? '');
+  const save = async () => {
+    setBusy(true);
+    setErr(null);
+    try {
+      await patch(`/meetings/${m.id}`, {
+        title: form.title,
+        scheduledAt: form.scheduledAt,
+        durationMinutes: Number(form.durationMinutes),
+        type: form.type,
+        location: form.location || null,
+        onlineLink: form.onlineLink || null,
+      });
+      onSaved();
+    } catch (e) {
+      setErr(e as Error);
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <Modal title="ویرایش / جابه‌جایی جلسه" wide onClose={onClose} footer={<Button busy={busy} disabled={form.title.trim().length < 3 || !form.scheduledAt} onClick={save}>ذخیره تغییرات</Button>}>
+      <ErrorBox error={err} />
+      <Field label="عنوان جلسه">
+        <input className="input" value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} />
+      </Field>
+      <div className="grid grid-2">
+        <Field label="تاریخ و ساعت (شمسی)">
+          <JalaliDateTimeInput value={form.scheduledAt} onChange={(v) => setForm({ ...form, scheduledAt: v })} />
+        </Field>
+        <Field label="مدت (دقیقه)">
+          <input className="input ltr" type="number" min={15} step={15} value={form.durationMinutes} onChange={(e) => setForm({ ...form, durationMinutes: Number(e.target.value) })} />
+        </Field>
+        <Field label="نوع جلسه">
+          <select className="input" value={form.type} onChange={(e) => setForm({ ...form, type: e.target.value as MeetingType })}>
+            {MEETING_TYPES.map((t) => (
+              <option key={t} value={t}>
+                {MEETING_TYPE_LABELS[t]}
+              </option>
+            ))}
+          </select>
+        </Field>
+        {form.type !== 'online' && (
+          <Field label="مکان">
+            <input className="input" value={form.location} onChange={(e) => setForm({ ...form, location: e.target.value })} />
+          </Field>
+        )}
+        {form.type !== 'in_person' && (
+          <Field label="لینک پلتفرم دیگر (اختیاری)">
+            <input className="input ltr" value={form.onlineLink} onChange={(e) => setForm({ ...form, onlineLink: e.target.value })} />
+          </Field>
+        )}
+      </div>
+      {invited && timeChanged && (
+        <div className="alert alert-info small">با ذخیره، به همه مدعوین اعلان «تغییر زمان یا مکان جلسه» ارسال می‌شود (و در صورت فعال بودن، پیامک).</div>
+      )}
+    </Modal>
   );
 }
