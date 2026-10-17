@@ -204,7 +204,7 @@ VIEWS.login = () => {
   const stepRole = () => {
     box.className = 'narrow stack';
     box.replaceChildren(
-      h('div', { class: 'hero' }, h('img', { src: 'icon.svg', alt: '', width: 56, height: 56 }), h('h1', {}, 'کلینیک آنلاین'), h('p', { class: 'muted' }, 'ویزیت آنلاین با پزشک و دستیار هوشمند')),
+      h('div', { class: 'hero' }, h('img', { src: 'icon.svg', alt: '', width: 72, height: 72 }), h('h1', { class: 'wordmark', 'aria-label': 'درمان پلاس' }, h('b', {}, 'درمان'), ' ', h('i', {}, 'پلاس')), h('div', { class: 'wordmark-latin', 'aria-hidden': 'true' }, 'DARMAN PLUS'), h('p', { class: 'tagline' }, 'سلامت، همیشه در دسترس'), h('p', { class: 'muted' }, 'ویزیت آنلاین با پزشک و دستیار هوشمند')),
       h('button', { class: 'entry', onclick: () => { role = 'patient'; stepPhone(); } },
         h('span', { class: 'entry-icon' }, '🧑'), h('span', {}, h('b', {}, 'ثبت‌نام و ورود بیماران'), h('br'), h('small', { class: 'muted' }, 'دریافت نوبت، ویزیت آنلاین، دستیار هوشمند'))),
       h('button', { class: 'entry', onclick: () => { role = 'doctor'; stepPhone(); } },
@@ -373,7 +373,7 @@ VIEWS.assistant = async () => {
   const loadHistory = async () => {
     const r = await api('GET', `/v1/ai/sessions/${sid}/messages?after=${encodeURIComponent(lastTs)}`);
     if (!r.items.length && !lastTs) {
-      if (!log.childElementCount) bubble('assistant', 'سلام! من دستیار هوشمند کلینیک هستم. می‌توانم علائم شما را بررسی کنم، به پرسش‌های عمومی پاسخ بدهم و برایتان نوبت بگیرم. تشخیص و تجویز فقط با پزشک است.');
+      if (!log.childElementCount) bubble('assistant', 'سلام! من دستیار هوشمند درمان پلاس هستم. می‌توانم علائم شما را بررسی کنم، به پرسش‌های عمومی پاسخ بدهم و برایتان نوبت بگیرم. تشخیص و تجویز فقط با پزشک است.');
       setMode('INFO_MODE');
       return;
     }

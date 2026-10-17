@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">
+  <!-- One-colour (white) mark for coloured backgrounds: the ring and the chest-piece centre are cut out. -->
+  <defs>
+    <mask id="dp-hole" maskUnits="userSpaceOnUse" x="0" y="0" width="128" height="128">
+      <rect width="128" height="128" fill="#fff"/>
+      <circle cx="66" cy="58" r="39" fill="#000"/>
+      <circle cx="102" cy="94" r="14" fill="#000"/>
+    </mask>
+    <mask id="dp-piece" maskUnits="userSpaceOnUse" x="0" y="0" width="128" height="128">
+      <rect width="128" height="128" fill="#fff"/>
+      <circle cx="102" cy="94" r="8" fill="#000"/>
+    </mask>
+  </defs>
+  <g mask="url(#dp-hole)" fill="#fff">
+    <circle cx="66" cy="58" r="50"/>
+    <path d="M25 81 L13 115 L55 103 Z" stroke="#fff" stroke-width="4" stroke-linejoin="round"/>
+  </g>
+  <circle cx="102" cy="94" r="11" fill="#fff" mask="url(#dp-piece)"/>
+  <circle cx="102" cy="94" r="3.5" fill="#fff"/>
+  <rect x="54" y="28" width="24" height="60" rx="6" fill="#fff"/>
+  <rect x="36" y="46" width="60" height="24" rx="6" fill="#fff"/>
+  <path d="M40 58 H54 L58 50 L62 67 L67 40 L72 66 L76 58 H92" fill="none" stroke="#1976D2" stroke-width="3.6" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

@@ -38,7 +38,7 @@ import { createSms } from './lib/sms.js';
 const PUBLIC_DIR = fileURLToPath(new URL('../public/', import.meta.url));
 const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8',
   '.svg': 'image/svg+xml', '.json': 'application/json', '.ico': 'image/x-icon', '.png': 'image/png',
-  '.webmanifest': 'application/manifest+json' };
+  '.webmanifest': 'application/manifest+json', '.woff2': 'font/woff2' };
 
 export function loadConfig(env = process.env) {
   const devMode = env.NODE_ENV !== 'production';
@@ -173,7 +173,7 @@ export function createApp(overrides = {}) {
     'X-Content-Type-Options': 'nosniff',
     'X-Frame-Options': 'DENY',
     'Referrer-Policy': 'no-referrer',
-    'Content-Security-Policy': "default-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src 'self'; img-src 'self' data:",
+    'Content-Security-Policy': "default-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; connect-src 'self'; img-src 'self' data:",
   };
 
   const server = http.createServer(async (req, res) => {

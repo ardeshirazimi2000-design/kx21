@@ -1,6 +1,6 @@
 {
   "appId": "ir.kx21.clinic",
-  "appName": "کلینیک آنلاین",
+  "appName": "درمان پلاس",
   "webDir": "www",
   "android": {
     "allowMixedContent": true,

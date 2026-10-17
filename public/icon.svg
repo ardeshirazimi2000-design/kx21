@@ -1,1 +1,20 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><rect width="64" height="64" rx="16" fill="#0f766e"/><path d="M27 14h10v13h13v10H37v13H27V37H14V27h13z" fill="#fff"/></svg>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">
+  <!-- Darman Plus mark: a chat bubble (online consultation) holding a medical cross with a heartbeat,
+       and a stethoscope chest-piece on the ring. Colour version for light backgrounds. -->
+  <defs>
+    <linearGradient id="dp-ring" x1="0" y1="0" x2="128" y2="128" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#1976D2"/><stop offset="1" stop-color="#0B3D91"/>
+    </linearGradient>
+    <linearGradient id="dp-cross" x1="0" y1="28" x2="0" y2="88" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#00C9A0"/><stop offset="1" stop-color="#00A07F"/>
+    </linearGradient>
+  </defs>
+  <circle cx="66" cy="58" r="50" fill="url(#dp-ring)"/>
+  <path d="M25 81 L13 115 L55 103 Z" fill="url(#dp-ring)" stroke="url(#dp-ring)" stroke-width="4" stroke-linejoin="round"/>
+  <circle cx="66" cy="58" r="39" fill="#fff"/>
+  <rect x="54" y="28" width="24" height="60" rx="6" fill="url(#dp-cross)"/>
+  <rect x="36" y="46" width="60" height="24" rx="6" fill="url(#dp-cross)"/>
+  <path d="M40 58 H54 L58 50 L62 67 L67 40 L72 66 L76 58 H92" fill="none" stroke="#fff" stroke-width="3.6" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="102" cy="94" r="11" fill="#fff" stroke="url(#dp-ring)" stroke-width="6"/>
+  <circle cx="102" cy="94" r="4" fill="#1976D2"/>
+</svg>

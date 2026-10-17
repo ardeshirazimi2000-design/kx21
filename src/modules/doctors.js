@@ -151,7 +151,7 @@ export function register(router, { db, platform, domain }) {
     platform.notify(ctx, {
       userId: u.id, channel: 'sms', target: u.phone,
       body: approve
-        ? 'مدارک شما تأیید شد و پروفایل‌تان در فهرست پزشکان کلینیک آنلاین قرار گرفت. اکنون می‌توانید تقویم خود را منتشر کنید.'
+        ? 'مدارک شما تأیید شد و پروفایل‌تان در فهرست پزشکان درمان پلاس قرار گرفت. اکنون می‌توانید تقویم خود را منتشر کنید.'
         : `مدارک شما تأیید نشد. دلیل: ${reason}. لطفاً از بخش «پروفایل و مدارک» اصلاح و دوباره ارسال کنید.`,
     });
     return { body: fullView(db.get('SELECT * FROM doctors WHERE id = ?', d.id)) };

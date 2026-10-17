@@ -116,7 +116,7 @@ curl -fsSL .../deploy/install.sh | DOMAIN=clinic.example.ir EMAIL=you@example.ir
 
 ### ۱. اپ اندروید (APK)
 
-پروژهٔ اندروید در `mobile/` با Capacitor ساخته شده است. نام اپ «کلینیک آنلاین» و شناسه‌اش `ir.kx21.clinic` است.
+پروژهٔ اندروید در `mobile/` با Capacitor ساخته شده است. نام اپ «درمان پلاس» و شناسه‌اش `ir.kx21.clinic` است.
 
 ```bash
 cd mobile

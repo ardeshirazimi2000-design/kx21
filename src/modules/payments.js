@@ -262,10 +262,10 @@ const RESULT_PAGE = (ok, title, detail) => `<!doctype html><html lang="fa" dir="
 <meta name="viewport" content="width=device-width, initial-scale=1"><title>${title}</title>
 <style>body{font-family:Vazirmatn,Tahoma,sans-serif;background:#f5f7f8;color:#17212b;display:flex;min-height:100vh;align-items:center;justify-content:center;margin:0;padding:16px}
 .c{background:#fff;border-radius:16px;padding:28px;max-width:420px;text-align:center;box-shadow:0 2px 8px rgb(0 0 0/8%)}
-.i{font-size:56px}.b{display:inline-block;margin-top:16px;padding:10px 18px;border-radius:10px;background:#0f766e;color:#fff;text-decoration:none}
+.i{font-size:56px}.b{display:inline-block;margin-top:16px;padding:10px 18px;border-radius:10px;background:#1976D2;color:#fff;text-decoration:none}
 button.b{border:0;font:inherit;cursor:pointer}.n{background:#b42318}</style></head><body><div class="c">
 <div class="i">${ok ? '✅' : '❌'}</div><h2>${title}</h2><p>${detail}</p>
-<p style="color:#5d6b78;font-size:14px">اگر از اپ وارد شده‌اید، به اپ «کلینیک آنلاین» برگردید؛ وضعیت خودکار به‌روز می‌شود.</p>
+<p style="color:#5d6b78;font-size:14px">اگر از اپ وارد شده‌اید، به اپ «درمان پلاس» برگردید؛ وضعیت خودکار به‌روز می‌شود.</p>
 <a class="b" href="/#appointments">بازگشت به کلینیک</a></div></body></html>`;
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 

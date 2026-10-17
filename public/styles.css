@@ -1,13 +1,16 @@
 :root {
-  --bg: #f5f7f8;
+  /* Darman Plus palette: navy #0B3D91, blue #1976D2, green #00B894, background #F4F7FA */
+  --bg: #f4f7fa;
   --surface: #ffffff;
-  --surface-2: #eef2f3;
-  --text: #17212b;
+  --surface-2: #edf2f8;
+  --text: #14213d;
   --muted: #5d6b78;
-  --border: #dbe2e6;
-  --primary: #0f766e;
+  --border: #d9e2ec;
+  --primary: #1976d2;
   --primary-ink: #ffffff;
-  --primary-soft: #d9f0ed;
+  --primary-soft: #e3effc;
+  --brand-navy: #0b3d91;
+  --brand-green: #00a884;
   --danger: #b42318;
   --danger-soft: #fde8e6;
   --warn: #9a6700;
@@ -16,7 +19,7 @@
   --ok-soft: #dcf5e3;
   --info: #1f5fa8;
   --info-soft: #e1edfb;
-  --bubble-me: #0f766e;
+  --bubble-me: #1976d2;
   --bubble-me-ink: #ffffff;
   --bubble-bot: #ffffff;
   --radius: 14px;
@@ -26,10 +29,11 @@
 @media (prefers-color-scheme: dark) {
   :root {
     --bg: #0f1418; --surface: #171e24; --surface-2: #1f2830; --text: #e6edf2; --muted: #9aa8b4;
-    --border: #2b3640; --primary: #2bb3a5; --primary-ink: #04201d; --primary-soft: #133a37;
+    --border: #2b3640; --primary: #5aa9f5; --primary-ink: #04172e; --primary-soft: #13294a;
+    --brand-navy: #8fbff5; --brand-green: #2fd3ab;
     --danger: #ff7b72; --danger-soft: #3d1a17; --warn: #e3b341; --warn-soft: #3a2e10;
     --ok: #56d364; --ok-soft: #12321b; --info: #79b8ff; --info-soft: #132a45;
-    --bubble-me: #1f6f68; --bubble-me-ink: #f0fffd; --bubble-bot: #1f2830;
+    --bubble-me: #1c4f8f; --bubble-me-ink: #f0f6ff; --bubble-bot: #1f2830;
     --shadow: none; color-scheme: dark;
   }
 }
@@ -275,7 +279,12 @@ td.ltr { direction: ltr; text-align: left; font-family: ui-monospace, monospace;
 
 /* ---------------- start screen ---------------- */
 .hero { text-align: center; margin: 10px 0 18px; }
-.hero h1 { margin: 8px 0 2px; font-size: 24px; }
+.hero h1 { margin: 8px 0 2px; font-size: 30px; line-height: 1.4; }
+.wordmark { font-weight: 900; letter-spacing: 0; }
+.wordmark b { color: var(--brand-navy); font-weight: 900; }
+.wordmark i { color: var(--brand-green); font-style: normal; font-weight: 900; }
+.wordmark-latin { font-size: 11px; font-weight: 700; letter-spacing: .32em; color: var(--brand-navy); direction: ltr; }
+.hero .tagline { margin: 6px 0 0; font-weight: 500; color: var(--brand-navy); }
 .entry {
   display: flex; align-items: center; gap: 14px; width: 100%; text-align: start; padding: 18px 16px;
   border-radius: var(--radius); border: 1px solid var(--border); background: var(--surface); box-shadow: var(--shadow);
