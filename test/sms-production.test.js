@@ -92,10 +92,11 @@ test('repeated code requests: one SMS per minute, concurrent taps rejected, fail
     const sent = [];
     let fail = false;
     let slow = null;
+    let entered = null; // resolves when a send has reached the (slow) gateway
     Object.assign(t.app.domain.sms, {
       enabled: true,
       sendOtp: async (mobile, code) => {
-        if (slow) await slow;
+        if (slow) { entered?.(); await slow; }
         if (fail) throw new Error('gateway down');
         sent.push(code);
         return { id: '1' };
@@ -111,8 +112,9 @@ test('repeated code requests: one SMS per minute, concurrent taps rejected, fail
     // Two taps while the gateway is still answering: the second is refused, one SMS goes out.
     let release;
     slow = new Promise((r) => { release = r; });
+    const reached = new Promise((r) => { entered = r; });
     const first = ask();
-    await new Promise((r) => setTimeout(r, 30));
+    await reached;
     const second = await ask();
     assert.equal(second.body.code, 'otp_in_progress');
     release();
