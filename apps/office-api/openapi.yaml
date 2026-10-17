@@ -122,6 +122,17 @@ components:
         workflow:
           type: string
           description: workflow definition key to start
+        bodyFormat:
+          type: string
+          enum:
+          - text
+          - html
+          description: 'html: body from the letter editor, sanitised server-side'
+        templateId: *id003
+        signatoryId:
+          type: string
+          format: uuid
+          description: designated signatory (needs letter.sign); only they can sign
     WorkflowStep:
       type: object
       properties:
@@ -1469,7 +1480,7 @@ paths:
       - name: sigId
         in: path
         required: true
-        schema: *id001
+        schema: *id003
   /api/signatures:
     get:
       tags:
@@ -1597,6 +1608,323 @@ paths:
         in: path
         required: true
         schema: *id003
+  /api/letter-templates:
+    get:
+      tags:
+      - Correspondence
+      summary: قالب‌ها و سربرگ‌های نامه (?all=1 غیرفعال‌ها هم [templates.manage])
+      responses:
+        '200':
+          description: OK
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Forbidden
+        '404':
+          description: Not found or not visible
+        '409':
+          description: Conflict (state / business rule)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    post:
+      tags:
+      - Correspondence
+      summary: قالب جدید [templates.manage]
+      responses:
+        '200':
+          description: OK
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Forbidden
+        '404':
+          description: Not found or not visible
+        '409':
+          description: Conflict (state / business rule)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      description: bodyHtml is sanitised to the letter editor's HTML subset.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name: *id001
+                description: *id001
+                kinds:
+                  type: array
+                  items:
+                    type: string
+                    enum:
+                    - outgoing
+                    - internal
+                unitId: *id003
+                pageSize:
+                  type: string
+                  enum:
+                  - A4
+                  - A5
+                headerText: *id001
+                orgName: *id001
+                orgSubtitle: *id001
+                footerText: *id001
+                showLogo: *id005
+                marginTop: *id002
+                marginBottom: *id002
+                marginSide: *id002
+                fontSize:
+                  type: number
+                showQr: *id005
+                bodyHtml: *id001
+                isDefault: *id005
+                isActive: *id005
+  /api/letter-templates/{id}:
+    get:
+      tags:
+      - Correspondence
+      summary: قالب نامه
+      responses:
+        '200':
+          description: OK
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Forbidden
+        '404':
+          description: Not found or not visible
+        '409':
+          description: Conflict (state / business rule)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: *id003
+    patch:
+      tags:
+      - Correspondence
+      summary: ویرایش قالب [templates.manage]
+      responses:
+        '200':
+          description: OK
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Forbidden
+        '404':
+          description: Not found or not visible
+        '409':
+          description: Conflict (state / business rule)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      description: Same fields as POST; omitted fields keep their value, null clears optional text.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name: *id001
+                isDefault: *id005
+                isActive: *id005
+                bodyHtml: *id001
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: *id003
+    delete:
+      tags:
+      - Correspondence
+      summary: حذف قالب (قالب استفاده‌شده فقط غیرفعال می‌شود) [templates.manage]
+      responses:
+        '200':
+          description: OK
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Forbidden
+        '404':
+          description: Not found or not visible
+        '409':
+          description: Conflict (state / business rule)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      description: 'Returns { outcome: deleted | deactivated }.'
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: *id003
+  /api/letter-templates/{id}/{image}:
+    post:
+      tags:
+      - Correspondence
+      summary: بارگذاری لوگو (image=logo، حداکثر ۲ مگابایت) یا تصویر کامل سربرگ (image=background، حداکثر ۵ مگابایت) [templates.manage]
+      responses:
+        '200':
+          description: OK
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Forbidden
+        '404':
+          description: Not found or not visible
+        '409':
+          description: Conflict (state / business rule)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                file:
+                  type: string
+                  format: binary
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: *id003
+      - name: image
+        in: path
+        required: true
+        schema:
+          type: string
+          enum:
+          - logo
+          - background
+    get:
+      tags:
+      - Correspondence
+      summary: تصویر لوگو یا سربرگ قالب
+      responses:
+        '200':
+          description: OK
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Forbidden
+        '404':
+          description: Not found or not visible
+        '409':
+          description: Conflict (state / business rule)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: *id003
+      - name: image
+        in: path
+        required: true
+        schema:
+          type: string
+          enum:
+          - logo
+          - background
+    delete:
+      tags:
+      - Correspondence
+      summary: حذف لوگو یا تصویر سربرگ [templates.manage]
+      responses:
+        '200':
+          description: OK
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Forbidden
+        '404':
+          description: Not found or not visible
+        '409':
+          description: Conflict (state / business rule)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: *id003
+      - name: image
+        in: path
+        required: true
+        schema:
+          type: string
+          enum:
+          - logo
+          - background
   /api/letters/{id}/send:
     post:
       tags:

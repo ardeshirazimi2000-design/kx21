@@ -10,6 +10,8 @@ import { DashboardPage } from './pages/Dashboard';
 import { IntegrationsPage } from './pages/Integrations';
 import { LetterDetailPage } from './pages/LetterDetail';
 import { LetterFormPage } from './pages/LetterForm';
+import { LetterPrintPage } from './pages/LetterPrint';
+import { LetterTemplatesPage } from './pages/LetterTemplates';
 import { LettersPage } from './pages/Letters';
 import { LoginPage } from './pages/Login';
 import { MeetingDetailPage, MeetingsPage } from './pages/Meetings';
@@ -44,6 +46,14 @@ export function App() {
       </Shell>
     );
   }
+  // The printable letter stands alone, without the app shell.
+  if (/^\/letters\/[^/]+\/print$/.test(loc.pathname)) {
+    return (
+      <Routes>
+        <Route path="/letters/:id/print" element={<LetterPrintPage />} />
+      </Routes>
+    );
+  }
   return (
     <Shell>
       <Routes>
@@ -55,6 +65,7 @@ export function App() {
         <Route path="/letters/:id/edit" element={<LetterFormPage />} />
         <Route path="/archive" element={<ArchivePage />} />
         <Route path="/signatures" element={<SignaturesPage />} />
+        <Route path="/letter-templates" element={<LetterTemplatesPage />} />
         <Route path="/workflows" element={<WorkflowsPage />} />
         <Route path="/meetings" element={<MeetingsPage />} />
         <Route path="/meetings/:id" element={<MeetingDetailPage />} />
@@ -111,12 +122,13 @@ function Shell({ children }: { children: ReactNode }) {
         </Link>
         <nav className="nav">
           {item('/', 'داشبورد')}
-          <NavGroup id="letters" title="مکاتبات" paths={['/cartable', '/letters', '/archive', '/signatures']}>
+          <NavGroup id="letters" title="مکاتبات" paths={['/cartable', '/letters', '/archive', '/signatures', '/letter-templates']}>
             {item('/cartable', 'کارتابل', count(cartable.data?.length))}
             {item('/letters', 'مکاتبات')}
             {item('/letters/new', 'نامه جدید')}
             {(can('archive.read') || can('archive.manage')) && item('/archive', 'بایگانی')}
             {can('signatures.manage') && item('/signatures', 'نمونه امضاها')}
+            {can('templates.manage') && item('/letter-templates', 'قالب‌های نامه')}
           </NavGroup>
           <NavGroup id="commissions" title="کمیسیون‌ها" paths={['/resolutions', '/meetings']}>
             {item('/resolutions', 'مصوبات کمیسیون‌ها')}

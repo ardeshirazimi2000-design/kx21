@@ -5,6 +5,7 @@ import {
   STEP_STATUS, STEP_TYPE, WF_STATUS,
 } from '../components/labels';
 import { PositionSelect, UserSelect } from '../components/pickers';
+import { LetterBody } from '../components/letterPaper';
 import { AuthImage } from '../components/signature';
 import { Badge, Button, Card, Empty, ErrorBox, Field, JalaliDateTimeInput, Loading, Modal, PageHeader, dateFa, dateTimeFa, fa } from '../components/ui';
 import { download, fetchText, openFile, patch, post, upload } from '../lib/api';
@@ -62,6 +63,7 @@ export function LetterDetailPage() {
             <ConfBadge level={l.confidentiality} />
             {l.source !== 'manual' && <Badge tone="info">{SOURCE[l.source]}</Badge>}
             <span>کد رهگیری: <span className="mono">{l.tracking_code}</span></span>
+            {l.lockReason && l.status !== 'cancelled' && <Badge>🔒 {l.lockReason}</Badge>}
           </span>
         }
         actions={
@@ -70,12 +72,16 @@ export function LetterDetailPage() {
             {l.my.canRegister && <Button busy={act.busy} onClick={() => doAct(() => post(`/letters/${l.id}/register`))}>ثبت و شماره‌گذاری</Button>}
             {l.status !== 'draft' && l.status !== 'cancelled' && <Button variant="secondary" onClick={() => setModal('refer')}>ارجاع</Button>}
             {l.my.canStartWorkflow && <Button variant="secondary" onClick={() => setModal('workflow')}>شروع گردش کار</Button>}
-            {l.my.canSign && <Button variant="success" busy={act.busy} onClick={() => confirm('نامه با امضای دیجیتال شما امضا شود؟') && doAct(() => post(`/letters/${l.id}/sign`))}>امضا</Button>}
+            {l.my.canSign && <Button variant="success" busy={act.busy} onClick={() => confirm('نامه با امضای دیجیتال شما امضا شود؟ تصویر نمونه امضای شما زیر نامه قرار می‌گیرد و پس از آن متن نامه قابل ویرایش نیست.') && doAct(() => post(`/letters/${l.id}/sign`))}>امضا</Button>}
             {l.my.canSend && <Button onClick={() => setModal('send')}>ارسال</Button>}
             {l.my.canReferToMeeting && <Button variant="secondary" onClick={() => setModal('meeting')}>ارجاع به کمیسیون</Button>}
             {l.my.canArchive && <Button variant="secondary" onClick={() => setModal('archive')}>بایگانی</Button>}
             {l.kind === 'incoming' && l.number && <Link className="btn btn-ghost" to={`/letters/new?replyTo=${l.id}`}>پاسخ</Link>}
-            {l.number && <Button variant="ghost" onClick={() => window.print()}>چاپ</Button>}
+            {l.kind !== 'incoming' ? (
+              <Link className="btn btn-ghost" to={`/letters/${l.id}/print`}>چاپ و PDF</Link>
+            ) : (
+              l.number && <Button variant="ghost" onClick={() => window.print()}>چاپ</Button>
+            )}
             {l.my.canCancel && <Button variant="danger" onClick={() => setModal('cancel')}>ابطال</Button>}
           </>
         }
@@ -110,6 +116,15 @@ export function LetterDetailPage() {
             <dd>{l.registered_at ? `${dateTimeFa(l.registered_at)} — ${l.registered_by_name ?? ''}` : '—'}</dd>
             <dt>ایجادکننده</dt>
             <dd>{l.created_by_name ?? 'سامانه'}</dd>
+            {l.signatory_name && (
+              <>
+                <dt>امضاکننده</dt>
+                <dd>
+                  {l.signatory_name}
+                  {l.signatory_position ? ` (${l.signatory_position})` : ''}
+                </dd>
+              </>
+            )}
             <dt>واحد صاحب نامه</dt>
             <dd>{l.owner_unit ?? '—'}</dd>
             {l.kind !== 'internal' && (
@@ -196,7 +211,7 @@ export function LetterDetailPage() {
 
       <Card title="متن نامه" className="mt">
         {l.summary && <p className="muted">خلاصه: {l.summary}</p>}
-        <div className="letter-body">{l.body || '—'}</div>
+        <div className="letter-body">{l.body ? <LetterBody body={l.body} format={l.body_format} /> : '—'}</div>
         {l.signatures.length > 0 && (
           <div className="letter-signatures">
             {l.signatures.map((s: any) => (

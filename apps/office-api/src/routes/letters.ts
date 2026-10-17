@@ -8,10 +8,11 @@ import { config } from '../config.js';
 import { badRequest, conflict, forbidden, notFound } from '../lib/errors.js';
 import { scanFile, sendFile, upload, uploadedName, validateFile } from '../lib/files.js';
 import { getFile, putFile } from '../lib/storage.js';
+import { sanitizeLetterHtml } from '../lib/html.js';
 import { body, dateStr, listParam, paged, pageParams, param, parse, uuid } from '../lib/validate.js';
 import { letterVisibleSql, loadVisibleLetter } from '../services/access.js';
 import { archiveLetter } from '../services/archive.js';
-import { letterContentHash, newTrackingCode, nextLetterNumber, primaryUnitOf } from '../services/letters.js';
+import { LETTER_HASH_VERSION, letterContentHash, letterHashes, newTrackingCode, nextLetterNumber, primaryUnitOf } from '../services/letters.js';
 import { notify, positionHolders } from '../services/notifications.js';
 import { signaturesOf, signContent, verifySignature } from '../services/signatures.js';
 import { actOnStep, canActOnStep, cancelWorkflow, startWorkflow } from '../services/workflow.js';
@@ -39,6 +40,9 @@ const letterSchema = z.object({
   replyToId: uuid.nullish(),
   dueDate: dateStr.nullish(),
   recipients: z.array(recipientSchema).max(100).optional(),
+  templateId: uuid.nullish(),
+  bodyFormat: z.enum(['text', 'html']).optional(),
+  signatoryId: uuid.nullish(),
 });
 
 const REGISTER_PERM = { incoming: 'letter.register_incoming', outgoing: 'letter.register_outgoing', internal: 'letter.create' } as const;
@@ -47,6 +51,38 @@ function requireCreate(u: AuthUser, kind: string, unitId: string | null) {
   // Anyone with letter.create drafts; incoming letters are recorded by the secretariat.
   if (kind === 'incoming') requirePerm(u, 'letter.register_incoming', unitId);
   else requirePerm(u, 'letter.create');
+}
+
+/** Letterhead and signatory checks; incoming letters (scans of someone else's paper) take neither. */
+async function checkTemplateAndSignatory(c: Db, kind: string, templateId: string | null | undefined, signatoryId: string | null | undefined) {
+  if (kind === 'incoming' && (templateId || signatoryId)) throw badRequest('نامه وارده قالب و امضاکننده ندارد');
+  if (templateId && !(await one(`SELECT 1 FROM letter_templates WHERE id = $1 AND is_active AND $2 = ANY(kinds)`, [templateId, kind], c))) {
+    throw badRequest('قالب انتخاب‌شده برای این نوع نامه فعال نیست');
+  }
+  if (
+    signatoryId &&
+    !(await one(
+      `SELECT 1 FROM users u WHERE u.id = $1 AND u.is_active AND EXISTS (
+         SELECT 1 FROM user_roles ur JOIN role_permissions rp ON rp.role_id = ur.role_id WHERE ur.user_id = u.id AND rp.permission_key = 'letter.sign')`,
+      [signatoryId],
+      c,
+    ))
+  ) {
+    throw badRequest('امضاکننده انتخاب‌شده مجوز امضای نامه ندارد');
+  }
+}
+
+const cleanBody = (text: string | null | undefined, format: string) => (text && format === 'html' ? sanitizeLetterHtml(text) || null : text);
+
+/**
+ * Why a letter's content can no longer change, or null. A signature freezes everything; a numbered outgoing or
+ * internal letter is final too (the secretariat may still correct the metadata of a registered incoming letter).
+ */
+async function lockReason(c: Db, l: any): Promise<string | null> {
+  if (!['draft', 'registered'].includes(l.status)) return 'نامه در این وضعیت قابل ویرایش نیست';
+  if (await one(`SELECT 1 FROM signatures WHERE entity_type = 'letter' AND entity_id = $1`, [l.id], c)) return 'نامه امضاشده قابل ویرایش نیست';
+  if (l.number && l.kind !== 'incoming') return 'نامه شماره‌شده قابل ویرایش نیست';
+  return null;
 }
 
 async function setRecipients(c: Db, letterId: string, recipients: z.infer<typeof recipientSchema>[] | undefined) {
@@ -101,14 +137,16 @@ lettersRouter.post('/letters', async (req, res) => {
   if (b.kind !== 'internal' && !b.externalParty && !b.externalOrg) throw badRequest(b.kind === 'incoming' ? 'فرستنده نامه وارده را وارد کنید' : 'گیرنده نامه صادره را وارد کنید');
   const row = await tx(async (c) => {
     if (b.replyToId) await loadVisibleLetter(u, b.replyToId, c);
+    await checkTemplateAndSignatory(c, b.kind, b.templateId, b.signatoryId);
+    const format = b.bodyFormat ?? 'text';
     let l = await one(
       `INSERT INTO letters (kind, tracking_code, subject, body, summary, external_party, external_org, external_number, external_date, source,
-          delivery_method, priority, confidentiality, owner_unit_id, reply_to_id, due_date, created_by)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17) RETURNING *`,
+          delivery_method, priority, confidentiality, owner_unit_id, reply_to_id, due_date, created_by, template_id, body_format, signatory_id)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20) RETURNING *`,
       [
-        b.kind, await newTrackingCode(c), b.subject, b.body ?? null, b.summary ?? null, b.externalParty ?? null, b.externalOrg ?? null,
+        b.kind, await newTrackingCode(c), b.subject, cleanBody(b.body, format) ?? null, b.summary ?? null, b.externalParty ?? null, b.externalOrg ?? null,
         b.externalNumber ?? null, b.externalDate ?? null, b.source, b.deliveryMethod ?? null, b.priority, b.confidentiality, ownerUnit,
-        b.replyToId ?? null, b.dueDate ?? null, u.id,
+        b.replyToId ?? null, b.dueDate ?? null, u.id, b.templateId ?? null, format, b.signatoryId ?? null,
       ],
       c,
     );
@@ -191,9 +229,12 @@ lettersRouter.get('/letters/:id', async (req, res) => {
   const [extra, recipients, attachments, routing, instances, steps, refs, resolution, document] = await Promise.all([
     one(
       `SELECT ou.name AS owner_unit, cu.full_name AS created_by_name, ru.full_name AS registered_by_name, su.full_name AS signer_name,
-              rt.number AS reply_to_number, rt.subject AS reply_to_subject
+              rt.number AS reply_to_number, rt.subject AS reply_to_subject, sg.full_name AS signatory_name,
+              (SELECT p.title FROM user_positions up JOIN positions p ON p.id = up.position_id
+                WHERE up.user_id = l.signatory_id AND (up.end_date IS NULL OR up.end_date >= current_date) ORDER BY up.is_primary DESC LIMIT 1) AS signatory_position
          FROM letters l LEFT JOIN org_units ou ON ou.id = l.owner_unit_id LEFT JOIN users cu ON cu.id = l.created_by
          LEFT JOIN users ru ON ru.id = l.registered_by LEFT JOIN users su ON su.id = l.signer_id LEFT JOIN letters rt ON rt.id = l.reply_to_id
+         LEFT JOIN users sg ON sg.id = l.signatory_id
         WHERE l.id = $1`,
       [l.id],
     ),
@@ -231,8 +272,9 @@ lettersRouter.get('/letters/:id', async (req, res) => {
     one('SELECT external_id, number, commission_name, status, progress, due_date FROM resolutions_cache WHERE letter_id = $1', [l.id]),
     one('SELECT id, folder_id, title FROM documents WHERE letter_id = $1', [l.id]),
   ]);
-  const hash = await letterContentHash(pool, l.id);
-  const signatures = await signaturesOf('letter', l.id, hash, pool);
+  const hashes = await letterHashes(pool, l.id);
+  const signatures = await signaturesOf('letter', l.id, hashes, pool);
+  const locked = await lockReason(pool, l);
   const myPositions = u.positions.map((p) => p.positionId);
   const myRoutes = routing.filter((r) => ['pending', 'seen'].includes(r.status) && (r.to_user_id === u.id || myPositions.includes(r.to_position_id)));
   const mySteps = [];
@@ -248,13 +290,18 @@ lettersRouter.get('/letters/:id', async (req, res) => {
     resolution,
     document,
     signatures,
-    contentHash: hash,
+    contentHash: hashes[LETTER_HASH_VERSION],
+    lockReason: locked,
     my: {
       routes: myRoutes.map((r) => r.id),
       steps: mySteps,
       canRegister: !l.number && l.status !== 'cancelled' && u.can(REGISTER_PERM[l.kind as keyof typeof REGISTER_PERM], l.owner_unit_id),
-      canEdit: ['draft', 'registered'].includes(l.status) && !signatures.length && (l.created_by === u.id || u.can('letter.register_incoming', l.owner_unit_id)),
-      canSign: !!l.number && !['cancelled', 'archived'].includes(l.status) && u.can('letter.sign', l.owner_unit_id),
+      canEdit: !locked && (l.created_by === u.id || u.can('letter.register_incoming', l.owner_unit_id)),
+      canSign:
+        !['cancelled', 'archived', 'sent'].includes(l.status) &&
+        u.can('letter.sign', l.owner_unit_id) &&
+        (!l.signatory_id || l.signatory_id === u.id) &&
+        !signatures.some((s) => s.user_id === u.id),
       canSend: l.kind === 'outgoing' && !!l.number && !['sent', 'cancelled', 'archived'].includes(l.status) && u.can('letter.send', l.owner_unit_id),
       canArchive: !!l.number && !['archived', 'cancelled'].includes(l.status) && u.can('archive.manage'),
       canCancel: !['cancelled', 'archived', 'sent'].includes(l.status) && (u.can('letter.cancel', l.owner_unit_id) || (l.status === 'draft' && l.created_by === u.id)),
@@ -269,17 +316,23 @@ lettersRouter.patch('/letters/:id', async (req, res) => {
   const b = body(req, letterSchema.omit({ kind: true }).partial());
   const row = await tx(async (c) => {
     const l = await loadVisibleLetter(u, param(req, 'id'), c, true);
-    if (!['draft', 'registered'].includes(l.status)) throw conflict('نامه در این وضعیت قابل ویرایش نیست');
+    const locked = await lockReason(c, l);
+    if (locked) throw conflict(locked);
     if (l.created_by !== u.id && !u.can('letter.register_incoming', l.owner_unit_id)) throw forbidden();
-    if ((await query(`SELECT 1 FROM signatures WHERE entity_type = 'letter' AND entity_id = $1`, [l.id], c)).length) throw conflict('نامه امضاشده قابل ویرایش نیست');
     if (b.confidentiality !== undefined && b.confidentiality > u.clearance) throw forbidden('سطح محرمانگی بالاتر از مجوز شماست');
+    await checkTemplateAndSignatory(c, l.kind, b.templateId, b.signatoryId);
+    const format = b.bodyFormat ?? l.body_format;
     const r = await one(
       `UPDATE letters SET subject = COALESCE($2, subject), body = COALESCE($3, body), summary = COALESCE($4, summary),
          external_party = COALESCE($5, external_party), external_org = COALESCE($6, external_org), external_number = COALESCE($7, external_number),
          external_date = COALESCE($8, external_date), delivery_method = COALESCE($9, delivery_method), priority = COALESCE($10, priority),
          confidentiality = COALESCE($11, confidentiality), owner_unit_id = COALESCE($12, owner_unit_id), due_date = COALESCE($13, due_date),
-         updated_at = now() WHERE id = $1 RETURNING *`,
-      [l.id, b.subject, b.body, b.summary, b.externalParty, b.externalOrg, b.externalNumber, b.externalDate, b.deliveryMethod, b.priority, b.confidentiality, b.ownerUnitId, b.dueDate],
+         body_format = $14, template_id = CASE WHEN $15::boolean THEN $16 ELSE template_id END,
+         signatory_id = CASE WHEN $17::boolean THEN $18 ELSE signatory_id END, updated_at = now() WHERE id = $1 RETURNING *`,
+      [
+        l.id, b.subject, cleanBody(b.body, format), b.summary, b.externalParty, b.externalOrg, b.externalNumber, b.externalDate, b.deliveryMethod, b.priority,
+        b.confidentiality, b.ownerUnitId, b.dueDate, format, b.templateId !== undefined, b.templateId ?? null, b.signatoryId !== undefined, b.signatoryId ?? null,
+      ],
       c,
     );
     await setRecipients(c, l.id, b.recipients);
@@ -306,6 +359,7 @@ lettersRouter.post('/letters/:id/attachments', upload.single('file'), async (req
   if ((await scanFile(req.file.buffer)) !== 'clean') throw badRequest('فایل آلوده تشخیص داده شد');
   const l = await loadVisibleLetter(u, param(req, 'id'));
   if (['cancelled', 'archived', 'sent'].includes(l.status)) throw conflict('به نامه در این وضعیت پیوست اضافه نمی‌شود');
+  if (await one(`SELECT 1 FROM signatures WHERE entity_type = 'letter' AND entity_id = $1`, [l.id])) throw conflict('به نامه امضاشده پیوست اضافه نمی‌شود');
   const stored = await putFile('letters', req.file.buffer);
   const row = await tx(async (c) => {
     let groupId = meta.groupId ?? null;
@@ -498,11 +552,12 @@ lettersRouter.post('/letters/:id/sign', async (req, res) => {
   const row = await tx(async (c) => {
     const l = await loadVisibleLetter(u, param(req, 'id'), c, true);
     requirePerm(u, 'letter.sign', l.owner_unit_id);
-    if (!l.number) throw conflict('نامه پیش از امضا باید شماره شود');
-    if (['cancelled', 'archived'].includes(l.status)) throw conflict('نامه در این وضعیت امضا نمی‌شود');
+    if (['cancelled', 'archived', 'sent'].includes(l.status)) throw conflict('نامه در این وضعیت امضا نمی‌شود');
+    if (l.signatory_id && l.signatory_id !== u.id) throw forbidden('امضای این نامه با امضاکننده تعیین‌شده است');
+    if (!l.body && l.kind !== 'incoming' && !(await one('SELECT 1 FROM letter_attachments WHERE letter_id = $1', [l.id], c))) throw conflict('نامه بدون متن امضا نمی‌شود');
     if (await one(`SELECT 1 FROM signatures WHERE entity_type = 'letter' AND entity_id = $1 AND user_id = $2`, [l.id, u.id], c)) throw conflict('شما این نامه را قبلاً امضا کرده‌اید');
-    const sig = await signContent(c, { userId: u.id, entityType: 'letter', entityId: l.id, contentHash: await letterContentHash(c, l.id), positionTitle: u.positions[0]?.title });
-    await c.query(`UPDATE letters SET signer_id = $2, status = CASE WHEN status IN ('registered','approved') THEN 'signed' ELSE status END, updated_at = now() WHERE id = $1`, [l.id, u.id]);
+    const sig = await signContent(c, { userId: u.id, entityType: 'letter', entityId: l.id, contentHash: await letterContentHash(c, l.id), hashVersion: LETTER_HASH_VERSION, positionTitle: u.positions[0]?.title });
+    await c.query(`UPDATE letters SET signer_id = $2, status = CASE WHEN status IN ('draft','registered','approved') THEN 'signed' ELSE status END, updated_at = now() WHERE id = $1`, [l.id, u.id]);
     await audit(c, req, { action: 'letter.signed', entity: 'letter', entityId: l.id, after: sig });
     return sig;
   });
@@ -578,7 +633,7 @@ publicLettersRouter.get('/verify/:code', async (req, res) => {
     `SELECT s.*, u.full_name FROM signatures s JOIN users u ON u.id = s.user_id WHERE s.entity_type = 'letter' AND s.entity_id = $1 ORDER BY s.signed_at`,
     [l.id],
   );
-  const hash = await letterContentHash(pool, l.id);
+  const hashes = await letterHashes(pool, l.id);
   res.json({
     number: l.number,
     kind: l.kind,
@@ -586,6 +641,6 @@ publicLettersRouter.get('/verify/:code', async (req, res) => {
     sentAt: l.sent_at,
     subject: l.confidentiality === 0 ? l.subject : null,
     party: l.confidentiality === 0 ? (l.kind === 'outgoing' ? l.external_org ?? l.external_party : null) : null,
-    signatures: sigs.map((s) => ({ signer: s.full_name, position: s.position_title, signedAt: s.signed_at, ...verifySignature(s, hash) })),
+    signatures: sigs.map((s) => ({ signer: s.full_name, position: s.position_title, signedAt: s.signed_at, ...verifySignature(s, hashes[s.hash_version]) })),
   });
 });

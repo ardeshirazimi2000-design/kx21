@@ -1,17 +1,9 @@
-import { useEffect, useRef, useState } from "react";
-import { ApiError, blobUrl, del, upload } from "../lib/api";
-import { Button, ErrorBox } from "./ui";
+import { useEffect, useRef, useState } from 'react';
+import { ApiError, blobUrl, del, upload } from '../lib/api';
+import { Button, ErrorBox } from './ui';
 
 /** An authenticated image (specimen signature); renders nothing when the file is missing. */
-export function AuthImage({
-  path,
-  alt,
-  height = 70,
-}: {
-  path: string | null;
-  alt: string;
-  height?: number;
-}) {
+export function AuthImage({ path, alt, height = 70 }: { path: string | null; alt: string; height?: number }) {
   const [url, setUrl] = useState<string | null>(null);
   useEffect(() => {
     if (!path) return;
@@ -30,25 +22,11 @@ export function AuthImage({
       setUrl(null);
     };
   }, [path]);
-  return url ? (
-    <img
-      src={url}
-      alt={alt}
-      style={{ height, maxWidth: 240, objectFit: "contain" }}
-    />
-  ) : null;
+  return url ? <img src={url} alt={alt} style={{ height, maxWidth: 240, objectFit: 'contain' }} /> : null;
 }
 
 /** Preview, upload (PNG/JPG, up to 1 MB) and removal of a person's specimen signature. */
-export function SignatureEditor({
-  userId,
-  hasSignature,
-  onChange,
-}: {
-  userId: string;
-  hasSignature: boolean;
-  onChange: () => void;
-}) {
+export function SignatureEditor({ userId, hasSignature, onChange }: { userId: string; hasSignature: boolean; onChange: () => void }) {
   const input = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<ApiError | null>(null);
@@ -71,11 +49,7 @@ export function SignatureEditor({
       <ErrorBox error={error} />
       <div className="signature-box">
         {hasSignature ? (
-          <AuthImage
-            key={version}
-            path={`/users/${userId}/signature?v=${version}`}
-            alt="نمونه امضا"
-          />
+          <AuthImage key={version} path={`/users/${userId}/signature?v=${version}`} alt="نمونه امضا" />
         ) : (
           <span className="muted small">نمونه امضا ثبت نشده است</span>
         )}
@@ -87,29 +61,21 @@ export function SignatureEditor({
         hidden
         onChange={(e) => {
           const f = e.target.files?.[0];
-          e.target.value = "";
+          e.target.value = '';
           if (f) void run(() => upload(`/users/${userId}/signature`, {}, f));
         }}
       />
       <div className="row gap-sm mt">
         <Button size="sm" busy={busy} onClick={() => input.current?.click()}>
-          {hasSignature ? "جایگزینی تصویر" : "بارگذاری تصویر امضا"}
+          {hasSignature ? 'جایگزینی تصویر' : 'بارگذاری تصویر امضا'}
         </Button>
         {hasSignature && (
-          <Button
-            size="sm"
-            variant="ghost"
-            busy={busy}
-            onClick={() => void run(() => del(`/users/${userId}/signature`))}
-          >
+          <Button size="sm" variant="ghost" busy={busy} onClick={() => void run(() => del(`/users/${userId}/signature`))}>
             حذف
           </Button>
         )}
       </div>
-      <p className="small muted mt">
-        تصویر PNG یا JPG امضا روی زمینه سفید، حداکثر ۱ مگابایت. امضاهای قبلی
-        نامه‌ها با تصویر زمان امضا باقی می‌مانند.
-      </p>
+      <p className="small muted mt">تصویر PNG یا JPG امضا روی زمینه سفید، حداکثر ۱ مگابایت. امضاهای قبلی نامه‌ها با تصویر زمان امضا باقی می‌مانند.</p>
     </div>
   );
 }

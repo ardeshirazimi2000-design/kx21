@@ -258,6 +258,110 @@ describe('specimen signatures (نمونه امضا)', () => {
   });
 });
 
+describe('letter templates and rich-text letters (قالب و سربرگ نامه)', () => {
+  const del = (who: string, url: string) => request(app).delete(url).set('authorization', `Bearer ${tokens[who]}`);
+
+  it('the secretariat maintains letterheads; everyone reads them', async () => {
+    const list = await as('expert').get('/api/letter-templates');
+    expect(list.status).toBe(200);
+    const builtIn = list.body.find((t: any) => t.is_default);
+    expect(builtIn).toMatchObject({ name: 'سربرگ رسمی اتاق', page_size: 'A4', kinds: ['outgoing', 'internal'] });
+    expect((await as('expert').post('/api/letter-templates', { name: 'قالب من' })).status).toBe(403);
+
+    const t = await as('clerk').post('/api/letter-templates', {
+      name: 'سربرگ معاونت',
+      kinds: ['outgoing'],
+      orgSubtitle: 'معاونت امور اعضا',
+      footerText: 'تهران، خیابان طالقانی',
+      marginTop: 40,
+      bodyHtml: '<p onclick="x()">با سلام<script>alert(1)</script></p>',
+      isDefault: true,
+    });
+    expect(t.status).toBe(201);
+    expect(t.body).toMatchObject({ is_default: true, margin_top: 40, body_html: '<p>با سلام</p>', has_logo: false });
+    // Only one default at a time.
+    expect((await as('expert').get(`/api/letter-templates/${builtIn.id}`)).body.is_default).toBe(false);
+    expect((await as('clerk').upload(`/api/letter-templates/${t.body.id}/logo`, {}, PDF, 'logo.pdf')).status).toBe(400);
+    expect((await as('clerk').upload(`/api/letter-templates/${t.body.id}/logo`, {}, png('logo'), 'logo.png')).status).toBe(204);
+    const logo = await as('expert').get(`/api/letter-templates/${t.body.id}/logo`);
+    expect(logo.status).toBe(200);
+    expect(Buffer.from(logo.body).equals(png('logo'))).toBe(true);
+    expect((await as('expert').get(`/api/letter-templates/${t.body.id}/background`)).status).toBe(404);
+    expect((await as('clerk').patch(`/api/letter-templates/${t.body.id}`, { isDefault: false, orgSubtitle: null })).body).toMatchObject({ org_subtitle: null, has_logo: true });
+    await as('clerk').patch(`/api/letter-templates/${builtIn.id}`, { isDefault: true });
+
+    // An unused template is deleted; a used one is only deactivated.
+    const spare = (await as('clerk').post('/api/letter-templates', { name: 'قالب یک‌بارمصرف' })).body;
+    expect((await del('clerk', `/api/letter-templates/${spare.id}`)).body.outcome).toBe('deleted');
+    await as('expert').post('/api/letters', { kind: 'outgoing', subject: 'نامه با سربرگ معاونت', externalOrg: 'سازمان', templateId: t.body.id });
+    expect((await del('clerk', `/api/letter-templates/${t.body.id}`)).body.outcome).toBe('deactivated');
+    expect((await as('expert').get('/api/letter-templates')).body.some((x: any) => x.id === t.body.id)).toBe(false);
+    expect((await as('clerk').get('/api/letter-templates?all=1')).body.some((x: any) => x.id === t.body.id)).toBe(true);
+    // A deactivated template cannot be chosen for new letters.
+    expect((await as('expert').post('/api/letters', { kind: 'outgoing', subject: 'نامه دیگر', externalOrg: 'سازمان', templateId: t.body.id })).status).toBe(400);
+  });
+
+  it('a letter typed on the letterhead is signed by its signatory, then numbered, and is locked', async () => {
+    const builtIn = (await as('expert').get('/api/letter-templates')).body.find((x: any) => x.is_default);
+    // Signatory must be able to sign; incoming letters take no letterhead.
+    expect((await as('expert').post('/api/letters', { kind: 'outgoing', subject: 'نامه', externalOrg: 'سازمان', signatoryId: me.clerk.id })).status).toBe(400);
+    expect((await as('clerk').post('/api/letters', { kind: 'incoming', subject: 'نامه وارده', externalOrg: 'سازمان', templateId: builtIn.id })).status).toBe(400);
+
+    const created = await as('expert').post('/api/letters', {
+      kind: 'outgoing',
+      subject: 'درخواست همکاری در همایش صادرات',
+      externalOrg: 'وزارت صنعت، معدن و تجارت',
+      externalParty: 'جناب آقای محمدی',
+      bodyFormat: 'html',
+      body: '<p style="text-align: justify; position: fixed">احتراماً <strong>همایش صادرات</strong> برگزار می‌شود.</p><img src=x onerror="alert(1)"><table><tr><td>یک</td></tr></table>',
+      templateId: builtIn.id,
+      signatoryId: me.president.id,
+    });
+    expect(created.status).toBe(201);
+    const l = created.body;
+    expect(l).toMatchObject({ body_format: 'html', template_id: builtIn.id, signatory_id: me.president.id });
+    expect(l.body).toContain('<p style="text-align:justify">احتراماً <strong>همایش صادرات</strong>');
+    expect(l.body).toContain('<table>');
+    expect(l.body).not.toMatch(/img|onerror|position/);
+    // Search reads the text, not the markup.
+    expect((await as('expert').get('/api/letters?q=' + encodeURIComponent('همایش صادرات'))).body.items.some((x: any) => x.id === l.id)).toBe(true);
+    expect((await as('expert').get('/api/letters?q=strong')).body.items.some((x: any) => x.id === l.id)).toBe(false);
+
+    let d = (await as('expert').get(`/api/letters/${l.id}`)).body;
+    expect(d).toMatchObject({ signatory_name: me.president.full_name, lockReason: null });
+    expect(d.my.canEdit).toBe(true);
+    await as('expert').post(`/api/letters/${l.id}/routes`, { targets: [{ userId: me.president.id, action: 'sign', instruction: 'امضا' }, { userId: me.deputy.id, action: 'info' }] });
+    // Only the designated signatory signs, and before numbering.
+    expect((await as('president').get(`/api/letters/${l.id}`)).body.my.canSign).toBe(true);
+    expect((await as('deputy').get(`/api/letters/${l.id}`)).body.my.canSign).toBe(false);
+    expect((await as('deputy').post(`/api/letters/${l.id}/sign`)).status).toBe(403);
+    expect((await as('president').post(`/api/letters/${l.id}/sign`)).status).toBe(201);
+    d = (await as('expert').get(`/api/letters/${l.id}`)).body;
+    expect(d.status).toBe('signed');
+    expect(d.lockReason).toBeTruthy();
+    expect(d.my.canEdit).toBe(false);
+    expect((await as('expert').patch(`/api/letters/${l.id}`, { subject: 'تغییر بعد از امضا' })).status).toBe(409);
+    expect((await as('expert').upload(`/api/letters/${l.id}/attachments`, {}, PDF, 'late.pdf')).status).toBe(409);
+    // Numbering after signing keeps the signature intact.
+    const reg = await as('clerk').post(`/api/letters/${l.id}/register`);
+    expect(reg.status).toBe(200);
+    expect(reg.body.status).toBe('signed');
+    d = (await as('clerk').get(`/api/letters/${l.id}`)).body;
+    expect(d.signatures[0]).toMatchObject({ valid: true, intact: true, user_id: me.president.id });
+    const v = await request(app).get(`/api/verify/${d.tracking_code}`);
+    expect(v.body.signatures[0]).toMatchObject({ valid: true, intact: true });
+    expect((await as('clerk').post(`/api/letters/${l.id}/send`, { deliveryMethod: 'پست' })).body.status).toBe('sent');
+    expect((await as('clerk').patch(`/api/letters/${l.id}`, { subject: 'تغییر بعد از ارسال' })).status).toBe(409);
+
+    // A numbered internal letter is final even before it is signed.
+    const internal = (await as('expert').post('/api/letters', { kind: 'internal', subject: 'نامه داخلی شماره‌شده', body: 'متن', register: true })).body;
+    expect(internal.number).toBeTruthy();
+    const p = await as('expert').patch(`/api/letters/${internal.id}`, { body: 'متن تازه' });
+    expect(p.status).toBe(409);
+    expect(p.body.error.message).toBe('نامه شماره‌شده قابل ویرایش نیست');
+  });
+});
+
 describe('workflow engine (گردش کار)', () => {
   let outgoing: any;
 

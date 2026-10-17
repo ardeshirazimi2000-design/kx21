@@ -30,15 +30,32 @@ export async function newTrackingCode(db: Db): Promise<string> {
   }
 }
 
-/** Hash of what a signature on a letter covers: identity, text and the latest version of each attachment. */
-export async function letterContentHash(db: Db, letterId: string): Promise<string> {
-  const l = await one('SELECT id, kind, number, subject, body, external_party, external_org, external_number, external_date FROM letters WHERE id = $1', [letterId], db);
+/** Hash version used for new signatures. */
+export const LETTER_HASH_VERSION = 2;
+
+/**
+ * Hash of what a signature on a letter covers: identity, text, template and the latest version of each attachment.
+ * Version 1 (signatures made before letters could be signed ahead of numbering) also covers the indicator number.
+ */
+export async function letterContentHash(db: Db, letterId: string, version = LETTER_HASH_VERSION): Promise<string> {
+  const l = await one(
+    'SELECT id, kind, number, subject, body, body_format, template_id, external_party, external_org, external_number, external_date FROM letters WHERE id = $1',
+    [letterId],
+    db,
+  );
   const atts = await query(
     `SELECT DISTINCT ON (group_id) group_id, sha256 FROM letter_attachments WHERE letter_id = $1 ORDER BY group_id, version DESC`,
     [letterId],
     db,
   );
-  return sha256(canonical({ ...l, attachments: atts.map((a) => a.sha256).sort() }));
+  const { number, body_format, template_id, ...v1 } = l!;
+  const covered = version === 1 ? { ...v1, number } : { ...v1, body_format, template_id };
+  return sha256(canonical({ ...covered, attachments: atts.map((a) => a.sha256).sort() }));
+}
+
+/** Current hash of a letter for each hash version, for verifying old and new signatures. */
+export async function letterHashes(db: Db, letterId: string): Promise<Record<number, string>> {
+  return { 1: await letterContentHash(db, letterId, 1), 2: await letterContentHash(db, letterId, 2) };
 }
 
 export async function primaryUnitOf(userId: string, db: Db): Promise<string | null> {

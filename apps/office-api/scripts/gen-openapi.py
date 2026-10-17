@@ -33,6 +33,8 @@ schemas = {
             "externalNumber": str_, "externalDate": date, "source": enum("manual", "email", "scan", "api"), "deliveryMethod": str_,
             "priority": enum("low", "normal", "high", "urgent"), "confidentiality": {"type": "integer", "minimum": 0, "maximum": 2}, "ownerUnitId": uuid,
             "replyToId": uuid, "dueDate": date, "recipients": arr(ref("Recipient")), "register": bool_, "workflow": {"type": "string", "description": "workflow definition key to start"},
+            "bodyFormat": {**enum("text", "html"), "description": "html: body from the letter editor, sanitised server-side"}, "templateId": uuid,
+            "signatoryId": {**uuid, "description": "designated signatory (needs letter.sign); only they can sign"},
         },
     },
     "WorkflowStep": S(
@@ -96,6 +98,14 @@ E = [
     ("get", "/api/users/{id}/signature", "Correspondence", "تصویر نمونه امضای کاربر", None, None),
     ("post", "/api/users/{id}/signature", "Correspondence", "ثبت یا جایگزینی نمونه امضا (PNG/JPEG، حداکثر ۱ مگابایت) [خود کاربر یا signatures.manage]", None, None),
     ("delete", "/api/users/{id}/signature", "Correspondence", "حذف نمونه امضا", None, None),
+    ("get", "/api/letter-templates", "Correspondence", "قالب‌ها و سربرگ‌های نامه (?all=1 غیرفعال‌ها هم [templates.manage])", None, None),
+    ("post", "/api/letter-templates", "Correspondence", "قالب جدید [templates.manage]", S(name=str_, description=str_, kinds=arr(enum("outgoing", "internal")), unitId=uuid, pageSize=enum("A4", "A5"), headerText=str_, orgName=str_, orgSubtitle=str_, footerText=str_, showLogo=bool_, marginTop=int_, marginBottom=int_, marginSide=int_, fontSize={"type": "number"}, showQr=bool_, bodyHtml=str_, isDefault=bool_, isActive=bool_), "bodyHtml is sanitised to the letter editor's HTML subset."),
+    ("get", "/api/letter-templates/{id}", "Correspondence", "قالب نامه", None, None),
+    ("patch", "/api/letter-templates/{id}", "Correspondence", "ویرایش قالب [templates.manage]", S(name=str_, isDefault=bool_, isActive=bool_, bodyHtml=str_), "Same fields as POST; omitted fields keep their value, null clears optional text."),
+    ("delete", "/api/letter-templates/{id}", "Correspondence", "حذف قالب (قالب استفاده‌شده فقط غیرفعال می‌شود) [templates.manage]", None, "Returns { outcome: deleted | deactivated }."),
+    ("post", "/api/letter-templates/{id}/{image}", "Correspondence", "بارگذاری لوگو (image=logo، حداکثر ۲ مگابایت) یا تصویر کامل سربرگ (image=background، حداکثر ۵ مگابایت) [templates.manage]", None, None),
+    ("get", "/api/letter-templates/{id}/{image}", "Correspondence", "تصویر لوگو یا سربرگ قالب", None, None),
+    ("delete", "/api/letter-templates/{id}/{image}", "Correspondence", "حذف لوگو یا تصویر سربرگ [templates.manage]", None, None),
     ("post", "/api/letters/{id}/send", "Correspondence", "ثبت ارسال نامه صادره", S(deliveryMethod=str_, requireSignature=bool_), None),
     ("post", "/api/letters/{id}/archive", "Correspondence", "بایگانی نامه", S(folderId=uuid), None),
     ("post", "/api/letters/{id}/cancel", "Correspondence", "ابطال", S(reason=str_), None),
@@ -170,13 +180,13 @@ for method, path, tag, summary, body, notes in E:
         op["requestBody"] = {"required": True, "content": {"application/json": {"schema": body}}}
     if path.endswith("/attachments") or path.endswith("/versions") or path == "/api/archive/documents" and method == "post":
         op["requestBody"] = {"required": True, "content": multipart_file(groupId=uuid, title=str_, folderId=uuid, note=str_)}
-    if path == "/api/users/{id}/signature" and method == "post":
+    if path in ("/api/users/{id}/signature", "/api/letter-templates/{id}/{image}") and method == "post":
         op["requestBody"] = {"required": True, "content": multipart_file()}
     if path in ("/api/auth/login", "/api/auth/refresh", "/api/auth/mfa/verify"):
         op["responses"]["200"] = {"description": "OK", "content": {"application/json": {"schema": ref("Tokens")}}}
     if method == "get" and path in ("/api/letters", "/api/users", "/api/archive/documents", "/api/notifications", "/api/audit", "/api/meetings", "/api/resolutions"):
         op["responses"]["200"] = {"description": "OK", "content": {"application/json": {"schema": ref("Paged")}}}
-    params = [{"name": seg[1:-1], "in": "path", "required": True, "schema": uuid if seg in ("{id}", "{attId}") else str_} for seg in path.split("/") if seg.startswith("{")]
+    params = [{"name": seg[1:-1], "in": "path", "required": True, "schema": enum("logo", "background") if seg == "{image}" else uuid if seg in ("{id}", "{attId}", "{sigId}") else str_} for seg in path.split("/") if seg.startswith("{")]
     if params:
         op["parameters"] = params
     paths.setdefault(path, {})[method] = op

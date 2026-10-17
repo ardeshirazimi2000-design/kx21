@@ -21,6 +21,7 @@ import { notificationsRouter } from './routes/notifications.js';
 import { orgRouter } from './routes/org.js';
 import { reportsRouter } from './routes/reports.js';
 import { signaturesRouter } from './routes/signatures.js';
+import { templatesRouter } from './routes/templates.js';
 import { workflowsRouter } from './routes/workflows.js';
 
 const openapiPath = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'openapi.yaml');
@@ -75,7 +76,7 @@ export function createApp() {
       keyGenerator: (req) => req.user?.id ?? ipKeyGenerator(req.ip ?? '0.0.0.0'),
     }),
   );
-  api.use(orgRouter, signaturesRouter, lettersRouter, workflowsRouter, archiveRouter, notificationsRouter, reportsRouter, integrationRouter, auditRouter);
+  api.use(orgRouter, signaturesRouter, templatesRouter, lettersRouter, workflowsRouter, archiveRouter, notificationsRouter, reportsRouter, integrationRouter, auditRouter);
   app.use('/api', api);
 
   if (config.webDistDir && existsSync(path.join(config.webDistDir, 'index.html'))) {

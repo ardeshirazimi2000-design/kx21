@@ -12,7 +12,7 @@ import { one, query, type Db } from '../db/pool.js';
 import { audit } from '../lib/audit.js';
 import { badRequest, conflict, forbidden, notFound } from '../lib/errors.js';
 import { archiveLetter } from './archive.js';
-import { letterContentHash, managerPositionOf, primaryUnitOf } from './letters.js';
+import { LETTER_HASH_VERSION, letterContentHash, managerPositionOf, primaryUnitOf } from './letters.js';
 import { notify, positionHolders } from './notifications.js';
 import { signContent } from './signatures.js';
 
@@ -282,9 +282,8 @@ export async function actOnStep(
   if (input.decision === 'reject' && !(input.comment && input.comment.trim().length >= 3)) throw badRequest('برای رد، توضیح لازم است');
 
   if (input.decision === 'approve' && s.type === 'sign') {
-    if (!letter.number) throw conflict('نامه پیش از امضا باید شماره شود');
     const pos = u.positions.find((p) => p.positionId === step.assignee_position_id) ?? u.positions[0];
-    await signContent(db, { userId: u.id, entityType: 'letter', entityId: letter.id, contentHash: await letterContentHash(db, letter.id), positionTitle: pos?.title });
+    await signContent(db, { userId: u.id, entityType: 'letter', entityId: letter.id, contentHash: await letterContentHash(db, letter.id), hashVersion: LETTER_HASH_VERSION, positionTitle: pos?.title });
     await query(`UPDATE letters SET signer_id = $2, status = 'signed', updated_at = now() WHERE id = $1`, [letter.id, u.id], db);
   }
   if (input.decision === 'approve' && s.type === 'archive') {
