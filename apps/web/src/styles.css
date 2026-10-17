@@ -123,7 +123,8 @@ h3 { font-size: 1rem; }
 .login-brand { display: flex; flex-direction: column; align-items: center; gap: 10px; color: #fff; text-align: center; margin-bottom: 20px; }
 .login-brand h1 { font-size: 1.15rem; }
 .login-brand p { margin: 0; color: #d6e6ea; }
-.nav-group { margin: 14px 8px 6px; font-size: 0.72rem; opacity: 0.6; }
+.nav-group { margin: 18px 8px 6px; font-size: 0.75rem; font-weight: 700; color: #e9c46a; display: flex; align-items: center; gap: 8px; cursor: default; user-select: none; }
+.nav-group::after { content: ''; flex: 1; height: 1px; background: currentColor; opacity: 0.35; }
 .nav a { display: flex; gap: 10px; align-items: center; padding: 8px 12px; border-radius: 8px; color: var(--sidebar-ink); }
 .nav a:hover { background: rgba(255, 255, 255, 0.06); text-decoration: none; }
 .nav a.active { background: rgba(255, 255, 255, 0.12); color: #fff; }

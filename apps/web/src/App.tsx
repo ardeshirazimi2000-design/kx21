@@ -98,12 +98,12 @@ function Shell({ children }: { children: ReactNode }) {
         </Link>
         <nav className="nav">
           {item('/', 'داشبورد')}
-          <div className="nav-group">جلسات</div>
+          <div className="nav-group" role="heading" aria-level={2}>جلسات</div>
           {item('/meetings', 'تقویم جلسات')}
           {item('/resolutions', 'مصوبات و پیگیری')}
           {(isExpert || isOfficer) && item('/referrals', 'ارجاعات کارشناسی')}
           {item('/notifications', 'اعلان‌ها', unread.data?.total ? <span className="count">{fa(unread.data.total)}</span> : null)}
-          <div className="nav-group">ساختار</div>
+          <div className="nav-group" role="heading" aria-level={2}>ساختار</div>
           {item('/commissions', 'کمیسیون‌ها')}
           {isAdmin && item('/terms', 'دوره‌ها')}
           {(isAdmin || isOfficer) && item('/people', 'اشخاص و کاربران')}
@@ -112,7 +112,7 @@ function Shell({ children }: { children: ReactNode }) {
           {me!.is_super_admin && item('/chambers', 'اتاق‌ها')}
           {(isAdmin || isOfficer) && (
             <>
-              <div className="nav-group">گزارش و کنترل</div>
+              <div className="nav-group" role="heading" aria-level={2}>گزارش و کنترل</div>
               {item('/reports', 'گزارش‌ها')}
               {isAdmin && item('/audit', 'رویدادنگاری (Audit)')}
             </>
