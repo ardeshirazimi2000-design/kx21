@@ -104,6 +104,20 @@ async function api(method, path, body, headers = {}) {
 const guard = (fn) => async (...args) => {
   try { return await fn(...args); } catch (e) { toast(e.message || 'خطا', true); console.error(e); }
 };
+// Form submit that runs once at a time: the submit button is disabled until the request returns
+// (a second tap would otherwise send — and pay for — another SMS code).
+const once = (fn) => {
+  let running = false;
+  return guard(async (e) => {
+    e?.preventDefault?.();
+    if (running) return;
+    running = true;
+    const btn = e?.target?.querySelector?.('button:not([type=button])');
+    const label = btn?.textContent;
+    if (btn) { btn.disabled = true; btn.textContent = 'لطفاً صبر کنید…'; }
+    try { await fn(e); } finally { running = false; if (btn?.isConnected) { btn.disabled = false; btn.textContent = label; } }
+  });
+};
 
 function setSession(s) { session = s; store.set('session', s); }
 function logout() { setSession(null); store.del('session'); route('login'); }
@@ -191,6 +205,7 @@ VIEWS.login = () => {
   let phone = '';
   let role = null; // 'patient' | 'doctor' — chosen on the start screen
   let mfaToken = null;
+  let lastNid = null; // national id of a registration, reused by "send again"
   const box = h('div', { class: 'card narrow stack' });
   const hint = h('div', { class: 'muted' });
   const showDevCode = (code, to = '', delivery = 'sms') => hint.replaceChildren(code
@@ -219,12 +234,13 @@ VIEWS.login = () => {
     box.className = 'card narrow stack';
     const input = h('input', { type: 'tel', dir: 'ltr', placeholder: '09121234567', autocomplete: 'tel', inputmode: 'tel', value: phone });
     const nid = needNid ? h('input', { type: 'text', dir: 'ltr', inputmode: 'numeric', maxlength: 10, placeholder: 'کد ملی ۱۰ رقمی' }) : null;
-    const submit = guard(async (e) => {
-      e.preventDefault();
+    const submit = once(async () => {
       phone = input.value.trim();
-      const r = await api('POST', '/v1/auth/otp/request', { phone, role, ...(nid ? { national_id: nid.value.trim() } : {}) });
+      lastNid = nid ? nid.value.trim() : null;
+      const r = await api('POST', '/v1/auth/otp/request', { phone, role, ...(lastNid ? { national_id: lastNid } : {}) });
       if (r.registration_required) { stepPhone(true); return; }
-      stepCode(r.registration);
+      stepCode(r.registration, r.resend_in);
+      if (r.already_sent) toast('کد تأیید چند لحظه پیش ارسال شده است؛ همان کد را وارد کنید');
       showDevCode(r.dev_code, phone, r.delivery);
     });
     box.replaceChildren(
@@ -242,34 +258,51 @@ VIEWS.login = () => {
     (nid ?? input).focus();
   };
 
-  const stepCode = (registering = false) => {
+  const stepCode = (registering = false, resendIn = 60) => {
     const input = h('input', { type: 'text', dir: 'ltr', inputmode: 'numeric', autocomplete: 'one-time-code', maxlength: 6 });
-    const submit = guard(async (e) => {
-      e.preventDefault();
+    // "Send again" unlocks after the server's resend window.
+    const resend = h('button', { class: 'btn small', type: 'button', disabled: true });
+    let left = resendIn ?? 60;
+    const tick = () => {
+      if (!resend.isConnected && left < (resendIn ?? 60)) return clearInterval(timer);
+      resend.disabled = left > 0;
+      resend.textContent = left > 0 ? `ارسال مجدد کد (${fa(left)} ثانیه)` : 'ارسال مجدد کد';
+      left -= 1;
+    };
+    const timer = setInterval(tick, 1000);
+    tick();
+    resend.onclick = guard(async () => {
+      resend.disabled = true;
+      const r = await api('POST', '/v1/auth/otp/request', { phone, role, ...(lastNid ? { national_id: lastNid } : {}) });
+      left = r.resend_in ?? 60;
+      toast(r.already_sent ? 'کد قبلی هنوز معتبر است؛ کمی بعد دوباره تلاش کنید' : 'کد جدید ارسال شد؛ کدهای قبلی باطل شدند');
+      showDevCode(r.dev_code, phone, r.delivery);
+      tick();
+    });
+    const submit = once(async () => {
       const r = await api('POST', '/v1/auth/otp/verify', { phone, code: input.value });
       if (r.mfa_required) { mfaToken = r.mfa_token; stepMfa(); showDevCode(r.dev_code, phone, r.delivery); return; }
       done(r);
     });
     box.replaceChildren(
       h('h2', {}, 'کد تأیید'),
-      registering ? h('div', { class: 'banner info' }, '✓ تطابق شماره موبایل و کد ملی در سامانه شاهکار تأیید شد.') : null,
+      ...(registering ? [h('div', { class: 'banner info' }, '✓ تطابق شماره موبایل و کد ملی در سامانه شاهکار تأیید شد.')] : []),
       h('p', { class: 'muted' }, `کد ۶ رقمی ارسال‌شده به ${fa(phone)} را وارد کنید.`),
       hint,
       h('form', { onsubmit: submit, class: 'stack' }, input, h('button', { class: 'btn primary block' }, 'ورود')),
-      h('button', { class: 'btn small', onclick: () => stepPhone() }, 'تغییر شماره'),
+      h('div', { class: 'row', style: 'gap:8px;flex-wrap:wrap' }, resend, h('button', { class: 'btn small', type: 'button', onclick: () => { clearInterval(timer); stepPhone(); } }, 'تغییر شماره')),
     );
     input.focus();
   };
 
   const stepMfa = () => {
     const input = h('input', { type: 'text', dir: 'ltr', inputmode: 'numeric', maxlength: 6 });
-    const submit = guard(async (e) => {
-      e.preventDefault();
+    const submit = once(async () => {
       done(await api('POST', '/v1/auth/mfa/verify', { mfa_token: mfaToken, code: input.value }));
     });
     box.replaceChildren(
       h('h2', {}, 'تأیید دومرحله‌ای'),
-      h('p', { class: 'muted' }, 'برای حساب‌های پزشک و کادر، کد دوم به ایمیل شما ارسال شد.'),
+      h('p', { class: 'muted' }, 'برای امنیت حساب‌های پزشک و کادر، یک کد دوم (جدا از کد ورود) برای شما پیامک شد.'),
       hint,
       h('form', { onsubmit: submit, class: 'stack' }, input, h('button', { class: 'btn primary block' }, 'تأیید')),
     );

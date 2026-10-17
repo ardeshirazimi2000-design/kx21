@@ -85,3 +85,49 @@ test('ADMIN_PHONE already used by a patient: converted only with ADMIN_TAKEOVER'
     t.close();
   }
 });
+
+test('repeated code requests: one SMS per minute, concurrent taps rejected, failed delivery frees the slot', async () => {
+  const t = await startApp({ devMode: false, seed: true, adminPhone: '09129990001', masterSecret: 'test-secret-production-mode-0123456789' });
+  try {
+    const sent = [];
+    let fail = false;
+    let slow = null;
+    Object.assign(t.app.domain.sms, {
+      enabled: true,
+      sendOtp: async (mobile, code) => {
+        if (slow) await slow;
+        if (fail) throw new Error('gateway down');
+        sent.push(code);
+        return { id: '1' };
+      },
+    });
+    const ask = () => t.call('POST', '/v1/auth/otp/request', { body: { phone: '09129990001', role: 'doctor' } });
+
+    // Delivery fails → no cooldown, the user may retry at once.
+    fail = true;
+    assert.equal((await ask()).body.code, 'sms_failed');
+    fail = false;
+
+    // Two taps while the gateway is still answering: the second is refused, one SMS goes out.
+    let release;
+    slow = new Promise((r) => { release = r; });
+    const first = ask();
+    await new Promise((r) => setTimeout(r, 30));
+    const second = await ask();
+    assert.equal(second.body.code, 'otp_in_progress');
+    release();
+    slow = null;
+    assert.equal((await first).status, 202);
+    assert.equal(sent.length, 1);
+
+    // A repeat within a minute keeps the code already sent.
+    const again = await ask();
+    assert.equal(again.body.already_sent, true);
+    assert.ok(again.body.resend_in > 0 && again.body.resend_in <= 60);
+    assert.equal(sent.length, 1);
+    const v = await t.call('POST', '/v1/auth/otp/verify', { body: { phone: '09129990001', code: sent[0] } });
+    assert.equal(v.body.mfa_required, true);
+  } finally {
+    t.close();
+  }
+});

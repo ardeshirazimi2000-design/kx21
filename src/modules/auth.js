@@ -7,6 +7,9 @@ import { normalizePhone, normalizeFa, isValidNationalId } from '../lib/fa.js';
 
 const OTP_TTL_MS = 2 * 60 * 1000;
 const OTP_MAX_ATTEMPTS = 5;
+// A new code replaces the previous one; within this window a repeated request (double tap, slow
+// SMS gateway) keeps the code already sent instead of texting another one.
+const OTP_RESEND_S = 60;
 const ACCESS_TTL_S = 60 * 60 * 8;
 const MFA_TTL_S = 5 * 60;
 const MFA_ROLES = new Set(['doctor', 'admin', 'operator']);
@@ -27,6 +30,7 @@ export function requireUser(ctx, ...roles) {
 }
 
 export function register(router, { db, keys, platform, config, limiter, domain }) {
+  const otpInFlight = new Set();
   const issueOtp = (ctx, target, purpose, payload = null) => {
     const code = randomDigits(6);
     db.run(
@@ -123,32 +127,56 @@ export function register(router, { db, keys, platform, config, limiter, domain }
       if (intent === 'doctor' && !staff) throw new ApiError(409, 'role_mismatch', 'این شماره به‌عنوان بیمار ثبت شده است؛ از گزینه «ورود بیماران» استفاده کنید');
     }
 
-    let payload = null;
-    if (!existing) {
-      // Registration: national code + mobile must match in Shahkar before any account is created.
-      const nid = ctx.body.national_id ? normalizeFa(ctx.body.national_id) : null;
-      if (!nid) return { body: { registration_required: true } };
-      if (!isValidNationalId(nid)) throw badRequest('کد ملی معتبر نیست', 'invalid_national_id');
-      limiter.hit(`shahkar:${ctx.tenantId}:${phone}`, 5, 60 * 60 * 1000);
-      const role = intent ?? 'patient';
-      const nidHash = lookupHash(keys, `${ctx.tenantId}:${nid}`);
-      const taken = db.get('SELECT 1 FROM users WHERE tenant_id = ? AND national_id_hash = ? AND role = ? AND deleted_at IS NULL', ctx.tenantId, nidHash, role);
-      if (taken) throw new ApiError(409, 'national_id_taken', 'برای این کد ملی قبلاً حساب ایجاد شده است؛ با شماره ثبت‌شده وارد شوید');
-      const v = await domain.identity.verifyMobileOwnership({ nationalId: nid, mobile: phone });
-      platform.audit(ctx, 'identity.shahkar', `phone:${phone}`, { matched: v.matched, source: v.source });
-      if (!v.matched) {
-        throw badRequest('این شماره موبایل به نام صاحب کد ملی واردشده ثبت نشده است (استعلام شاهکار). لطفاً شماره‌ای که به نام خودتان است وارد کنید.', 'shahkar_mismatch');
+    if (!existing && !ctx.body.national_id) return { body: { registration_required: true } };
+    // One request per number at a time (a second tap while Shahkar/SMS is still answering).
+    const flightKey = `${ctx.tenantId}:${phone}`;
+    if (otpInFlight.has(flightKey)) throw new ApiError(409, 'otp_in_progress', 'کد در حال ارسال است؛ چند لحظه صبر کنید');
+    otpInFlight.add(flightKey);
+    try {
+      if (domain.sms?.enabled) {
+        const last = db.get(
+          `SELECT created_at FROM otp_codes WHERE tenant_id = ? AND target = ? AND purpose = 'login' AND used_at IS NULL AND expires_at > ?
+           ORDER BY created_at DESC LIMIT 1`, ctx.tenantId, phone, nowIso());
+        const wait = last ? OTP_RESEND_S - Math.floor((Date.now() - Date.parse(last.created_at)) / 1000) : 0;
+        if (wait > 0) {
+          return { status: 202, body: { sent: true, already_sent: true, resend_in: wait, delivery: domain.sms.delivery, registration: !existing, identity_verified: !existing, expires_in: OTP_TTL_MS / 1000 } };
+        }
       }
-      payload = { role, nid, source: v.source };
+      let payload = null;
+      if (!existing) {
+        // Registration: national code + mobile must match in Shahkar before any account is created.
+        const nid = ctx.body.national_id ? normalizeFa(ctx.body.national_id) : null;
+        if (!nid) return { body: { registration_required: true } };
+        if (!isValidNationalId(nid)) throw badRequest('کد ملی معتبر نیست', 'invalid_national_id');
+        limiter.hit(`shahkar:${ctx.tenantId}:${phone}`, 5, 60 * 60 * 1000);
+        const role = intent ?? 'patient';
+        const nidHash = lookupHash(keys, `${ctx.tenantId}:${nid}`);
+        const taken = db.get('SELECT 1 FROM users WHERE tenant_id = ? AND national_id_hash = ? AND role = ? AND deleted_at IS NULL', ctx.tenantId, nidHash, role);
+        if (taken) throw new ApiError(409, 'national_id_taken', 'برای این کد ملی قبلاً حساب ایجاد شده است؛ با شماره ثبت‌شده وارد شوید');
+        const v = await domain.identity.verifyMobileOwnership({ nationalId: nid, mobile: phone });
+        platform.audit(ctx, 'identity.shahkar', `phone:${phone}`, { matched: v.matched, source: v.source });
+        if (!v.matched) {
+          throw badRequest('این شماره موبایل به نام صاحب کد ملی واردشده ثبت نشده است (استعلام شاهکار). لطفاً شماره‌ای که به نام خودتان است وارد کنید.', 'shahkar_mismatch');
+        }
+        payload = { role, nid, source: v.source };
+      }
+      limiter.hit(`otp:${ctx.tenantId}:${phone}`, 3, 10 * 60 * 1000);
+      const code = issueOtp(ctx, phone, 'login', payload && { ...payload, nid: seal(keys, payload.nid).toString('base64') });
+      try {
+        await deliverCode(ctx, phone, code, 'login');
+      } catch (e) {
+        // Nothing reached the phone: drop the code so the user can ask again right away.
+        db.run(`UPDATE otp_codes SET used_at = ? WHERE tenant_id = ? AND target = ? AND purpose = 'login' AND used_at IS NULL`, nowIso(), ctx.tenantId, phone);
+        throw e;
+      }
+      platform.audit(ctx, 'auth.otp_requested', `phone:${phone}`, { registration: !!payload });
+      return {
+        status: 202,
+        body: { sent: true, delivery: domain.sms?.enabled ? domain.sms.delivery : 'sms', registration: !!payload, identity_verified: !!payload, expires_in: OTP_TTL_MS / 1000, resend_in: OTP_RESEND_S, ...(config.devMode ? { dev_code: code } : {}) },
+      };
+    } finally {
+      otpInFlight.delete(flightKey);
     }
-    limiter.hit(`otp:${ctx.tenantId}:${phone}`, 3, 10 * 60 * 1000);
-    const code = issueOtp(ctx, phone, 'login', payload && { ...payload, nid: seal(keys, payload.nid).toString('base64') });
-    await deliverCode(ctx, phone, code, 'login');
-    platform.audit(ctx, 'auth.otp_requested', `phone:${phone}`, { registration: !!payload });
-    return {
-      status: 202,
-      body: { sent: true, delivery: domain.sms?.enabled ? domain.sms.delivery : 'sms', registration: !!payload, identity_verified: !!payload, expires_in: OTP_TTL_MS / 1000, ...(config.devMode ? { dev_code: code } : {}) },
-    };
   });
 
   router.post('/v1/auth/otp/verify', async (ctx) => {
