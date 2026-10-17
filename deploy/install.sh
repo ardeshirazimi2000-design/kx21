@@ -3,6 +3,7 @@
 #
 #   curl -fsSL https://raw.githubusercontent.com/ardeshirazimi2000-design/kx21/claude/telehealth-mvp/deploy/install.sh | bash
 #   curl -fsSL .../deploy/install.sh | DOMAIN=clinic.example.ir EMAIL=you@example.ir bash   # + HTTPS
+#   ... | DOMAIN=clinic.example.ir BEHIND_PROXY=1 bash   # HTTPS handled by a web server already on this host
 #
 # Re-running it updates the code and restarts the service; data and secrets are kept.
 # Supports RHEL/Alma/Rocky/CentOS Stream/Fedora (dnf/yum) and Debian/Ubuntu (apt).
@@ -17,6 +18,7 @@ NODE_VERSION="${NODE_VERSION:-22.20.0}"
 NODE_DIR=/opt/node22
 PORT="${PORT:-3000}"
 DOMAIN="${DOMAIN:-}"
+BEHIND_PROXY="${BEHIND_PROXY:-0}"   # 1 = an existing web server (nginx/Caddy) already proxies DOMAIN to this app
 EMAIL="${EMAIL:-}"
 ENABLE_TURN="${ENABLE_TURN:-1}"   # coturn relay for video visits (needed behind mobile-carrier NAT)
 ENABLE_CXR="${ENABLE_CXR:-1}"     # chest X-ray pattern flags for physicians (Python + onnxruntime, CPU, ~400 MB RAM)
@@ -28,6 +30,32 @@ die() { printf '\n\033[1;31mERROR: %s\033[0m\n' "$*" >&2; exit 1; }
 
 [ "$(id -u)" -eq 0 ] || die "run as root"
 [ "$(uname -m)" = "x86_64" ] || die "only x86_64 is supported by this script"
+
+# ---------------------------------------------------------------- HTTPS pre-flight
+# The server may already host other websites. Never take ports 80/443 from another web server and
+# never overwrite a Caddyfile that serves other sites: stop here, before anything is changed.
+if [ -n "$DOMAIN" ] && [ "$BEHIND_PROXY" != "1" ]; then
+  if command -v ss >/dev/null; then
+    OTHER=$(ss -ltnpH 2>/dev/null | awk '$4 ~ /:(80|443)$/' | grep -v '"caddy"' | grep -o '(("[^"]*"' | tr -d '("' | sort -u | tr '\n' ' ' || true)
+    [ -z "$OTHER" ] || die "ports 80/443 are already used by: $OTHER(another website on this server).
+   Nothing was changed. Point that web server at this app instead (for nginx see
+   $APP_DIR/deploy/nginx.conf.example or the repository's deploy/nginx.conf.example),
+   then re-run with DOMAIN=$DOMAIN BEHIND_PROXY=1"
+  fi
+  if [ -f /etc/caddy/Caddyfile ] && ! grep -q 'managed by kx21' /etc/caddy/Caddyfile; then
+    SITES=$(grep -cE '^[^[:space:]#{][^{]*\{[[:space:]]*$' /etc/caddy/Caddyfile || true)
+    if [ "$SITES" -gt 1 ] || ! grep -q "reverse_proxy 127.0.0.1:$PORT" /etc/caddy/Caddyfile; then
+      die "/etc/caddy/Caddyfile serves other sites. Nothing was changed. Add this block to it yourself and reload Caddy:
+   $DOMAIN {
+       encode gzip
+       reverse_proxy 127.0.0.1:$PORT {
+           flush_interval -1
+       }
+   }
+   then re-run with DOMAIN=$DOMAIN BEHIND_PROXY=1"
+    fi
+  fi
+fi
 command -v systemctl >/dev/null || die "systemd is required"
 
 # ---------------------------------------------------------------- packages
@@ -264,7 +292,7 @@ systemctl enable -q kx21
 systemctl restart kx21
 
 # ---------------------------------------------------------------- HTTPS (optional)
-if [ -n "$DOMAIN" ]; then
+if [ -n "$DOMAIN" ] && [ "$BEHIND_PROXY" != "1" ]; then
   if ! command -v caddy >/dev/null; then
     say "Installing Caddy (automatic HTTPS)"
     curl -fsSL --max-time 300 -o /usr/local/bin/caddy "https://caddyserver.com/api/download?os=linux&arch=amd64" \
@@ -274,6 +302,7 @@ if [ -n "$DOMAIN" ]; then
   fi
   mkdir -p /etc/caddy
   cat > /etc/caddy/Caddyfile <<EOF
+# managed by kx21 installer (re-running it rewrites this file)
 {
 	${EMAIL:+email $EMAIL}
 }
@@ -311,7 +340,7 @@ open_port() {
   if systemctl is-active -q firewalld 2>/dev/null; then firewall-cmd -q --permanent --add-port="$1/tcp"; firewall-cmd -q --reload
   elif command -v ufw >/dev/null && ufw status | grep -q "Status: active"; then ufw allow "$1/tcp" >/dev/null; fi
 }
-if [ -n "$DOMAIN" ]; then open_port 80; open_port 443; else open_port "$PORT"; fi
+if [ -n "$DOMAIN" ]; then [ "$BEHIND_PROXY" = "1" ] || { open_port 80; open_port 443; }; else open_port "$PORT"; fi
 if [ "${TURN_OK:-0}" = "1" ]; then
   if systemctl is-active -q firewalld 2>/dev/null; then
     firewall-cmd -q --permanent --add-port=3478/udp --add-port=3478/tcp --add-port=49160-49200/udp; firewall-cmd -q --reload
