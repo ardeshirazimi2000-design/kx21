@@ -83,3 +83,14 @@ npm run typecheck
 8. [تصمیم‌های محصول برای تأیید](docs/08-product-decisions.md)
 9. [راهنمای کاربران و مدیران](docs/09-user-manual.md)
 10. [ساخت فایل نصبی اپ اندروید](docs/10-mobile-build.md)
+
+## اتوماسیون اداری (یکپارچه با سامانه جلسات)
+سامانه اتوماسیون اداری (مکاتبات وارده/صادره/داخلی، گردش کار، بایگانی و امضای دیجیتال، دسترسی و ورود دومرحله‌ای، اعلان‌ها و گزارش‌ها) در `apps/office-api` و `apps/office-web` با پایگاه داده جدای `kx_office` قرار دارد و با این سامانه دوطرفه یکپارچه است: مصوبات به نامه و گردش پیگیری تبدیل می‌شوند، نامه‌ها به کمیسیون ارجاع می‌شوند و پیشرفت اجرا به مصوبه برمی‌گردد.
+
+```bash
+npm run office:seed        # migration + داده نمونه (createdb kx_office)
+npm run dev:office-api     # http://localhost:4100
+npm run dev:office-web     # http://localhost:5174 — ورود: admin، clerk، cmshead، expert، president … / Passw0rd!
+npm test -w @kx/office-api
+```
+در نصب Docker و `deploy/install.sh` اتوماسیون روی پورت `8100` نصب و خودکار به سامانه جلسات وصل می‌شود (`OFFICE=0` برای صرف‌نظر). مستندات: [docs/office](docs/office/README.md)

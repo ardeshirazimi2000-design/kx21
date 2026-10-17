@@ -10,6 +10,8 @@
 #   SEED=1               load demo data (accounts with password Passw0rd!) — use 0 for an empty install
 #   NPM_REGISTRY=...     npm mirror if registry.npmjs.org is not reachable
 #   APP_DIR=/opt/kx21    install location
+#   OFFICE=1             also install office automation (اتوماسیون اداری) on $OFFICE_PORT — use 0 to skip
+#   OFFICE_PORT=8100     office automation port
 set -euo pipefail
 
 PORT="${PORT:-8000}"
@@ -17,6 +19,9 @@ SEED="${SEED:-1}"
 APP_DIR="${APP_DIR:-/opt/kx21}"
 APP_USER=kx
 ENV_FILE=/etc/kx21.env
+OFFICE="${OFFICE:-1}"
+OFFICE_PORT="${OFFICE_PORT:-8100}"
+OFFICE_ENV_FILE=/etc/kx21-office.env
 SRC_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 
 [ "$(id -u)" -eq 0 ] || { echo "Run as root (sudo)."; exit 1; }
@@ -48,10 +53,23 @@ sudo -u postgres psql -tc "SELECT 1 FROM pg_roles WHERE rolname='kx'" | grep -q 
   || sudo -u postgres psql -c "CREATE ROLE kx LOGIN PASSWORD '$DB_PASS'"
 sudo -u postgres psql -tc "SELECT 1 FROM pg_database WHERE datname='kx'" | grep -q 1 \
   || sudo -u postgres psql -c "CREATE DATABASE kx OWNER kx"
+if [ "$OFFICE" = "1" ]; then
+  sudo -u postgres psql -tc "SELECT 1 FROM pg_database WHERE datname='kx_office'" | grep -q 1 \
+    || sudo -u postgres psql -c "CREATE DATABASE kx_office OWNER kx"
+  if [ -f "$OFFICE_ENV_FILE" ]; then
+    OFFICE_JWT_SECRET="$(grep '^JWT_SECRET=' "$OFFICE_ENV_FILE" | cut -d= -f2-)"
+    OFFICE_DATA_KEY="$(grep '^DATA_ENCRYPTION_KEY=' "$OFFICE_ENV_FILE" | cut -d= -f2-)"
+    OFFICE_FIRST=0
+  else
+    OFFICE_JWT_SECRET="$(openssl rand -hex 32)"
+    OFFICE_DATA_KEY="$(openssl rand -hex 32)"
+    OFFICE_FIRST=1
+  fi
+fi
 
 log "Copying application to $APP_DIR"
 id "$APP_USER" >/dev/null 2>&1 || useradd --system --home "$APP_DIR" --shell /usr/sbin/nologin "$APP_USER"
-mkdir -p "$APP_DIR" /var/lib/kx21/uploads
+mkdir -p "$APP_DIR" /var/lib/kx21/uploads /var/lib/kx21/office-storage
 rsync -a --delete --exclude node_modules --exclude dist --exclude .git --exclude apps/mobile "$SRC_DIR/" "$APP_DIR/"
 
 log "Installing dependencies and building (a few minutes)"
@@ -60,6 +78,10 @@ npm ci --no-audit --no-fund
 npm run build -w @kx/shared
 npm run build -w @kx/api
 npm run build -w @kx/web
+if [ "$OFFICE" = "1" ]; then
+  npm run build -w @kx/office-api
+  npm run build -w @kx/office-web
+fi
 
 SERVER_IP="$(hostname -I | awk '{print $1}')"
 cat > "$ENV_FILE" <<ENV
@@ -87,6 +109,31 @@ if [ "$SEED" = "1" ]; then
   sudo -u "$APP_USER" env $(grep -v '^#' "$ENV_FILE" | xargs) node "$APP_DIR/apps/api/dist/db/seed.js"
 fi
 
+if [ "$OFFICE" = "1" ]; then
+  cat > "$OFFICE_ENV_FILE" <<ENV
+NODE_ENV=production
+TZ=Asia/Tehran
+PORT=$OFFICE_PORT
+DATABASE_URL=postgres://kx:$DB_PASS@localhost:5432/kx_office
+JWT_SECRET=$OFFICE_JWT_SECRET
+DATA_ENCRYPTION_KEY=$OFFICE_DATA_KEY
+WEB_DIST_DIR=$APP_DIR/apps/office-web/dist
+STORAGE_DIR=/var/lib/kx21/office-storage
+PUBLIC_URL=http://$SERVER_IP:$OFFICE_PORT
+CORS_ORIGINS=http://$SERVER_IP:$OFFICE_PORT,http://localhost:$OFFICE_PORT
+SMS_PROVIDER=log
+EMAIL_PROVIDER=log
+ENV
+  chmod 600 "$OFFICE_ENV_FILE"
+  chown -R "$APP_USER:$APP_USER" /var/lib/kx21
+  log "Office automation: migrations"
+  sudo -u "$APP_USER" env $(grep -v '^#' "$OFFICE_ENV_FILE" | xargs) node "$APP_DIR/apps/office-api/dist/db/migrate.js"
+  if [ "$SEED" = "1" ] && [ "$OFFICE_FIRST" = "1" ]; then
+    log "Office automation: demo data"
+    sudo -u "$APP_USER" env $(grep -v '^#' "$OFFICE_ENV_FILE" | xargs) node "$APP_DIR/apps/office-api/dist/db/seed.js"
+  fi
+fi
+
 log "Creating systemd service kx21"
 cat > /etc/systemd/system/kx21.service <<UNIT
 [Unit]
@@ -106,12 +153,37 @@ NoNewPrivileges=true
 [Install]
 WantedBy=multi-user.target
 UNIT
+if [ "$OFFICE" = "1" ]; then
+  cat > /etc/systemd/system/kx21-office.service <<UNIT
+[Unit]
+Description=Office automation (integrated with the commissions platform)
+After=network.target postgresql.service
+Requires=postgresql.service
+
+[Service]
+User=$APP_USER
+EnvironmentFile=$OFFICE_ENV_FILE
+WorkingDirectory=$APP_DIR/apps/office-api
+ExecStart=/usr/bin/node dist/server.js
+Restart=always
+RestartSec=3
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+fi
 systemctl daemon-reload
 systemctl enable kx21
 systemctl restart kx21
+if [ "$OFFICE" = "1" ]; then
+  systemctl enable kx21-office
+  systemctl restart kx21-office
+fi
 
 if command -v ufw >/dev/null && ufw status | grep -q "Status: active"; then
   ufw allow "$PORT/tcp"
+  [ "$OFFICE" = "1" ] && ufw allow "$OFFICE_PORT/tcp"
 fi
 
 log "Waiting for the service"
@@ -121,8 +193,29 @@ for _ in $(seq 1 30); do
 done
 curl -fs "http://127.0.0.1:$PORT/health" >/dev/null || { journalctl -u kx21 -n 50 --no-pager; exit 1; }
 
+if [ "$OFFICE" = "1" ]; then
+  for _ in $(seq 1 30); do
+    curl -fs "http://127.0.0.1:$OFFICE_PORT/health" >/dev/null && break
+    sleep 1
+  done
+  curl -fs "http://127.0.0.1:$OFFICE_PORT/health" >/dev/null || { journalctl -u kx21-office -n 50 --no-pager; exit 1; }
+  if [ "$SEED" = "1" ] && [ "$OFFICE_FIRST" = "1" ]; then
+    log "Connecting office automation to the meetings system"
+    sudo -u "$APP_USER" env $(grep -v '^#' "$OFFICE_ENV_FILE" | xargs) MEETINGS_URL="http://127.0.0.1:$PORT" \
+      MEETINGS_ADMIN_EMAIL=admin@kx.local MEETINGS_ADMIN_PASSWORD='Passw0rd!' \
+      OFFICE_WEBHOOK_URL="http://127.0.0.1:$OFFICE_PORT/api/integrations/meetings/webhook" \
+      node "$APP_DIR/apps/office-api/dist/db/connect-meetings.js" || echo "Connect later from the office automation «یکپارچه‌سازی» page."
+  fi
+fi
+
 echo
 echo "Installed. Open:  http://$SERVER_IP:$PORT"
 [ "$SEED" = "1" ] && echo "Demo login: admin@kx.local / Passw0rd!   (also chair@, secretary@, member1@kx.local)"
 echo "Logs:     journalctl -u kx21 -f"
 echo "Config:   $ENV_FILE   (after editing: systemctl restart kx21)"
+if [ "$OFFICE" = "1" ]; then
+  echo
+  echo "Office automation:  http://$SERVER_IP:$OFFICE_PORT"
+  [ "$SEED" = "1" ] && echo "Demo login: admin, clerk, cmshead, expert, president … / Passw0rd!"
+  echo "Logs:     journalctl -u kx21-office -f    Config: $OFFICE_ENV_FILE"
+fi
