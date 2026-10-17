@@ -146,7 +146,7 @@ sed -i "s/^PORT=.*/PORT=$PORT/" "$ENV_FILE"
 # Optional integrations passed on the command line are stored in the env file, e.g.
 #   curl … | SAPI_TOKEN=… ZARINPAL_MERCHANT_ID=… bash
 upsert() { sed -i "/^$1=/d" "$ENV_FILE"; printf '%s=%s\n' "$1" "$2" >> "$ENV_FILE"; }
-for VAR in SAPI_TOKEN SAPI_BASE IDENTITY_INQUIRY_URL SMS_PROVIDER SMS_API_KEY SMS_OTP_TEMPLATE SMS_MFA_TEMPLATE SMS_TEMPLATE_PARAM SMS_SENDER SMS_APIIR_SERVICE ADMIN_PHONE DRUG_API_BASE DRUG_API_TOKEN ZARINPAL_MERCHANT_ID ZARINPAL_SANDBOX PUBLIC_BASE_URL VISION_LLM_BASE_URL VISION_LLM_MODEL LLM_BASE_URL LLM_MODEL; do
+for VAR in SAPI_TOKEN SAPI_BASE IDENTITY_INQUIRY_URL SMS_PROVIDER SMS_API_KEY SMS_OTP_TEMPLATE SMS_MFA_TEMPLATE SMS_TEMPLATE_PARAM SMS_SENDER SMS_APIIR_SERVICE ADMIN_PHONE ADMIN_TAKEOVER DRUG_API_BASE DRUG_API_TOKEN ZARINPAL_MERCHANT_ID ZARINPAL_SANDBOX PUBLIC_BASE_URL VISION_LLM_BASE_URL VISION_LLM_MODEL LLM_BASE_URL LLM_MODEL; do
   VAL="${!VAR:-}"; [ -n "$VAL" ] && upsert "$VAR" "$VAL" && echo "   set $VAR"
 done
 [ -n "$DOMAIN" ] && upsert PUBLIC_BASE_URL "https://$DOMAIN"
@@ -358,7 +358,8 @@ fi
 
 # ---------------------------------------------------------------- check
 sleep 2
-if curl -fsS "http://127.0.0.1:$PORT/healthz" >/dev/null; then
+CHECK_HOST=127.0.0.1; [ "$BIND" = "0.0.0.0" ] || CHECK_HOST="$BIND"
+if curl -fsS "http://$CHECK_HOST:$PORT/healthz" >/dev/null; then
   IP=$(curl -fsS --max-time 5 https://api.ipify.org 2>/dev/null || hostname -I | awk '{print $1}')
   say "Done ✔"
   if [ -n "$DOMAIN" ]; then echo "   Open: https://$DOMAIN   (DNS A record of $DOMAIN must point to $IP)"

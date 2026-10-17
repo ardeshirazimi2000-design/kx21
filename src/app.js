@@ -55,6 +55,7 @@ export function loadConfig(env = process.env) {
     seed: env.SEED ? env.SEED !== 'false' : env.NODE_ENV !== 'production',
     // Production bootstrap: the real administrator's mobile number (demo accounts are disabled).
     adminPhone: env.ADMIN_PHONE || '',
+    adminTakeover: env.ADMIN_TAKEOVER === '1',
     llmBaseUrl: env.LLM_BASE_URL || '',
     llmModel: env.LLM_MODEL || 'llama-3.1-8b-instruct',
     llmApiKey: env.LLM_API_KEY || '',

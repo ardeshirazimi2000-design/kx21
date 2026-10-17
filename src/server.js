@@ -5,7 +5,7 @@ const app = createApp();
 const { port, host, devMode, llmBaseUrl } = app.config;
 
 app.server.listen(port, host, () => {
-  console.log(`\n🩺 Telehealth MVP running at http://localhost:${port}`);
+  console.log(`\n🩺 Telehealth MVP running at http://${host === '0.0.0.0' ? 'localhost' : host}:${port}`);
   console.log(`   mode: ${devMode ? 'development (OTP codes shown in UI/console)' : 'production'}`);
   console.log(`   assistant text generation: ${llmBaseUrl ? `self-hosted LLM at ${llmBaseUrl}` : 'grounded templates (set LLM_BASE_URL for vLLM)'}`);
   if (devMode) {

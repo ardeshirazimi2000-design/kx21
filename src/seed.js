@@ -72,8 +72,13 @@ export function bootstrapProduction({ db, config }) {
     const u = db.get('SELECT id, role FROM users WHERE tenant_id = ? AND phone = ?', t, admin);
     if (!u) {
       db.run('INSERT INTO users (id, tenant_id, role, phone, full_name, created_at) VALUES (?,?,?,?,?,?)', uuid(), t, 'admin', admin, 'مدیر سامانه', nowIso());
+    } else if (u.role === 'patient' && config.adminTakeover) {
+      // The owner signed up as a patient with their own number first (ADMIN_TAKEOVER=1 confirms it).
+      db.run("UPDATE users SET role = 'admin', staff_role_id = NULL, disabled_at = NULL, deleted_at = NULL WHERE id = ?", u.id);
+      console.warn(`[bootstrap] ADMIN_PHONE ${admin}: patient account converted to administrator`);
     } else if (u.role !== 'admin') {
-      console.warn(`[bootstrap] ADMIN_PHONE ${admin} already belongs to a ${u.role} account; not changed`);
+      console.warn(`[bootstrap] ADMIN_PHONE ${admin} already belongs to a ${u.role} account; not changed`
+        + (u.role === 'patient' ? ' (re-run the installer with ADMIN_TAKEOVER=1 to make it the administrator)' : ''));
     } else {
       db.run('UPDATE users SET deleted_at = NULL WHERE id = ?', u.id);
     }

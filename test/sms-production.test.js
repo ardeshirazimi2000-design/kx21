@@ -4,7 +4,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createSms } from '../src/lib/sms.js';
 import { startApp, randomNationalId } from './helpers.js';
-import { DEMO_ACCOUNTS } from '../src/seed.js';
+import { DEMO_ACCOUNTS, bootstrapProduction } from '../src/seed.js';
 
 test('Kavenegar verify/lookup and SMS.ir send/verify requests', async () => {
   const calls = [];
@@ -65,6 +65,22 @@ test('production: codes only by SMS, real admin bootstrapped, demo accounts disa
     const p = await t.call('POST', '/v1/auth/otp/request', { body: { phone: '09351112233', role: 'patient', national_id: randomNationalId() } });
     assert.equal(p.status, 503); // no Shahkar token in production → registration refused (fail closed)
     assert.equal(t.app.db.get('SELECT COUNT(*) AS n FROM doctors WHERE deleted_at IS NULL').n, 0);
+  } finally {
+    t.close();
+  }
+});
+
+test('ADMIN_PHONE already used by a patient: converted only with ADMIN_TAKEOVER', async () => {
+  const t = await startApp({ seed: false });
+  try {
+    const { db, config } = t.app;
+    const tenant = config.defaultTenant;
+    db.run('INSERT INTO users (id, tenant_id, role, phone, full_name, created_at) VALUES (?,?,?,?,?,?)', 'u-owner', tenant, 'patient', '09181110000', 'مالک', new Date().toISOString());
+    bootstrapProduction({ db, config: { ...config, adminPhone: '09181110000' } });
+    assert.equal(db.get('SELECT role FROM users WHERE id = ?', 'u-owner').role, 'patient');
+    bootstrapProduction({ db, config: { ...config, adminPhone: '09181110000', adminTakeover: true } });
+    assert.equal(db.get('SELECT role FROM users WHERE id = ?', 'u-owner').role, 'admin');
+    assert.equal(db.get('SELECT COUNT(*) AS n FROM users WHERE phone = ?', '09181110000').n, 1);
   } finally {
     t.close();
   }
