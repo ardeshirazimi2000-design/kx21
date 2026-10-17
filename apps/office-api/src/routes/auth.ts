@@ -80,7 +80,7 @@ authRouter.post('/logout', async (req, res) => {
 
 authRouter.get('/me', authenticate, async (req, res) => {
   const u = currentUser(req);
-  const profile = await one('SELECT id, username, full_name, email, mobile, national_id, clearance, mfa_enabled FROM users WHERE id = $1', [u.id]);
+  const profile = await one('SELECT id, username, full_name, email, mobile, national_id, clearance, mfa_enabled, signature_key IS NOT NULL AS has_signature FROM users WHERE id = $1', [u.id]);
   res.json({
     ...profile,
     roles: u.roles,

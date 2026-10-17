@@ -23,12 +23,16 @@ export async function signContent(
   input: { userId: string; entityType: 'letter' | 'document_version'; entityId: string; contentHash: string; positionTitle?: string | null },
 ) {
   const keys = await userKeys(input.userId, db);
+  const specimen = await one('SELECT signature_key, signature_mime FROM users WHERE id = $1', [input.userId], db);
   const message = Buffer.from(`${input.entityType}:${input.entityId}:${input.contentHash}`);
   const signature = crypto.sign(null, message, keys.privateKey).toString('base64');
   return one(
-    `INSERT INTO signatures (entity_type, entity_id, user_id, position_title, content_hash, signature, public_key)
-     VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id, entity_type, entity_id, user_id, position_title, algorithm, content_hash, signed_at`,
-    [input.entityType, input.entityId, input.userId, input.positionTitle ?? null, input.contentHash, signature, keys.publicKey],
+    `INSERT INTO signatures (entity_type, entity_id, user_id, position_title, content_hash, signature, public_key, image_key, image_mime)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id, entity_type, entity_id, user_id, position_title, algorithm, content_hash, signed_at`,
+    [
+      input.entityType, input.entityId, input.userId, input.positionTitle ?? null, input.contentHash, signature, keys.publicKey,
+      specimen?.signature_key ?? null, specimen?.signature_mime ?? null,
+    ],
     db,
   );
 }
@@ -51,5 +55,9 @@ export async function signaturesOf(entityType: string, entityId: string, current
     [entityType, entityId],
     db,
   );
-  return rows.map(({ signature, public_key, ...r }) => ({ ...r, ...verifySignature({ ...r, signature, public_key }, currentHash) }));
+  return rows.map(({ signature, public_key, image_key, image_mime: _m, ...r }) => ({
+    ...r,
+    has_image: !!image_key,
+    ...verifySignature({ ...r, signature, public_key }, currentHash),
+  }));
 }

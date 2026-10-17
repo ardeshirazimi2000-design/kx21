@@ -1435,6 +1435,168 @@ paths:
         in: path
         required: true
         schema: *id003
+  /api/letters/{id}/signatures/{sigId}/image:
+    get:
+      tags:
+      - Correspondence
+      summary: تصویر امضای ثبت‌شده روی نامه
+      responses:
+        '200':
+          description: OK
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Forbidden
+        '404':
+          description: Not found or not visible
+        '409':
+          description: Conflict (state / business rule)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: *id003
+      - name: sigId
+        in: path
+        required: true
+        schema: *id001
+  /api/signatures:
+    get:
+      tags:
+      - Correspondence
+      summary: فهرست نمونه امضای کاربران [signatures.manage]
+      responses:
+        '200':
+          description: OK
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Forbidden
+        '404':
+          description: Not found or not visible
+        '409':
+          description: Conflict (state / business rule)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /api/users/{id}/signature:
+    get:
+      tags:
+      - Correspondence
+      summary: تصویر نمونه امضای کاربر
+      responses:
+        '200':
+          description: OK
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Forbidden
+        '404':
+          description: Not found or not visible
+        '409':
+          description: Conflict (state / business rule)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: *id003
+    post:
+      tags:
+      - Correspondence
+      summary: ثبت یا جایگزینی نمونه امضا (PNG/JPEG، حداکثر ۱ مگابایت) [خود کاربر یا signatures.manage]
+      responses:
+        '200':
+          description: OK
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Forbidden
+        '404':
+          description: Not found or not visible
+        '409':
+          description: Conflict (state / business rule)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                file:
+                  type: string
+                  format: binary
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: *id003
+    delete:
+      tags:
+      - Correspondence
+      summary: حذف نمونه امضا
+      responses:
+        '200':
+          description: OK
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Forbidden
+        '404':
+          description: Not found or not visible
+        '409':
+          description: Conflict (state / business rule)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: *id003
   /api/letters/{id}/send:
     post:
       tags:
@@ -2869,6 +3031,49 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: *id003
+  /api/meetings/{id}/invitation-letters:
+    post:
+      tags:
+      - Meetings
+      summary: ساخت پیش‌نویس نامه دعوت برای مدعوین [letter.register_outgoing]
+      responses:
+        '200':
+          description: OK
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Forbidden
+        '404':
+          description: Not found or not visible
+        '409':
+          description: Conflict (state / business rule)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      description: Skips invitees that already have a non-cancelled invitation letter.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                inviteeIds:
+                  type: array
+                  items: *id003
+                note: *id001
       parameters:
       - name: id
         in: path

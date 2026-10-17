@@ -91,6 +91,11 @@ E = [
     ("patch", "/api/routes/{id}", "Correspondence", "پاسخ به ارجاع (seen/done/returned)", S(status=enum("seen", "done", "returned"), response=str_), None),
     ("get", "/api/cartable", "Correspondence", "کارتابل: ارجاعات و گام‌های گردش کار در انتظار", None, None),
     ("post", "/api/letters/{id}/sign", "Correspondence", "امضای دیجیتال (Ed25519 روی هش محتوا و پیوست‌ها)", None, None),
+    ("get", "/api/letters/{id}/signatures/{sigId}/image", "Correspondence", "تصویر امضای ثبت‌شده روی نامه", None, None),
+    ("get", "/api/signatures", "Correspondence", "فهرست نمونه امضای کاربران [signatures.manage]", None, None),
+    ("get", "/api/users/{id}/signature", "Correspondence", "تصویر نمونه امضای کاربر", None, None),
+    ("post", "/api/users/{id}/signature", "Correspondence", "ثبت یا جایگزینی نمونه امضا (PNG/JPEG، حداکثر ۱ مگابایت) [خود کاربر یا signatures.manage]", None, None),
+    ("delete", "/api/users/{id}/signature", "Correspondence", "حذف نمونه امضا", None, None),
     ("post", "/api/letters/{id}/send", "Correspondence", "ثبت ارسال نامه صادره", S(deliveryMethod=str_, requireSignature=bool_), None),
     ("post", "/api/letters/{id}/archive", "Correspondence", "بایگانی نامه", S(folderId=uuid), None),
     ("post", "/api/letters/{id}/cancel", "Correspondence", "ابطال", S(reason=str_), None),
@@ -138,6 +143,7 @@ E = [
     ("post", "/api/intake/letters", "Integration", "ثبت نامه وارده از ایمیل/اسکن/سامانه دیگر (X-Api-Key)", S(subject=str_, body=str_, externalOrg=str_, externalParty=str_, externalNumber=str_, externalDate=date, source=enum("email", "scan", "api"), externalRef=str_, attachments=arr(S(fileName=str_, contentBase64=str_))), None),
     ("get", "/api/meetings", "Meetings", "جلسات (کش سامانه جلسات) [meetings.view]", None, None),
     ("get", "/api/meetings/{id}", "Meetings", "جلسه (?refresh=1 دریافت مجدد)", None, None),
+    ("post", "/api/meetings/{id}/invitation-letters", "Meetings", "ساخت پیش‌نویس نامه دعوت برای مدعوین [letter.register_outgoing]", S(inviteeIds=arr(uuid), note=str_), "Skips invitees that already have a non-cancelled invitation letter."),
     ("get", "/api/commissions", "Meetings", "کمیسیون‌ها از سامانه جلسات [meetings.refer]", None, None),
     ("get", "/api/resolutions", "Meetings", "مصوبات (?mine&status&q)", None, None),
     ("get", "/api/resolutions/{id}", "Meetings", "مصوبه با گزارش‌های پیگیری", None, None),
@@ -164,6 +170,8 @@ for method, path, tag, summary, body, notes in E:
         op["requestBody"] = {"required": True, "content": {"application/json": {"schema": body}}}
     if path.endswith("/attachments") or path.endswith("/versions") or path == "/api/archive/documents" and method == "post":
         op["requestBody"] = {"required": True, "content": multipart_file(groupId=uuid, title=str_, folderId=uuid, note=str_)}
+    if path == "/api/users/{id}/signature" and method == "post":
+        op["requestBody"] = {"required": True, "content": multipart_file()}
     if path in ("/api/auth/login", "/api/auth/refresh", "/api/auth/mfa/verify"):
         op["responses"]["200"] = {"description": "OK", "content": {"application/json": {"schema": ref("Tokens")}}}
     if method == "get" and path in ("/api/letters", "/api/users", "/api/archive/documents", "/api/notifications", "/api/audit", "/api/meetings", "/api/resolutions"):

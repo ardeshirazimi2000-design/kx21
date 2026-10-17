@@ -139,6 +139,15 @@ export async function openFile(path: string) {
 }
 
 /** Authenticated SVG/text fetch (barcode, QR). */
+/** Object URL of an authenticated file (images shown inline); the caller revokes it. */
+export async function blobUrl(path: string): Promise<string> {
+  const s = getSession();
+  const res = await fetch(`/api${path}`, { headers: s ? { authorization: `Bearer ${s.accessToken}` } : {} });
+  if (res.status === 401 && (await refresh())) return blobUrl(path);
+  if (!res.ok) throw new ApiError(res.status, 'download_failed', 'دریافت فایل ممکن نشد');
+  return URL.createObjectURL(await res.blob());
+}
+
 export async function fetchText(path: string): Promise<string> {
   const s = getSession();
   const res = await fetch(`/api${path}`, { headers: s ? { authorization: `Bearer ${s.accessToken}` } : {} });

@@ -112,6 +112,7 @@ E = [
     ("patch", "/api/meetings/{id}", "Meetings", "ویرایش زمان/مکان (اعلان فوری تغییر)", S(title=str_, scheduledAt=dt, location=str_, onlineLink=str_), None),
     ("post", "/api/meetings/{id}/invitees", "Meetings", "افزودن مدعو", S(userId=uuid, role=str_, hasVote=bool_), None),
     ("delete", "/api/meetings/{id}/invitees/{userId}", "Meetings", "حذف مدعو", None, None),
+    ("post", "/api/meetings/{id}/invitation-letters", "Meetings", "درخواست پیش‌نویس نامه دعوت از اتوماسیون اداری [meeting.manage]", S(userIds={"type": "array", "items": uuid}, note=str_), "Queues `meeting.invitation_letters_requested` for connected office-automation clients. 202 { queued, invitees }; 409 when no client subscribes."),
     ("post", "/api/meetings/{id}/schedule", "Meetings", "Draft → Scheduled", None, None),
     ("post", "/api/meetings/{id}/invite", "Meetings", "ارسال دعوت‌نامه (Push/SMS/Email/In-app)", None, None),
     ("post", "/api/meetings/{id}/checkin/open", "Attendance", "باز کردن اعلام حضور", None, None),

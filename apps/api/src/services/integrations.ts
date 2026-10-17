@@ -18,7 +18,13 @@ export const INTEGRATION_SCOPES = [
 ] as const;
 export type IntegrationScope = (typeof INTEGRATION_SCOPES)[number];
 
-export const INTEGRATION_EVENTS = ['resolution.created', 'resolution.updated', 'meeting.updated', 'referral.updated'] as const;
+export const INTEGRATION_EVENTS = [
+  'resolution.created',
+  'resolution.updated',
+  'meeting.updated',
+  'referral.updated',
+  'meeting.invitation_letters_requested',
+] as const;
 
 export interface IntegrationClient {
   id: string;

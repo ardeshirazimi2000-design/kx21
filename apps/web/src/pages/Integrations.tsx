@@ -18,6 +18,7 @@ const EVENT_LABEL: Record<string, string> = {
   'resolution.created': 'ثبت مصوبه',
   'resolution.updated': 'تغییر مصوبه',
   'meeting.updated': 'تغییر جلسه',
+  'meeting.invitation_letters_requested': 'درخواست نامه دعوت',
   'referral.updated': 'تغییر وضعیت ارجاع',
 };
 const EVENT_STATUS: Record<string, [string, 'warning' | 'success' | 'danger' | 'neutral']> = {

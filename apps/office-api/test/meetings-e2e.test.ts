@@ -4,6 +4,7 @@
  *  1. ثبت مصوبه → signed webhook → internal letter + follow-up workflow in office automation
  *  2. ارجاع مکاتبه به جلسه → agenda issue (with attachment) in the meetings system, status changes come back
  *  3. پیگیری اجرای مصوبه → workflow completion reports progress 100% back to the meetings system
+ * and the invitation letters (نامه دعوت) a commission secretary requests for a meeting's invitees.
  */
 import { spawn, type ChildProcess } from 'node:child_process';
 import http from 'node:http';
@@ -250,6 +251,59 @@ describe('office automation ⇄ commission meetings (end to end)', () => {
     expect(n.some((x: any) => x.event === 'meeting.referral_updated')).toBe(true);
     const detail = (await as('clerk').get(`/api/letters/${l.body.id}`)).body;
     expect(detail.meetingRefs[0].status).toBe('under_review');
+  }, 60_000);
+
+  it('invitation letters: the meetings system asks for drafts for chosen invitees', async () => {
+    const meeting = (await mdb.query(`SELECT id, title FROM meetings WHERE status = 'invitation_sent' LIMIT 1`)).rows[0];
+    const invitees = (
+      await mdb.query(
+        `SELECT u.id, u.full_name, u.organization, mi.role FROM meeting_invitees mi JOIN users u ON u.id = mi.user_id WHERE mi.meeting_id = $1 ORDER BY mi.role = 'guest' DESC, u.full_name`,
+        [meeting.id],
+      )
+    ).rows;
+    const guest = invitees.find((x) => x.role === 'guest');
+    const member = invitees.find((x) => x.role !== 'guest');
+    const outsider = (await mdb.query(`SELECT id FROM users WHERE id <> ALL($1::uuid[]) AND chamber_id = $2 LIMIT 1`, [invitees.map((x) => x.id), chamberId])).rows[0];
+    // The commission secretary manages the meeting (the chamber admin only administers).
+    const adminToken = meetingsToken;
+    expect((await m('POST', `/meetings/${meeting.id}/invitation-letters`, { userIds: [guest.id] })).status).toBe(403);
+    meetingsToken = (await m('POST', '/auth/login', { identifier: 'secretary@kx.local', password: 'Passw0rd!' })).body.accessToken;
+    expect((await m('POST', `/meetings/${meeting.id}/invitation-letters`, { userIds: [guest.id, outsider.id] })).status).toBe(400);
+
+    const req1 = await m('POST', `/meetings/${meeting.id}/invitation-letters`, { userIds: [guest.id, member.id], note: 'همراه داشتن مستندات صادرات الزامی است.' });
+    expect(req1.status).toBe(202);
+    expect(req1.body.queued).toBe(1);
+    const rows = await until('invitation letters', async () => {
+      const r = (await pool.query(`SELECT * FROM meeting_invitation_letters WHERE meeting_external_id = $1`, [meeting.id])).rows;
+      return r.length === 2 ? r : null;
+    });
+    const guestLetter = (await as('clerk').get(`/api/letters/${rows.find((r) => r.invitee_external_id === guest.id).letter_id}`)).body;
+    expect(guestLetter).toMatchObject({ kind: 'outgoing', status: 'draft', source: 'meeting', external_party: guest.full_name, external_org: guest.organization });
+    expect(guestLetter.body).toContain(meeting.title);
+    expect(guestLetter.body).toContain('دستور جلسه');
+    expect(guestLetter.body).toContain('همراه داشتن مستندات');
+    expect((await as('clerk').get('/api/notifications')).body.items.some((n: any) => n.event === 'meeting.invitation_letters')).toBe(true);
+    // The secretariat numbers the draft like any outgoing letter.
+    expect((await as('clerk').post(`/api/letters/${guestLetter.id}/register`)).body.number).toMatch(/^ص\//);
+
+    // Asking again does not duplicate letters for invitees that already have one.
+    await m('POST', `/meetings/${meeting.id}/invitation-letters`, { userIds: [guest.id, member.id] });
+    await until('second request processed', async () => {
+      const r = await pool.query(`SELECT 1 FROM integration_inbox WHERE event_type = 'meeting.invitation_letters_requested' AND status = 'processed'`);
+      return r.rowCount === 2;
+    });
+    expect((await pool.query(`SELECT 1 FROM meeting_invitation_letters WHERE meeting_external_id = $1`, [meeting.id])).rowCount).toBe(2);
+
+    // The office side can draft the rest directly; only the secretariat may.
+    const third = invitees.find((x) => x.id !== guest.id && x.id !== member.id);
+    expect((await as('expert').post(`/api/meetings/${meeting.id}/invitation-letters`, { inviteeIds: [third.id] })).status).toBe(403);
+    const own = await as('clerk').post(`/api/meetings/${meeting.id}/invitation-letters`, { inviteeIds: [third.id] });
+    expect(own.status).toBe(201);
+    expect(own.body.created).toBe(1);
+    const detail = (await as('clerk').get(`/api/meetings/${meeting.id}`)).body;
+    expect(detail.invitations).toHaveLength(3);
+    expect(detail.invitations.some((x: any) => x.letter_number)).toBe(true);
+    meetingsToken = adminToken;
   }, 60_000);
 
   it('rejects unsigned or replayed webhooks', async () => {

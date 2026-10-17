@@ -1,10 +1,11 @@
 import { roleLabel } from '@kx/shared';
 import { useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
-import { MEETING_STATUS, Pill, RESOLUTION_STATUS, REFERRAL_STATUS } from '../components/labels';
-import { Button, Card, Empty, ErrorBox, Loading, PageHeader, Pager, Tabs, dateFa, dateTimeFa, fa } from '../components/ui';
+import { MEETING_STATUS, Pill, RESOLUTION_STATUS, REFERRAL_STATUS, STATUS } from '../components/labels';
+import { Button, Card, Empty, ErrorBox, Field, Loading, Modal, PageHeader, Pager, Tabs, dateFa, dateTimeFa, fa } from '../components/ui';
+import { useAuth } from '../lib/auth';
 import { useAction, useApi } from '../lib/hooks';
-import { api, download } from '../lib/api';
+import { api, download, post } from '../lib/api';
 
 export function MeetingsPage() {
   const [tab, setTab] = useState<'upcoming' | 'all'>('upcoming');
@@ -73,6 +74,8 @@ export function MeetingDetailPage() {
   const { id } = useParams();
   const r = useApi<any>(`/meetings/${id}`, [id]);
   const act = useAction();
+  const { can } = useAuth();
+  const [inviting, setInviting] = useState(false);
   if (r.error) return <ErrorBox error={r.error} />;
   if (!r.data) return <Loading />;
   const m = r.data;
@@ -151,6 +154,57 @@ export function MeetingDetailPage() {
           </table>
         )}
       </Card>
+      <Card
+        title="نامه‌های دعوت"
+        className="mt"
+        actions={
+          can('letter.register_outgoing') && (d.participants ?? []).length > 0 && (
+            <Button size="sm" variant="secondary" onClick={() => setInviting(true)}>
+              ساخت نامه دعوت
+            </Button>
+          )
+        }
+      >
+        {!m.invitations.length ? (
+          <Empty>برای این جلسه نامه دعوتی ساخته نشده است. دبیر کمیسیون می‌تواند از صفحه مدعوین جلسه در سامانه جلسات آن را درخواست کند.</Empty>
+        ) : (
+          <table className="table">
+            <thead>
+              <tr>
+                <th>مدعو</th>
+                <th>نامه</th>
+                <th>وضعیت</th>
+                <th>درخواست‌کننده</th>
+              </tr>
+            </thead>
+            <tbody>
+              {m.invitations.map((x: any) => (
+                <tr key={x.letter_id}>
+                  <td>{x.invitee_name}</td>
+                  <td>
+                    <Link to={`/letters/${x.letter_id}`}>{x.letter_number ? fa(x.letter_number) : 'پیش‌نویس'}</Link>
+                  </td>
+                  <td>
+                    <Pill map={STATUS} value={x.letter_status} />
+                  </td>
+                  <td className="small">
+                    {x.requested_by ?? '—'} <span className="muted">{dateTimeFa(x.created_at)}</span>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </Card>
+      {inviting && (
+        <InvitationLettersModal
+          meetingId={m.id}
+          participants={d.participants ?? []}
+          already={m.invitations.filter((x: any) => x.letter_status !== 'cancelled').map((x: any) => x.invitee_external_id)}
+          onClose={() => setInviting(false)}
+          onDone={async () => (setInviting(false), await r.reload())}
+        />
+      )}
       {(d.documents ?? []).length > 0 && (
         <Card title="مستندات جلسه" className="mt">
           <ul className="list">
@@ -185,5 +239,80 @@ export function MeetingDetailPage() {
         </Card>
       )}
     </>
+  );
+}
+
+function InvitationLettersModal({
+  meetingId,
+  participants,
+  already,
+  onClose,
+  onDone,
+}: {
+  meetingId: string;
+  participants: any[];
+  already: string[];
+  onClose: () => void;
+  onDone: () => void;
+}) {
+  const open = participants.filter((p) => !already.includes(p.id));
+  const [selected, setSelected] = useState<Set<string>>(() => new Set(open.map((p) => p.id)));
+  const [note, setNote] = useState('');
+  const act = useAction();
+  const toggle = (id: string) =>
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  return (
+    <Modal
+      title="ساخت پیش‌نویس نامه دعوت"
+      onClose={onClose}
+      wide
+      footer={
+        <>
+          <Button variant="secondary" onClick={onClose}>
+            انصراف
+          </Button>
+          <Button
+            busy={act.busy}
+            disabled={!selected.size}
+            onClick={() =>
+              act.run(async () => {
+                await post(`/meetings/${meetingId}/invitation-letters`, { inviteeIds: [...selected], note: note.trim() || null });
+                onDone();
+              })
+            }
+          >
+            ساخت {fa(selected.size)} نامه
+          </Button>
+        </>
+      }
+    >
+      <ErrorBox error={act.error} />
+      {!open.length ? (
+        <Empty>برای همه مدعوین نامه دعوت ساخته شده است.</Empty>
+      ) : (
+        <table className="table">
+          <tbody>
+            {open.map((p) => (
+              <tr key={p.id}>
+                <td style={{ width: 32 }}>
+                  <input type="checkbox" checked={selected.has(p.id)} onChange={() => toggle(p.id)} aria-label={p.full_name} />
+                </td>
+                <td>{p.full_name}</td>
+                <td className="muted">{p.organization}</td>
+                <td>{roleLabel(p.role)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+      <Field label="توضیح اضافه در متن نامه (اختیاری)">
+        <textarea className="input" rows={3} value={note} onChange={(e) => setNote(e.target.value)} maxLength={2000} />
+      </Field>
+    </Modal>
   );
 }

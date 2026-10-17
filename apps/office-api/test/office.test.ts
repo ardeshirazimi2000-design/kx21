@@ -35,6 +35,7 @@ async function login(who: string) {
 }
 
 const PDF = Buffer.from('%PDF-1.4\n1 0 obj<<>>endobj\ntrailer<<>>\n%%EOF');
+const png = (marker: string) => Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.from(marker)]);
 
 beforeAll(async () => {
   await pool.query('DROP SCHEMA public CASCADE; CREATE SCHEMA public;');
@@ -212,6 +213,48 @@ describe('letter intake (ایمیل / اسکن / API)', () => {
     expect((await as('clerk').get('/api/cartable')).body.some((x: any) => x.letter_id === r.body.id)).toBe(true);
     // The secretariat checks it and registers it.
     expect((await as('clerk').post(`/api/letters/${r.body.id}/register`)).body.number).toMatch(/^و\//);
+  });
+});
+
+describe('specimen signatures (نمونه امضا)', () => {
+  it('the secretariat registers signatures; the image in use is captured with each digital signature', async () => {
+    const first = png('president-v1');
+    // Only the person themself or the secretariat (signatures.manage) registers a specimen.
+    expect((await as('expert').upload(`/api/users/${me.president.id}/signature`, {}, first, 'sign.png')).status).toBe(403);
+    expect((await as('clerk').upload(`/api/users/${me.president.id}/signature`, {}, Buffer.from('not an image'), 'sign.png')).status).toBe(400);
+    expect((await as('clerk').upload(`/api/users/${me.president.id}/signature`, {}, PDF, 'sign.pdf')).status).toBe(400);
+    expect((await as('clerk').upload(`/api/users/${me.president.id}/signature`, {}, first, 'sign.png')).status).toBe(204);
+    expect((await as('expert').upload(`/api/users/${me.expert.id}/signature`, {}, png('expert'), 'mine.png')).status).toBe(204);
+    expect((await as('expert').get('/api/auth/me')).body.has_signature).toBe(true);
+    expect((await as('expert').get('/api/signatures')).status).toBe(403);
+    expect((await as('cmsexpert').get(`/api/users/${me.expert.id}/signature`)).status).toBe(403);
+    const list = await as('clerk').get('/api/signatures?q=' + encodeURIComponent(me.president.full_name));
+    expect(list.body.items[0]).toMatchObject({ id: me.president.id, has_signature: true, can_sign: true, signature_updated_by: me.clerk.full_name });
+
+    // President signs a numbered letter: the specimen is stored with the signature.
+    const l = (await as('president').post('/api/letters', { kind: 'outgoing', subject: 'نامه آزمایشی امضا', body: 'متن', externalOrg: 'سازمان نمونه' })).body;
+    await as('president').post(`/api/letters/${l.id}/routes`, { targets: [{ userId: me.clerk.id, action: 'refer', instruction: 'شماره شود' }] });
+    expect((await as('clerk').post(`/api/letters/${l.id}/register`)).status).toBe(200);
+    const sig = await as('president').post(`/api/letters/${l.id}/sign`);
+    expect(sig.status).toBe(201);
+    let d = (await as('clerk').get(`/api/letters/${l.id}`)).body;
+    expect(d.signatures[0]).toMatchObject({ has_image: true, valid: true, intact: true });
+    expect(d.signatures[0].image_key).toBeUndefined();
+    const img = await as('clerk').get(`/api/letters/${l.id}/signatures/${sig.body.id}/image`);
+    expect(img.status).toBe(200);
+    expect(img.headers['content-type']).toBe('image/png');
+    expect(Buffer.from(img.body).equals(first)).toBe(true);
+    // Replacing the specimen later does not change the already-signed letter.
+    expect((await as('clerk').upload(`/api/users/${me.president.id}/signature`, {}, png('president-v2'), 'new.png')).status).toBe(204);
+    const again = await as('clerk').get(`/api/letters/${l.id}/signatures/${sig.body.id}/image`);
+    expect(Buffer.from(again.body).equals(first)).toBe(true);
+    // A person who cannot see the letter cannot fetch its signature image.
+    expect((await as('reshead').get(`/api/letters/${l.id}/signatures/${sig.body.id}/image`)).status).toBe(404);
+    expect((await as('expert').post(`/api/users/${me.expert.id}/signature`)).status).toBe(400);
+    d = (await as('expert').get('/api/auth/me')).body;
+    expect(d.has_signature).toBe(true);
+    expect((await request(app).delete(`/api/users/${me.expert.id}/signature`).set('authorization', `Bearer ${tokens.expert}`)).status).toBe(204);
+    expect((await as('expert').get('/api/auth/me')).body.has_signature).toBe(false);
   });
 });
 
