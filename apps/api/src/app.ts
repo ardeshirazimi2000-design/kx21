@@ -14,6 +14,7 @@ import { agendaRouter } from './routes/agenda.js';
 import { authRouter } from './routes/auth.js';
 import { delegatesRouter } from './routes/delegates.js';
 import { documentsRouter, filesRouter } from './routes/documents.js';
+import { integrationApiRouter, integrationsAdminRouter } from './routes/integration.js';
 import { meetingsRouter } from './routes/meetings.js';
 import { minutesRouter } from './routes/minutes.js';
 import { reportsRouter } from './routes/reports.js';
@@ -69,6 +70,12 @@ export function createApp() {
 
   app.use('/api/auth', authRouter);
   app.use('/api', filesRouter);
+  // Machine-to-machine API for integrated systems (API key / OAuth2 client credentials).
+  app.use(
+    '/api/integration/v1',
+    rateLimit({ windowMs: 60 * 1000, limit: config.isTest ? 100000 : 1200, standardHeaders: 'draft-8', legacyHeaders: false }),
+    integrationApiRouter,
+  );
 
   const api = express.Router();
   api.use(authenticate);
@@ -91,6 +98,7 @@ export function createApp() {
   api.use(reportsRouter);
   api.use(rolesRouter);
   api.use(delegatesRouter);
+  api.use(integrationsAdminRouter);
   app.use('/api', api);
 
   // Single-port mode: serve the built web app and fall back to index.html for client routes.

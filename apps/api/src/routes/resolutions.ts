@@ -8,6 +8,7 @@ import { body, dateStr, listParam, paged, pageParams, param, uuid } from '../lib
 import { commissionAccess } from '../services/access.js';
 import { adminBrowsableChambers, browsableCommissionIds } from '../services/roles.js';
 import { notify } from '../services/notifications.js';
+import { notifySubmitted, recordProgress } from '../services/resolutionProgress.js';
 
 export const resolutionsRouter = Router();
 
@@ -137,7 +138,8 @@ resolutionsRouter.get('/resolutions/:id', async (req, res) => {
   const { r, canManage, isOwner } = await loadResolution(u, param(req, 'id'));
   const [updates, tasks, documents, extra] = await Promise.all([
     query(
-      `SELECT ru.*, u.full_name FROM resolution_updates ru JOIN users u ON u.id = ru.user_id WHERE ru.resolution_id = $1 ORDER BY ru.created_at DESC`,
+      `SELECT ru.*, COALESCE(u.full_name, ic.name) AS full_name FROM resolution_updates ru LEFT JOIN users u ON u.id = ru.user_id
+         LEFT JOIN integration_clients ic ON ic.id = ru.integration_client_id WHERE ru.resolution_id = $1 ORDER BY ru.created_at DESC`,
       [r.id],
     ),
     query('SELECT t.*, u.full_name AS assignee_name FROM tasks t LEFT JOIN users u ON u.id = t.assignee_id WHERE t.resolution_id = $1', [r.id]),
@@ -208,37 +210,13 @@ resolutionsRouter.patch('/resolutions/:id/progress', async (req, res) => {
   const { row, officers } = await tx(async (c) => {
     const { r, canManage, isOwner } = await loadResolution(u, param(req, 'id'), c, true);
     if (!isOwner && !canManage) throw forbidden('فقط مسئول اجرا می‌تواند پیشرفت را ثبت کند');
-    if (['done', 'cancelled'].includes(r.status)) throw conflict('این مصوبه بسته شده است');
     if (b.documentId) {
       const d = await one('SELECT resolution_id FROM documents WHERE id = $1', [b.documentId], c);
       if (!d || d.resolution_id !== r.id) throw badRequest('مستند متعلق به این مصوبه نیست');
     }
-    const status = b.submit || b.progress === 100 ? 'submitted' : 'in_progress';
-    const row = await one(`UPDATE resolutions SET progress = $2, status = $3, updated_at = now() WHERE id = $1 RETURNING *`, [r.id, b.progress, status], c);
-    await c.query(`INSERT INTO resolution_updates (resolution_id, user_id, kind, progress, note, document_id) VALUES ($1,$2,'progress',$3,$4,$5)`, [
-      r.id, u.id, b.progress, b.note ?? null, b.documentId ?? null,
-    ]);
-    await c.query(`UPDATE tasks SET status = 'in_progress', output = COALESCE($2, output), updated_at = now() WHERE resolution_id = $1`, [r.id, b.note ?? null]);
-    await audit(c, req, { chamberId: r.chamber_id, action: 'resolution.progress', entity: 'resolution', entityId: r.id, before: { progress: r.progress, status: r.status }, after: { progress: b.progress, status } });
-    const officers = status === 'submitted'
-      ? await query<{ user_id: string }>(
-          `SELECT user_id FROM commission_memberships WHERE commission_id = $1 AND status = 'active' AND position = 'secretary'`,
-          [r.commission_id],
-          c,
-        )
-      : [];
-    return { row, officers: officers.map((o) => o.user_id) };
+    return recordProgress(c, req, r, { ...b, userId: u.id });
   });
-  if (officers.length) {
-    await notify({
-      chamberId: row.chamber_id,
-      userIds: officers,
-      event: 'resolution.reviewed',
-      title: `گزارش اجرای مصوبه ${row.number} برای بررسی ارسال شد`,
-      body: `پیشرفت اعلام‌شده: ${row.progress}٪`,
-      data: { resolutionId: row.id },
-    });
-  }
+  await notifySubmitted(row, officers);
   res.json(row);
 });
 

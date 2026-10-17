@@ -43,6 +43,11 @@ export const config = {
    * Built-in webinar (self-hosted Jitsi Meet with JWT authentication, see deploy/webinar).
    * Enabled when both the public URL and the shared secret are set.
    */
+  /** 64 hex chars (AES-256) for secrets at rest; derived from JWT_SECRET when unset. */
+  dataEncryptionKey: process.env.DATA_ENCRYPTION_KEY,
+  /** Outbox delivery to integration webhooks (run on a single instance in multi-instance deployments). */
+  integrationWorkerEnabled: process.env.INTEGRATION_WORKER_ENABLED !== 'false',
+  integrationWorkerIntervalSeconds: Number(process.env.INTEGRATION_WORKER_INTERVAL_SECONDS ?? '5'),
   webinar: {
     url: (process.env.WEBINAR_URL ?? '').replace(/\/+$/, ''),
     appId: process.env.WEBINAR_APP_ID ?? 'kx-commissions',
@@ -51,6 +56,10 @@ export const config = {
     earlyMinutes: Number(process.env.WEBINAR_EARLY_MINUTES ?? '30'),
   },
 };
+
+if (config.dataEncryptionKey && !/^[0-9a-f]{64}$/i.test(config.dataEncryptionKey)) {
+  throw new Error('DATA_ENCRYPTION_KEY must be 64 hex characters (openssl rand -hex 32)');
+}
 
 if (isProd && config.jwtSecret.length < 32) {
   throw new Error('JWT_SECRET must be at least 32 characters in production');
