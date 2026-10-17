@@ -197,6 +197,24 @@ describe('correspondence (مکاتبات)', () => {
   });
 });
 
+describe('letter intake (ایمیل / اسکن / API)', () => {
+  it('an intake gateway posts an incoming letter with attachments into the secretariat cartable', async () => {
+    const payload = { subject: 'نامه دریافتی از ایمیل دبیرخانه', externalOrg: 'شرکت نمونه', source: 'email', attachments: [{ fileName: 'scan.pdf', contentBase64: PDF.toString('base64') }] };
+    expect((await request(app).post('/api/intake/letters').set('x-api-key', 'oai_wrong').send(payload)).status).toBe(401);
+    expect((await as('clerk').put('/api/integrations/intake', { rotateKey: true })).status).toBe(403);
+    const k = await as('admin').put('/api/integrations/intake', { rotateKey: true });
+    expect(k.body.apiKey).toMatch(/^oai_/);
+    const r = await request(app).post('/api/intake/letters').set('x-api-key', k.body.apiKey).send(payload);
+    expect(r.status).toBe(201);
+    const l = (await as('clerk').get(`/api/letters/${r.body.id}`)).body;
+    expect(l).toMatchObject({ kind: 'incoming', status: 'draft', source: 'email' });
+    expect(l.attachments).toHaveLength(1);
+    expect((await as('clerk').get('/api/cartable')).body.some((x: any) => x.letter_id === r.body.id)).toBe(true);
+    // The secretariat checks it and registers it.
+    expect((await as('clerk').post(`/api/letters/${r.body.id}/register`)).body.number).toMatch(/^و\//);
+  });
+});
+
 describe('workflow engine (گردش کار)', () => {
   let outgoing: any;
 

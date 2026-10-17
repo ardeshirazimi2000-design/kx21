@@ -181,6 +181,28 @@ E = [
     ("get", "/api/search", "Reports", "جستجوی سراسری (?q)", None, None),
     ("get", "/api/audit", "Audit", "رویدادنگاری (?chamberId&entity&entityId&action)", None, None),
     ("get", "/api/audit/verify", "Audit", "بررسی سلامت زنجیره هش", None, None),
+    # Integration admin (chamber admins): external systems such as office automation.
+    ("get", "/api/integrations", "Integrations", "سامانه‌های متصل (?chamberId)", None, None),
+    ("post", "/api/integrations", "Integrations", "تعریف سامانه خارجی؛ کلید API و رمز Webhook فقط یک بار برگردانده می‌شوند", S(chamberId=uuid, name=str_, description=str_, scopes={"type": "array", "items": str_}, events={"type": "array", "items": str_}, webhookUrl=str_), None),
+    ("patch", "/api/integrations/{id}", "Integrations", "ویرایش / غیرفعال‌سازی", S(name=str_, scopes={"type": "array", "items": str_}, events={"type": "array", "items": str_}, webhookUrl=str_, isActive=bool_), None),
+    ("post", "/api/integrations/{id}/rotate", "Integrations", "صدور کلید و رمز جدید", None, None),
+    ("get", "/api/integrations/{id}/events", "Integrations", "صف رویدادهای خروجی (outbox)", None, None),
+    ("post", "/api/integrations/{id}/events/{eventId}/retry", "Integrations", "ارسال دوباره رویداد", None, None),
+    ("post", "/api/integrations/{id}/ping", "Integrations", "ارسال رویداد آزمایشی integration.ping", None, None),
+    # Integration API for external systems (X-Api-Key or OAuth2 client-credentials bearer token).
+    ("post", "/api/integration/v1/oauth/token", "Integration API", "OAuth2 client credentials (grant_type, client_id, client_secret)", None, "Form or JSON body; returns { access_token, token_type, expires_in, scope }."),
+    ("get", "/api/integration/v1/me", "Integration API", "مشخصات کلاینت", None, None),
+    ("get", "/api/integration/v1/commissions", "Integration API", "کمیسیون‌ها [meetings:read]", None, None),
+    ("get", "/api/integration/v1/meetings", "Integration API", "جلسات (?from&to&commissionId&status&page) [meetings:read]", None, None),
+    ("get", "/api/integration/v1/meetings/{id}", "Integration API", "جلسه با حاضران، دستور، مصوبات، مستندات و صورتجلسه تأییدشده [meetings:read]", None, None),
+    ("get", "/api/integration/v1/resolutions", "Integration API", "مصوبات (?status&ownerNationalId&updatedSince) [resolutions:read]", None, None),
+    ("get", "/api/integration/v1/resolutions/{id}", "Integration API", "مصوبه با سابقه پیگیری [resolutions:read]", None, None),
+    ("post", "/api/integration/v1/resolutions/{id}/feedback", "Integration API", "گزارش اجرای مصوبه [resolutions:feedback]", S(progress=int_, note=str_, submit=bool_, externalRef=str_, documentId=uuid), "submit=true with progress 100 sends the resolution to the commission secretary for approval; the external system never closes it."),
+    ("post", "/api/integration/v1/referrals", "Integration API", "ارجاع مکاتبه به کمیسیون (idempotent با externalRef) [referrals:write]", S(commissionId=uuid, title=str_, description=str_, externalRef=str_, externalNumber=str_, externalDate=date, requestedMeetingId=uuid), None),
+    ("get", "/api/integration/v1/referrals/{id}", "Integration API", "وضعیت ارجاع، دستور جلسه و مصوبات مرتبط [referrals:write]", None, None),
+    ("post", "/api/integration/v1/documents", "Integration API", "ارسال پیوست برای ارجاع یا مصوبه (multipart: file, issueId|resolutionId, title) [documents:write]", None, None),
+    ("get", "/api/integration/v1/documents/{id}/content", "Integration API", "دریافت فایل [documents:read]", None, None),
+    ("get", "/api/integration/v1/events", "Integration API", "رویدادها پس از شناسه (?after&limit) برای حالت Polling [events:read]", None, "Same envelope as webhooks: { id, type, occurredAt, data }. Webhooks carry `x-kx-signature: t=<unix>,v1=<hex HMAC-SHA256(secret, t + '.' + body)>`."),
 ]
 
 paths = {}
@@ -197,6 +219,8 @@ for method, path, tag, summary, body, notes in E:
         op["description"] = notes
     if path.startswith("/api/files/"):
         op["security"] = []
+    if path.startswith("/api/integration/v1/"):
+        op["security"] = [] if path.endswith("/oauth/token") else [{"apiKey": []}, {"bearer": []}]
     if path.startswith("/api/auth/") and path not in ("/api/auth/me", "/api/auth/password", "/api/auth/mfa/setup", "/api/auth/mfa/enable", "/api/auth/devices"):
         op["security"] = []
     if body is not None:
@@ -210,7 +234,7 @@ for method, path, tag, summary, body, notes in E:
     params = []
     for seg in path.split("/"):
         if seg.startswith("{"):
-            params.append({"name": seg[1:-1], "in": "path", "required": True, "schema": str_ if seg == "{key}" else uuid})
+            params.append({"name": seg[1:-1], "in": "path", "required": True, "schema": str_ if seg in ("{key}", "{eventId}") else uuid})
     if params:
         op["parameters"] = params
     paths.setdefault(path, {})[method] = op
@@ -230,7 +254,7 @@ doc = {
     },
     "servers": [{"url": "http://localhost:4000"}],
     "security": [{"bearer": []}],
-    "components": {"securitySchemes": {"bearer": {"type": "http", "scheme": "bearer", "bearerFormat": "JWT"}}, "schemas": schemas},
+    "components": {"securitySchemes": {"bearer": {"type": "http", "scheme": "bearer", "bearerFormat": "JWT"}, "apiKey": {"type": "apiKey", "in": "header", "name": "X-Api-Key"}}, "schemas": schemas},
     "paths": paths,
 }
 with open(out, "w", encoding="utf-8") as f:
