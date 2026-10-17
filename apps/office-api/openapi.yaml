@@ -2043,6 +2043,104 @@ paths:
         in: path
         required: true
         schema: *id003
+  /api/search:
+    get:
+      tags:
+      - Correspondence
+      summary: جستجوی هوشمند موضوعی (BM25 فارسی، با گسترش و رتبه‌بندی معنایی در صورت تنظیم هوش مصنوعی)
+      responses:
+        '200':
+          description: OK
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Forbidden
+        '404':
+          description: Not found or not visible
+        '409':
+          description: Conflict (state / business rule)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      description: 'Query: q (required), kind, from, to, cancelled=0|1, page (≤10), pageSize (≤50). Returns items with relevance (0–100), matched
+        terms and snippet segments, plus keywords, expanded and ai flags. Only letters visible to the user.'
+  /api/letters/{id}/related:
+    get:
+      tags:
+      - Correspondence
+      summary: نامه‌های مرتبط (پیرو/عطف، همان جلسه، موضوع مشابه)
+      responses:
+        '200':
+          description: OK
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Forbidden
+        '404':
+          description: Not found or not visible
+        '409':
+          description: Conflict (state / business rule)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      description: Each item has reasons (thread | meeting | subject) and similarity (%).
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: *id003
+  /api/search/summary:
+    post:
+      tags:
+      - Correspondence
+      summary: خلاصه هوشمند نامه‌های انتخاب‌شده درباره موضوع
+      responses:
+        '200':
+          description: OK
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Forbidden
+        '404':
+          description: Not found or not visible
+        '409':
+          description: Conflict (state / business rule)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      description: Up to 12 letters; classified letters (confidentiality > 0) are never sent to the AI. 400 if no chat model is configured.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                q: *id001
+                letterIds:
+                  type: array
+                  items: *id003
   /api/verify/{code}:
     get:
       tags:
@@ -3212,6 +3310,97 @@ paths:
           application/json:
             schema:
               $ref: '#/components/schemas/EventEnvelope'
+  /api/integrations/ai:
+    get:
+      tags:
+      - Integration
+      summary: تنظیمات هوش مصنوعی جستجوی هوشمند و آمار نمایه
+      responses:
+        '200':
+          description: OK
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Forbidden
+        '404':
+          description: Not found or not visible
+        '409':
+          description: Conflict (state / business rule)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      description: The API key is never returned (hasApiKey only).
+    put:
+      tags:
+      - Integration
+      summary: تنظیم ارائه‌دهنده سازگار با OpenAI
+      responses:
+        '200':
+          description: OK
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Forbidden
+        '404':
+          description: Not found or not visible
+        '409':
+          description: Conflict (state / business rule)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      description: apiKey omitted keeps the stored key; null or empty removes it. At least one model is required.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                baseUrl: *id001
+                apiKey: *id001
+                embeddingModel: *id001
+                chatModel: *id001
+                isActive: *id005
+  /api/integrations/ai/test:
+    post:
+      tags:
+      - Integration
+      summary: آزمایش مدل‌های embedding و گفتگو
+      responses:
+        '200':
+          description: OK
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Forbidden
+        '404':
+          description: Not found or not visible
+        '409':
+          description: Conflict (state / business rule)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
   /api/integrations/intake:
     put:
       tags:

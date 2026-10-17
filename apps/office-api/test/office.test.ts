@@ -1,3 +1,4 @@
+import { createServer, type Server } from 'node:http';
 import { readFile, readdir } from 'node:fs/promises';
 import path from 'node:path';
 import request from 'supertest';
@@ -9,6 +10,7 @@ import { seed, SEED_PASSWORD } from '../src/db/seed.js';
 import '../src/integration/meetings.js';
 import { drainJobs } from '../src/services/jobs.js';
 import { outbox } from '../src/services/notifications.js';
+import { embedPending } from '../src/services/search.js';
 import { runScheduledJobs } from '../src/services/scheduler.js';
 
 const app = createApp();
@@ -522,6 +524,138 @@ describe('archive (بایگانی و اسناد)', () => {
     expect(doc.status).toBe('disposed');
     expect(doc.versions.every((v: any) => !v.available)).toBe(true);
     expect((await as('admin').get(`/api/archive/versions/${v2.body.id}/download`)).status).toBe(409);
+  });
+});
+
+describe('smart search (جستجوی هوشمند)', () => {
+  const ids: Record<string, string> = {};
+  const create = async (who: string, key: string, letter: object) => {
+    const r = await as(who).post('/api/letters', letter);
+    expect(r.status, key).toBe(201);
+    ids[key] = r.body.id;
+  };
+
+  beforeAll(async () => {
+    await create('expert', 'carpet1', {
+      kind: 'outgoing',
+      subject: 'درخواست حمایت از صادرات فرش دستباف',
+      externalOrg: 'سازمان توسعه تجارت',
+      bodyFormat: 'html',
+      body: '<p>احتراماً، صادرکنندگان <strong>فرش دستباف</strong> به دلیل کاهش تقاضای بازارهای هدف با مشکل روبه‌رو هستند و درخواست مشوق صادراتی دارند.</p>',
+    });
+    await create('expert', 'carpet2', {
+      kind: 'internal',
+      subject: 'گزارش وضعیت صادرات فرش دستباف در شش ماه نخست',
+      body: 'آمار صادرات فرش‌های دستباف نشان می‌دهد ارزش صادرات نسبت به سال گذشته کاهش یافته است.',
+      replyToId: undefined,
+    });
+    await create('expert', 'carpetReply', {
+      kind: 'internal',
+      subject: 'پاسخ: پیگیری مشوق‌ها',
+      body: 'در خصوص نامه قبلی، جلسه‌ای با صادرکنندگان برگزار شود.',
+    });
+    await create('expert', 'insurance', { kind: 'internal', subject: 'بیمه تامین اجتماعی کارکنان', body: 'لیست بیمه کارکنان برای ماه جاری ارسال شود.' });
+    await create('expert', 'rug', { kind: 'internal', subject: 'نمایشگاه گلیم و قالیچه عشایری', body: 'برپایی غرفه گلیم و قالیچه در نمایشگاه بین‌المللی.' });
+    await create('president', 'secret', { kind: 'internal', subject: 'صادرات فرش دستباف و بازار چین', body: 'نامه محرمانه رئیس درباره فرش دستباف.', confidentiality: 1 });
+    // The reply is linked to the first letter.
+    await pool.query('UPDATE letters SET reply_to_id = $1 WHERE id = $2', [ids.carpet1, ids.carpetReply]);
+  });
+
+  it('ranks letters on a topic and suggests related keywords, within what the user may see', async () => {
+    const r = await as('expert').get('/api/search?q=' + encodeURIComponent('صادرات فرش‌های دستباف'));
+    expect(r.status).toBe(200);
+    const found = r.body.items.map((x: any) => x.id);
+    expect(found.slice(0, 2).sort()).toEqual([ids.carpet1, ids.carpet2].sort());
+    expect(found).not.toContain(ids.insurance);
+    expect(found).not.toContain(ids.secret); // the president's classified draft is not the expert's to see
+    expect(r.body.items[0].relevance).toBe(100);
+    expect(r.body.items[0].snippet.some((s: any) => s.hit)).toBe(true);
+    expect(r.body.items[0].snippet.map((s: any) => s.text).join('')).not.toContain('<');
+    expect(r.body.keywords.length).toBeGreaterThan(0);
+    expect(r.body.ai).toMatchObject({ enabled: false, expanded: false, reranked: false });
+    // The president sees their own letter too; Arabic letters and digits in the query make no difference.
+    const p = await as('president').get('/api/search?q=' + encodeURIComponent('صادرات فرش'));
+    expect(p.body.items.map((x: any) => x.id)).toContain(ids.secret);
+    expect((await as('expert').get('/api/search?q=' + encodeURIComponent('بيمه'))).body.items.map((x: any) => x.id)).toEqual([ids.insurance]);
+    const outgoing = (await as('expert').get('/api/search?q=' + encodeURIComponent('صادرات فرش') + '&kind=outgoing')).body.items;
+    expect(outgoing[0].id).toBe(ids.carpet1);
+    expect(outgoing.every((x: any) => x.kind === 'outgoing')).toBe(true);
+    expect((await as('expert').get('/api/search?q=x')).status).toBe(400);
+    // An edited letter is re-indexed.
+    await as('expert').patch(`/api/letters/${ids.insurance}`, { subject: 'بیمه تکمیلی درمان کارکنان' });
+    expect((await as('expert').get('/api/search?q=' + encodeURIComponent('بیمه تکمیلی'))).body.items[0].id).toBe(ids.insurance);
+  });
+
+  it('lists related letters: the reply chain and letters on the same subject', async () => {
+    const r = await as('expert').get(`/api/letters/${ids.carpet1}/related`);
+    expect(r.status).toBe(200);
+    const byId = Object.fromEntries(r.body.map((x: any) => [x.id, x]));
+    expect(byId[ids.carpetReply].reasons).toContain('thread');
+    expect(byId[ids.carpet2].reasons).toContain('subject');
+    expect(byId[ids.carpet2].similarity).toBeGreaterThan(15);
+    expect(byId[ids.insurance]).toBeUndefined();
+    expect(byId[ids.secret]).toBeUndefined();
+    expect((await as('cmsexpert').get(`/api/letters/${ids.carpet1}/related`)).status).toBe(404);
+  });
+
+  it('uses a configured AI model to widen the topic, re-rank and summarise', async () => {
+    // A stand-in for an OpenAI-compatible model server (e.g. Ollama on the organisation's network).
+    const words = ['فرش', 'قالیچه', 'گلیم', 'صادرات', 'بیمه'];
+    const vec = (t: string) => words.map((w) => (t.includes(w) || (w === 'فرش' && /قالیچه|گلیم/.test(t)) ? 1 : 0) + 0.01);
+    const seen: any[] = [];
+    const server: Server = createServer((req, res) => {
+      let raw = '';
+      req.on('data', (c) => (raw += c));
+      req.on('end', () => {
+        const b = JSON.parse(raw);
+        seen.push({ url: req.url, auth: req.headers.authorization, body: b });
+        res.setHeader('content-type', 'application/json');
+        if (req.url === '/v1/embeddings') return res.end(JSON.stringify({ data: b.input.map((t: string, index: number) => ({ index, embedding: vec(t) })) }));
+        const prompt = b.messages.map((m: any) => m.content).join('\n');
+        const content = prompt.includes('کلیدواژه') ? 'قالیچه، گلیم' : prompt.includes('آماده') ? 'آماده' : 'صادرات فرش دستباف کاهش یافته و درخواست مشوق شده است [۱].';
+        res.end(JSON.stringify({ choices: [{ message: { content } }] }));
+      });
+    });
+    await new Promise<void>((ok) => server.listen(0, '127.0.0.1', ok));
+    const port = (server.address() as any).port;
+    try {
+      expect((await as('expert').put('/api/integrations/ai', { baseUrl: `http://127.0.0.1:${port}/v1`, chatModel: 'x' })).status).toBe(403);
+      expect((await as('it').put('/api/integrations/ai', { baseUrl: `http://127.0.0.1:${port}/v1` })).status).toBe(400);
+      expect(
+        (await as('it').put('/api/integrations/ai', { baseUrl: `http://127.0.0.1:${port}/v1/`, apiKey: 'local-key', embeddingModel: 'bge-m3', chatModel: 'qwen' })).status,
+      ).toBe(204);
+      const settings = (await as('it').get('/api/integrations/ai')).body;
+      expect(settings).toMatchObject({ baseUrl: `http://127.0.0.1:${port}/v1`, hasApiKey: true, embeddingModel: 'bge-m3', isActive: true });
+      expect(JSON.stringify(settings)).not.toContain('local-key');
+      const t = (await as('it').post('/api/integrations/ai/test')).body;
+      expect(t).toMatchObject({ embedding: { ok: true, dimensions: 5 }, chat: { ok: true, reply: 'آماده' } });
+      expect(seen[0].auth).toBe('Bearer local-key');
+
+      // Classified letters are never embedded.
+      expect(await embedPending()).toBeGreaterThan(0);
+      const sent = seen.filter((x) => x.url === '/v1/embeddings').flatMap((x) => x.body.input).join('\n');
+      expect(sent).toContain('گلیم');
+      expect(sent).not.toContain('بازار چین');
+
+      // «فرش» alone never appears in the rug letter; the model's related words bring it in.
+      const r = await as('expert').get('/api/search?q=' + encodeURIComponent('فرش'));
+      expect(r.body.ai).toMatchObject({ enabled: true, expanded: true, reranked: true, canSummarize: true });
+      expect(r.body.expanded).toEqual(['قالیچه', 'گلیم']);
+      expect(r.body.items.map((x: any) => x.id)).toContain(ids.rug);
+
+      const s = await as('expert').post('/api/search/summary', { q: 'صادرات فرش', letterIds: [ids.carpet1, ids.carpet2, ids.secret] });
+      expect(s.status).toBe(200);
+      expect(s.body.summary).toContain('[۱]');
+      expect(s.body.letters.map((x: any) => x.id).sort()).toEqual([ids.carpet1, ids.carpet2].sort());
+      const lastPrompt = JSON.stringify(seen[seen.length - 1].body);
+      expect(lastPrompt).not.toContain('بازار چین');
+      expect((await as('expert').post('/api/search/summary', { q: 'فرش', letterIds: [ids.secret] })).status).toBe(400);
+    } finally {
+      await as('it').put('/api/integrations/ai', { baseUrl: `http://127.0.0.1:${port}/v1`, chatModel: 'qwen', isActive: false });
+      server.close();
+    }
+    // Without the model, search still works on its own.
+    expect((await as('expert').get('/api/search?q=' + encodeURIComponent('فرش'))).body.ai.enabled).toBe(false);
   });
 });
 

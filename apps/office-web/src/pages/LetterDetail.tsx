@@ -6,6 +6,7 @@ import {
 } from '../components/labels';
 import { PositionSelect, UserSelect } from '../components/pickers';
 import { LetterBody } from '../components/letterPaper';
+import { RelatedLetters } from './SmartSearch';
 import { AuthImage } from '../components/signature';
 import { Badge, Button, Card, Empty, ErrorBox, Field, JalaliDateTimeInput, Loading, Modal, PageHeader, dateFa, dateTimeFa, fa } from '../components/ui';
 import { download, fetchText, openFile, patch, post, upload } from '../lib/api';
@@ -238,6 +239,9 @@ export function LetterDetailPage() {
       </Card>
 
       <Attachments letter={l} onChange={r.reload} />
+      <Card title="نامه‌های مرتبط" className="mt no-print" actions={<Link className="btn btn-ghost btn-sm" to={`/smart-search?q=${encodeURIComponent(l.subject)}`}>جستجوی هوشمند این موضوع</Link>}>
+        <RelatedLetters letterId={l.id} />
+      </Card>
       <Workflows letter={l} onChange={r.reload} />
 
       <Card title="سابقه ارجاعات" className="mt no-print">

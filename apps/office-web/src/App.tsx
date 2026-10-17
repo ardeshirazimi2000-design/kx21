@@ -22,6 +22,7 @@ import { ReportsPage } from './pages/Reports';
 import { ResolutionDetailPage, ResolutionsPage } from './pages/Resolutions';
 import { RolesPage } from './pages/Roles';
 import { SignaturesPage } from './pages/Signatures';
+import { SmartSearchPage } from './pages/SmartSearch';
 import { UsersPage } from './pages/Users';
 import { VerifyPage } from './pages/Verify';
 import { WorkflowsPage } from './pages/Workflows';
@@ -60,6 +61,7 @@ export function App() {
         <Route path="/" element={<DashboardPage />} />
         <Route path="/cartable" element={<CartablePage />} />
         <Route path="/letters" element={<LettersPage />} />
+        <Route path="/smart-search" element={<SmartSearchPage />} />
         <Route path="/letters/new" element={<LetterFormPage />} />
         <Route path="/letters/:id" element={<LetterDetailPage />} />
         <Route path="/letters/:id/edit" element={<LetterFormPage />} />
@@ -122,10 +124,11 @@ function Shell({ children }: { children: ReactNode }) {
         </Link>
         <nav className="nav">
           {item('/', 'داشبورد')}
-          <NavGroup id="letters" title="مکاتبات" paths={['/cartable', '/letters', '/archive', '/signatures', '/letter-templates']}>
+          <NavGroup id="letters" title="مکاتبات" paths={['/cartable', '/letters', '/smart-search', '/archive', '/signatures', '/letter-templates']}>
             {item('/cartable', 'کارتابل', count(cartable.data?.length))}
             {item('/letters', 'مکاتبات')}
             {item('/letters/new', 'نامه جدید')}
+            {item('/smart-search', 'جستجوی هوشمند')}
             {(can('archive.read') || can('archive.manage')) && item('/archive', 'بایگانی')}
             {can('signatures.manage') && item('/signatures', 'نمونه امضاها')}
             {can('templates.manage') && item('/letter-templates', 'قالب‌های نامه')}

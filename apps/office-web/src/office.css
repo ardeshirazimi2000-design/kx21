@@ -153,3 +153,19 @@
   .print-letter .paper { box-shadow: none; margin: 0; }
 }
 .print-bar { position: sticky; top: 0; z-index: 5; display: flex; align-items: center; gap: 8px; padding: 10px 16px; background: var(--surface); border-bottom: 1px solid var(--border); }
+
+/* Smart search */
+.smart-layout { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 16px; align-items: start; }
+@media (max-width: 1000px) { .smart-layout { grid-template-columns: 1fr; } }
+.smart-q { font-size: 1.05rem; }
+.smart-hit { margin-bottom: 12px; }
+.smart-title { font-weight: 600; font-size: 1.02rem; }
+.smart-relevance { width: 90px; height: 6px; border-radius: 3px; background: var(--surface-2); overflow: hidden; flex: none; }
+.smart-relevance span { display: block; height: 100%; background: var(--primary); border-radius: 3px; }
+.smart-snippet { margin: 8px 0; line-height: 1.9; color: var(--text); }
+.smart-snippet mark { background: rgba(255, 196, 0, 0.35); color: inherit; border-radius: 3px; padding: 0 2px; }
+.smart-summary { white-space: pre-wrap; line-height: 1.9; }
+.chip { display: inline-block; padding: 1px 10px; border-radius: 999px; background: var(--surface-2); border: 1px solid var(--border); font-size: 0.82rem; }
+.chip-btn { cursor: pointer; font: inherit; font-size: 0.82rem; color: var(--text); }
+.chip-btn:hover { border-color: var(--primary); color: var(--primary); }
+.related-list li { padding: 6px 0; }
