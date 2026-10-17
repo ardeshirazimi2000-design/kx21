@@ -98,24 +98,25 @@ function Shell({ children }: { children: ReactNode }) {
         </Link>
         <nav className="nav">
           {item('/', 'داشبورد')}
-          <div className="nav-group" role="heading" aria-level={2}>جلسات</div>
-          {item('/meetings', 'تقویم جلسات')}
-          {item('/resolutions', 'مصوبات و پیگیری')}
-          {(isExpert || isOfficer) && item('/referrals', 'ارجاعات کارشناسی')}
-          {item('/notifications', 'اعلان‌ها', unread.data?.total ? <span className="count">{fa(unread.data.total)}</span> : null)}
-          <div className="nav-group" role="heading" aria-level={2}>ساختار</div>
-          {item('/commissions', 'کمیسیون‌ها')}
-          {isAdmin && item('/terms', 'دوره‌ها')}
-          {(isAdmin || isOfficer) && item('/people', 'اشخاص و کاربران')}
-          {isAdmin && item('/roles', 'نقش‌ها و دسترسی‌ها')}
-          {isAdmin && item('/notification-settings', 'تنظیمات اطلاع‌رسانی')}
-          {me!.is_super_admin && item('/chambers', 'اتاق‌ها')}
+          <NavGroup id="meetings" title="جلسات" paths={['/meetings', '/resolutions', '/referrals', '/notifications']}>
+            {item('/meetings', 'تقویم جلسات')}
+            {item('/resolutions', 'مصوبات و پیگیری')}
+            {(isExpert || isOfficer) && item('/referrals', 'ارجاعات کارشناسی')}
+            {item('/notifications', 'اعلان‌ها', unread.data?.total ? <span className="count">{fa(unread.data.total)}</span> : null)}
+          </NavGroup>
+          <NavGroup id="structure" title="ساختار" paths={['/commissions', '/terms', '/people', '/roles', '/notification-settings', '/chambers']}>
+            {item('/commissions', 'کمیسیون‌ها')}
+            {isAdmin && item('/terms', 'دوره‌ها')}
+            {(isAdmin || isOfficer) && item('/people', 'اشخاص و کاربران')}
+            {isAdmin && item('/roles', 'نقش‌ها و دسترسی‌ها')}
+            {isAdmin && item('/notification-settings', 'تنظیمات اطلاع‌رسانی')}
+            {me!.is_super_admin && item('/chambers', 'اتاق‌ها')}
+          </NavGroup>
           {(isAdmin || isOfficer) && (
-            <>
-              <div className="nav-group" role="heading" aria-level={2}>گزارش و کنترل</div>
+            <NavGroup id="reports" title="گزارش و کنترل" paths={['/reports', '/audit']}>
               {item('/reports', 'گزارش‌ها')}
               {isAdmin && item('/audit', 'رویدادنگاری (Audit)')}
-            </>
+            </NavGroup>
           )}
         </nav>
       </aside>
@@ -161,6 +162,50 @@ function Shell({ children }: { children: ReactNode }) {
           </button>
         </header>
         <main className="content">{children}</main>
+      </div>
+    </div>
+  );
+}
+
+const NAV_KEY = 'kx.nav.collapsed';
+const readCollapsed = (): string[] => {
+  try {
+    return JSON.parse(localStorage.getItem(NAV_KEY) ?? '[]');
+  } catch {
+    return [];
+  }
+};
+
+/** Collapsible sidebar group; the group holding the current page always opens. */
+function NavGroup({ id, title, paths, children }: { id: string; title: string; paths: string[]; children: ReactNode }) {
+  const loc = useLocation();
+  const holdsCurrent = paths.some((p) => loc.pathname === p || loc.pathname.startsWith(`${p}/`));
+  const [open, setOpen] = useState(() => holdsCurrent || !readCollapsed().includes(id));
+  useEffect(() => {
+    if (holdsCurrent) setOpen(true);
+  }, [holdsCurrent]);
+  const toggle = () => {
+    const next = !open;
+    setOpen(next);
+    try {
+      const set = new Set(readCollapsed());
+      if (next) set.delete(id);
+      else set.add(id);
+      localStorage.setItem(NAV_KEY, JSON.stringify([...set]));
+    } catch {
+      /* storage unavailable */
+    }
+  };
+  return (
+    <div className={`nav-section ${open ? 'open' : ''}`}>
+      <button type="button" className="nav-group" aria-expanded={open} aria-controls={`nav-${id}`} onClick={toggle}>
+        <span>{title}</span>
+        <svg className="nav-chevron" width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+          <path d="M4 6l4 4 4-4" />
+        </svg>
+      </button>
+      <div id={`nav-${id}`} className="nav-items" hidden={!open}>
+        {children}
       </div>
     </div>
   );

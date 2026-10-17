@@ -123,8 +123,12 @@ h3 { font-size: 1rem; }
 .login-brand { display: flex; flex-direction: column; align-items: center; gap: 10px; color: #fff; text-align: center; margin-bottom: 20px; }
 .login-brand h1 { font-size: 1.15rem; }
 .login-brand p { margin: 0; color: #d6e6ea; }
-.nav-group { margin: 18px 8px 6px; font-size: 0.75rem; font-weight: 700; color: #e9c46a; display: flex; align-items: center; gap: 8px; cursor: default; user-select: none; }
-.nav-group::after { content: ''; flex: 1; height: 1px; background: currentColor; opacity: 0.35; }
+.nav-section { margin-top: 6px; }
+.nav-group { width: 100%; margin: 8px 0 2px; padding: 8px 12px; border: 0; border-radius: 8px; background: transparent; font: inherit; font-size: 0.85rem; font-weight: 700; color: #e9c46a; display: flex; align-items: center; justify-content: space-between; gap: 8px; cursor: pointer; text-align: start; }
+.nav-group:hover { background: rgba(255, 255, 255, 0.06); }
+.nav-chevron { transition: transform 0.2s ease; transform: rotate(-90deg); }
+.nav-section.open .nav-chevron { transform: rotate(0deg); }
+.nav-items { padding-inline-start: 10px; border-inline-start: 1px solid rgba(233, 196, 106, 0.25); margin-inline-start: 14px; }
 .nav a { display: flex; gap: 10px; align-items: center; padding: 8px 12px; border-radius: 8px; color: var(--sidebar-ink); }
 .nav a:hover { background: rgba(255, 255, 255, 0.06); text-decoration: none; }
 .nav a.active { background: rgba(255, 255, 255, 0.12); color: #fff; }
