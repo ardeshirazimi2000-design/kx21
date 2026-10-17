@@ -46,6 +46,7 @@ export function loadConfig(env = process.env) {
   return {
     port: Number(env.PORT || 3000),
     host: env.HOST || '0.0.0.0',
+    trustedProxies: String(env.TRUSTED_PROXIES || '').split(',').map((x) => x.trim()).filter(Boolean),
     dbPath: env.DB_PATH || 'data/telehealth.db',
     masterSecret: env.MASTER_SECRET || 'dev-only-insecure-master-secret',
     defaultTenant: env.DEFAULT_TENANT_ID || '00000000-0000-4000-8000-000000000001',
@@ -105,6 +106,9 @@ export function createApp(overrides = {}) {
   const sms = createSms(config);
   const platform = createPlatform({ db, config, sms });
   const limiter = new RateLimiter();
+  // Loopback is always a trusted proxy; TRUSTED_PROXIES adds address prefixes (e.g. the Docker bridge "172.").
+  const proxyPrefixes = ['127.', '::ffff:127.', ...(config.trustedProxies ?? []).flatMap((p) => [p, `::ffff:${p}`])];
+  const isTrustedProxy = (peer) => peer === '::1' || proxyPrefixes.some((p) => peer.startsWith(p));
   const router = new Router();
 
   const domain = { sms, access: access.createAccess({ db }) };
@@ -201,10 +205,12 @@ export function createApp(overrides = {}) {
         if (req.method === 'GET' && (await serveStatic(req, res, url.pathname))) return;
         throw new ApiError(404, 'not_found', 'مسیر پیدا نشد');
       }
-      // Behind the local reverse proxy (Caddy) the client address comes in X-Forwarded-For.
+      // Behind the reverse proxy (local Caddy/nginx, or a Docker proxy on TRUSTED_PROXIES) the client
+      // address comes in X-Forwarded-For. The last entry is the one our proxy added; earlier ones are
+      // whatever the client sent and could be forged.
       const peer = req.socket.remoteAddress ?? '';
-      const fwd = String(req.headers['x-forwarded-for'] ?? '').split(',')[0].trim();
-      const ip = /^(127\.|::1$|::ffff:127\.)/.test(peer) && fwd ? fwd : peer;
+      const fwd = String(req.headers['x-forwarded-for'] ?? '').split(',').map((x) => x.trim()).filter(Boolean).at(-1);
+      const ip = fwd && isTrustedProxy(peer) ? fwd : peer;
       limiter.hit(`ip:${ip}`, 600, 60_000);
       const m = router.match(req.method, url.pathname);
       if (!m) throw new ApiError(404, 'not_found', 'مسیر پیدا نشد');

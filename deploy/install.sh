@@ -18,7 +18,8 @@ NODE_VERSION="${NODE_VERSION:-22.20.0}"
 NODE_DIR=/opt/node22
 PORT="${PORT:-3000}"
 DOMAIN="${DOMAIN:-}"
-BEHIND_PROXY="${BEHIND_PROXY:-0}"   # 1 = an existing web server (nginx/Caddy) already proxies DOMAIN to this app
+BEHIND_PROXY="${BEHIND_PROXY:-0}"   # 1 = an existing web server (nginx/Caddy/Docker proxy) already proxies DOMAIN to this app
+APP_BIND="${APP_BIND:-}"           # with a Docker proxy: the Docker bridge address, e.g. 172.17.0.1
 EMAIL="${EMAIL:-}"
 ENABLE_TURN="${ENABLE_TURN:-1}"   # coturn relay for video visits (needed behind mobile-carrier NAT)
 ENABLE_CXR="${ENABLE_CXR:-1}"     # chest X-ray pattern flags for physicians (Python + onnxruntime, CPU, ~400 MB RAM)
@@ -150,7 +151,7 @@ for VAR in SAPI_TOKEN SAPI_BASE IDENTITY_INQUIRY_URL SMS_PROVIDER SMS_API_KEY SM
 done
 [ -n "$DOMAIN" ] && upsert PUBLIC_BASE_URL "https://$DOMAIN"
 # Real registration (PRODUCTION=1): codes only by SMS, Shahkar required, demo accounts disabled.
-envget() { grep -E "^$1=" "$ENV_FILE" | tail -1 | cut -d= -f2-; }
+envget() { { grep -E "^$1=" "$ENV_FILE" || true; } | tail -1 | cut -d= -f2-; }
 if [ "${PRODUCTION:-}" = "1" ]; then
   # The api.ir token (already used for Shahkar) can send the codes too: default to it.
   if [ -z "$(envget SMS_PROVIDER)" ] && [ -n "$(envget SAPI_TOKEN)" ]; then upsert SMS_PROVIDER apiir; echo "   SMS_PROVIDER=apiir (codes via api.ir with the existing SAPI_TOKEN)"; fi
@@ -168,6 +169,12 @@ elif [ "${PRODUCTION:-}" = "0" ]; then
 fi
 # Behind Caddy only localhost may reach the app; without a domain it listens publicly.
 if [ -n "$DOMAIN" ]; then BIND=127.0.0.1; else BIND=0.0.0.0; fi
+# A proxy running in Docker cannot reach 127.0.0.1 on the host: APP_BIND=172.17.0.1 (the Docker bridge)
+# makes the app listen there instead (still not reachable from the internet) and trusts that proxy's
+# X-Forwarded-For.
+[ -n "$APP_BIND" ] || APP_BIND="$(envget APP_BIND)"   # remembered from an earlier run
+if [ "$APP_BIND" = "0" ] || [ -z "$DOMAIN" ]; then sed -i '/^APP_BIND=/d; /^TRUSTED_PROXIES=/d' "$ENV_FILE"; APP_BIND=""; fi
+if [ -n "$APP_BIND" ]; then BIND="$APP_BIND"; upsert APP_BIND "$APP_BIND"; upsert TRUSTED_PROXIES "${APP_BIND%%.*}."; fi
 sed -i "s/^HOST=.*/HOST=$BIND/" "$ENV_FILE"
 
 # ---------------------------------------------------------------- TURN relay (video visits)
