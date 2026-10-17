@@ -130,7 +130,7 @@ const TABS = {
   doctor_pending: [['doctor-profile', 'پروفایل و مدارک'], ['inbox', 'اعلان‌ها']],
   // Staff tabs are shown by permission (see TAB_PERMS); operator and admin share the same list.
   operator: [['escalations', 'درخواست‌های ارجاع'], ['stats', 'آمار']],
-  admin: [['admin-doctors', 'تأیید پزشکان'], ['settings', 'تعرفه‌ها'], ['drug-catalog', 'فهرست داروها'], ['payments', 'پرداخت‌ها'], ['accounting', 'حسابداری'], ['escalations', 'درخواست‌های ارجاع'], ['stats', 'آمار'], ['audit', 'لاگ ممیزی'], ['activity', 'سابقه ورود و فعالیت'], ['staff', 'کاربران و نقش‌ها']],
+  admin: [['admin-doctors', 'تأیید پزشکان'], ['settings', 'تنظیمات سیستم'], ['drug-catalog', 'فهرست داروها'], ['payments', 'پرداخت‌ها'], ['accounting', 'حسابداری'], ['escalations', 'درخواست‌های ارجاع'], ['stats', 'آمار'], ['audit', 'لاگ ممیزی'], ['activity', 'سابقه ورود و فعالیت'], ['staff', 'کاربران و نقش‌ها']],
 };
 TABS.doctor.splice(4, 0, ['doctor-accounting', 'حسابداری من']);
 for (const k of ['patient', 'doctor', 'doctor_pending']) TABS[k].push(['my-activity', 'سابقه ورود']);
@@ -806,12 +806,17 @@ VIEWS.calendar = async () => {
   }));
   const from = timeSelect('16:00');
   const to = timeSelect('19:00');
-  const dur = h('select', {}, [15, 20, 30, 45, 60].map((m) => h('option', { value: m, selected: m === 30 }, `${fa(m)} دقیقه`)));
+  // Allowed visit lengths come from the admin's system settings (filled on the first load).
+  const dur = h('select', {}, h('option', { value: 30 }, `${fa(30)} دقیقه`));
   const list = h('div');
   // Wall-clock time in Tehran (UTC+03:30) → ISO.
   const toIso = (d, t) => { const [y, m, dd] = d.split('-').map(Number); const [hh, mm] = t.split(':').map(Number); return new Date(Date.UTC(y, m - 1, dd, hh, mm) - 210 * 60000).toISOString(); };
   const load = async () => {
     const r = await api('GET', '/v1/doctors/me/slots');
+    if (r.visit && !dur.dataset.ready) {
+      dur.replaceChildren(...r.visit.durations.map((m) => h('option', { value: m, selected: m === r.visit.default }, `${fa(m)} دقیقه`)));
+      dur.dataset.ready = '1';
+    }
     const days = new Map();
     for (const s of r.items) { const k = tehranDayKey(s.starts_at); if (!days.has(k)) days.set(k, []); days.get(k).push(s); }
     list.replaceChildren(...[...days.values()].map((slots) => h('div', {}, h('div', { class: 'day-title' }, fmt.day(slots[0].starts_at)),

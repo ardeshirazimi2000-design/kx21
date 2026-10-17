@@ -8,6 +8,7 @@ import { canonical, sha256 } from '../lib/crypto.js';
 import { formatFaDateTime } from '../lib/fa.js';
 import { requireUser } from './auth.js';
 import { SPECIALTIES } from './patient.js';
+import { getVisitSettings } from '../lib/visit-settings.js';
 
 const CHANNELS = ['video', 'audio', 'chat'];
 const MAX_SLOTS_PER_REQUEST = 64;
@@ -207,7 +208,7 @@ export function register(router, { db, platform, domain }) {
        FROM slots s WHERE s.doctor_id = ? AND s.ends_at > ? ORDER BY s.starts_at LIMIT 300`,
       ctx.user.did, nowIso(),
     );
-    return { body: { items: rows.map((s) => ({ id: s.id, starts_at: s.starts_at, ends_at: s.ends_at, booked: !!s.appointment_id })) } };
+    return { body: { items: rows.map((s) => ({ id: s.id, starts_at: s.starts_at, ends_at: s.ends_at, booked: !!s.appointment_id })), visit: getVisitSettings(db, ctx.tenantId) } };
   });
 
   const requireApprovedDoctor = (ctx) => {
@@ -221,9 +222,10 @@ export function register(router, { db, platform, domain }) {
     requireFields(ctx.body, ['starts_at', 'ends_at']);
     const start = Date.parse(ctx.body.starts_at);
     const end = Date.parse(ctx.body.ends_at);
-    const dur = Number(ctx.body.duration_min ?? 30);
+    const visit = getVisitSettings(db, ctx.tenantId);
+    const dur = Number(ctx.body.duration_min ?? visit.default);
     if (isNaN(start) || isNaN(end) || end <= start) throw badRequest('بازه زمانی نامعتبر است');
-    if (!Number.isInteger(dur) || dur < 10 || dur > 120) throw badRequest('مدت هر نوبت باید بین ۱۰ تا ۱۲۰ دقیقه باشد');
+    if (!visit.durations.includes(dur)) throw badRequest(`مدت هر نوبت باید یکی از این مقادیر باشد: ${visit.durations.join('، ')} دقیقه`, 'duration_not_allowed');
     if (start < Date.now()) throw badRequest('بازه باید در آینده باشد');
     const count = Math.floor((end - start) / (dur * 60000));
     if (count < 1) throw badRequest('بازه از مدت یک نوبت کوتاه‌تر است');

@@ -8,6 +8,7 @@
 import { ApiError, badRequest, notFound, conflict, requireUuid } from '../lib/http.js';
 import { uuid, nowIso, parseJson } from '../lib/db.js';
 import { requireUser } from './auth.js';
+import { getVisitSettings, setVisitSettings } from '../lib/visit-settings.js';
 
 export const TARIFF_KEYS = ['triage', 'visit_chat', 'visit_audio', 'visit_video'];
 export const TARIFF_LABELS = { triage: 'ارزیابی علائم (تریاژ)', visit_chat: 'ویزیت متنی', visit_audio: 'ویزیت صوتی', visit_video: 'ویزیت تصویری' };
@@ -287,14 +288,19 @@ export function register(router, { db, platform, config, domain }) {
 
   router.get('/v1/admin/settings', async (ctx) => {
     domain.access.require(ctx, 'tariffs.manage');
-    return { body: { tariffs: pay.getTariffs(ctx.tenantId), payments_enabled: pay.paymentsEnabled(ctx.tenantId), commission_percent: pay.getCommission(ctx.tenantId), labels: TARIFF_LABELS, gateway: pay.gateway, sandbox: !!config.zarinpalSandbox } };
+    return { body: { tariffs: pay.getTariffs(ctx.tenantId), payments_enabled: pay.paymentsEnabled(ctx.tenantId), commission_percent: pay.getCommission(ctx.tenantId), visit: getVisitSettings(db, ctx.tenantId), labels: TARIFF_LABELS, gateway: pay.gateway, sandbox: !!config.zarinpalSandbox } };
   });
 
   router.put('/v1/admin/settings', async (ctx) => {
     domain.access.require(ctx, 'tariffs.manage');
     if (ctx.body.payments_enabled !== undefined) pay.setPaymentsEnabled(ctx, ctx.body.payments_enabled);
     if (ctx.body.commission_percent !== undefined) pay.setCommission(ctx, ctx.body.commission_percent);
-    return { body: { tariffs: pay.setTariffs(ctx, ctx.body.tariffs ?? {}), payments_enabled: pay.paymentsEnabled(ctx.tenantId), commission_percent: pay.getCommission(ctx.tenantId) } };
+    if (ctx.body.visit !== undefined) {
+      const v = setVisitSettings(db, ctx, ctx.body.visit ?? {});
+      platform.audit(ctx, 'settings.visit', `tenant:${ctx.tenantId}`, v);
+    }
+    const tariffs = ctx.body.tariffs ? pay.setTariffs(ctx, ctx.body.tariffs) : pay.getTariffs(ctx.tenantId);
+    return { body: { tariffs, payments_enabled: pay.paymentsEnabled(ctx.tenantId), commission_percent: pay.getCommission(ctx.tenantId), visit: getVisitSettings(db, ctx.tenantId) } };
   });
 
   router.get('/v1/payments', async (ctx) => {

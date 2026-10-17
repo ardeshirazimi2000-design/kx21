@@ -203,6 +203,28 @@ export function installV2(x) {
   // ---------------------------------------------------------------- admin: settings & payments
   VIEWS.settings = async () => {
     const s = await api('GET', '/v1/admin/settings');
+    // Visit length: the durations doctors may pick when publishing their calendar.
+    const DUR_CHOICES = [10, 15, 20, 25, 30, 40, 45, 60, 90];
+    const durBoxes = DUR_CHOICES.map((m) => h('input', { type: 'checkbox', value: m, checked: s.visit.durations.includes(m) }));
+    const durDefault = h('select');
+    const syncDefault = () => {
+      const on = durBoxes.filter((b) => b.checked).map((b) => Number(b.value));
+      const cur = Number(durDefault.value || s.visit.default);
+      durDefault.replaceChildren(...on.map((m) => h('option', { value: m, selected: m === cur }, `${fa(m)} دقیقه`)));
+    };
+    durBoxes.forEach((b) => { b.onchange = syncDefault; });
+    syncDefault();
+    x.$app.append(h('div', { class: 'card stack' },
+      h('h2', {}, 'مدت زمان ویزیت'),
+      h('p', { class: 'muted' }, 'پزشکان هنگام انتشار تقویم فقط از مدت‌های انتخاب‌شده می‌توانند استفاده کنند. اگر فقط یک مدت انتخاب کنید، همه نوبت‌ها با همان مدت ساخته می‌شوند. نوبت‌های قبلاً منتشرشده تغییر نمی‌کنند.'),
+      h('div', { class: 'row', style: 'flex-wrap:wrap;gap:6px 16px' }, durBoxes.map((b) => h('label', { class: 'row', style: 'gap:6px;align-items:center' }, b, `${fa(b.value)} دقیقه`))),
+      h('div', {}, h('label', {}, 'مدت پیش‌فرض'), durDefault),
+      h('button', { class: 'btn primary', onclick: guard(async () => {
+        const durations = durBoxes.filter((b) => b.checked).map((b) => Number(b.value));
+        if (!durations.length) { toast('حداقل یک مدت را انتخاب کنید'); return; }
+        await api('PUT', '/v1/admin/settings', { visit: { durations, default: Number(durDefault.value) } });
+        toast('مدت زمان ویزیت ذخیره شد');
+      }) }, 'ذخیره مدت ویزیت')));
     const inputs = Object.fromEntries(Object.keys(s.tariffs).map((k) => [k, h('input', { type: 'number', min: 0, step: 1000, value: Math.round(s.tariffs[k] / 10) })]));
     const enabled = h('input', { type: 'checkbox', checked: s.payments_enabled });
     const commission = h('input', { type: 'number', min: 0, max: 100, step: 0.5, value: s.commission_percent ?? 0, dir: 'ltr' });
