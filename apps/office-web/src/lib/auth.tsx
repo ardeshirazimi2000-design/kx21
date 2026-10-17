@@ -19,6 +19,7 @@ export interface Me {
   national_id: string | null;
   clearance: number;
   mfa_enabled: boolean;
+  has_signature: boolean;
   mfaRequired: boolean;
   roles: string[];
   permissions: string[];

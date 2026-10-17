@@ -7,6 +7,7 @@ export const PERMISSIONS = [
   { key: 'letter.sign', name: 'امضای نامه', module: 'مکاتبات' },
   { key: 'letter.send', name: 'ارسال نامه صادره', module: 'مکاتبات' },
   { key: 'letter.cancel', name: 'ابطال نامه', module: 'مکاتبات' },
+  { key: 'signatures.manage', name: 'معرفی و ثبت نمونه امضای اشخاص', module: 'مکاتبات' },
   { key: 'workflow.start', name: 'شروع گردش کار', module: 'گردش کار' },
   { key: 'workflow.manage', name: 'طراحی و نسخه‌بندی گردش کار', module: 'گردش کار' },
   { key: 'archive.read', name: 'مشاهده بایگانی حوزه', module: 'بایگانی' },
@@ -38,7 +39,7 @@ export const SYSTEM_ROLES: { key: string; name: string; description: string; per
     description: 'ثبت، شماره‌گذاری، ارسال و بایگانی مکاتبات',
     permissions: pick(
       'letter.create', 'letter.register_incoming', 'letter.register_outgoing', 'letter.read_all', 'letter.send', 'letter.cancel',
-      'workflow.start', 'archive.read', 'archive.manage', 'meetings.view', 'meetings.refer',
+      'signatures.manage', 'workflow.start', 'archive.read', 'archive.manage', 'meetings.view', 'meetings.refer',
     ),
   },
   {

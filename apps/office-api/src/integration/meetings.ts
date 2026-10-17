@@ -5,7 +5,7 @@
  * Inbound events land in integration_inbox (deduplicated) and are processed by the job queue.
  */
 import crypto from 'node:crypto';
-import { formatJalaliDate } from '@kx/shared';
+import { formatJalaliDate, formatJalaliLong, formatTime } from '@kx/shared';
 import { one, pool, query, tx, type Db } from '../db/pool.js';
 import { audit } from '../lib/audit.js';
 import { decryptText } from '../lib/crypto.js';
@@ -153,6 +153,9 @@ registerHandler('meetings.event', async ({ inboxId }: { inboxId: number }) => {
       case 'referral.updated':
         await syncReferral(data.id);
         break;
+      case 'meeting.invitation_letters_requested':
+        await createInvitationLetters({ meetingId: data.meetingId, inviteeIds: data.inviteeIds ?? [], note: data.note, requestedBy: data.requestedBy });
+        break;
       default:
         status = 'ignored';
     }
@@ -295,6 +298,91 @@ async function createResolutionLetter(db: Db, i: Integration, r: any, ownerUserI
     db,
   );
   return letter.id as string;
+}
+
+const MEETING_TYPE: Record<string, string> = { in_person: 'حضوری', online: 'برخط (آنلاین)', hybrid: 'ترکیبی (حضوری و برخط)' };
+
+function invitationBody(m: any, p: any, note?: string | null) {
+  const when = m.scheduled_at ? `روز ${formatJalaliLong(m.scheduled_at)} ساعت ${formatTime(m.scheduled_at)}` : 'در زمانی که متعاقباً اعلام می‌شود';
+  const where = [m.location ? `در ${m.location}` : null, m.type && m.type !== 'in_person' ? `به‌صورت ${MEETING_TYPE[m.type] ?? m.type}` : null]
+    .filter(Boolean)
+    .join(' و ');
+  const agenda = (m.agenda ?? []).map((a: any, idx: number) => `${idx + 1}. ${a.title}`);
+  return [
+    `${p.full_name} محترم`,
+    p.organization ? p.organization : null,
+    '',
+    'با سلام و احترام،',
+    `به استحضار می‌رساند جلسه${m.number ? ` شماره ${m.number}` : ''} کمیسیون ${m.commission_name} با موضوع «${m.title}» ${when}${where ? ` ${where}` : ''} برگزار می‌شود.`,
+    agenda.length ? '\nدستور جلسه:' : null,
+    ...agenda,
+    m.online_link && m.type !== 'in_person' ? `\nنشانی حضور برخط: ${m.online_link}` : null,
+    note ? `\n${note}` : null,
+    '',
+    'از جنابعالی دعوت می‌شود در این جلسه حضور یابید. خواهشمند است در صورت عدم امکان حضور، مراتب یا نماینده خود را به دبیرخانه کمیسیون اعلام فرمایید.',
+  ]
+    .filter((x) => x !== null)
+    .join('\n');
+}
+
+/**
+ * «نامه دعوت»: one outgoing draft per invitee of a meeting, for the secretariat to number, have
+ * signed and send. An invitee who already has a live invitation letter for the meeting is skipped.
+ */
+export async function createInvitationLetters(input: { meetingId: string; inviteeIds: string[]; note?: string | null; requestedBy?: string | null }) {
+  const i = await loadIntegration();
+  if (!i) throw new Error('integration disabled');
+  const m = await syncMeeting(input.meetingId);
+  const result = await tx(async (db) => {
+    const creator = await systemUser(db);
+    const created: { id: string; invitee: string }[] = [];
+    for (const inviteeId of new Set(input.inviteeIds)) {
+      const p = (m.participants ?? []).find((x: any) => x.id === inviteeId);
+      if (!p) continue;
+      const live = await one(
+        `SELECT 1 FROM meeting_invitation_letters mil JOIN letters l ON l.id = mil.letter_id
+          WHERE mil.meeting_external_id = $1 AND mil.invitee_external_id = $2 AND l.status <> 'cancelled'`,
+        [m.id, p.id],
+        db,
+      );
+      if (live) continue;
+      const letter = await one(
+        `INSERT INTO letters (kind, tracking_code, subject, body, external_party, external_org, source, priority, status, owner_unit_id, created_by)
+         VALUES ('outgoing',$1,$2,$3,$4,$5,'meeting','normal','draft',$6,$7) RETURNING id`,
+        [
+          await newTrackingCode(db),
+          `دعوت به جلسه کمیسیون ${m.commission_name}${m.number ? ` (جلسه ${m.number})` : ''}`,
+          invitationBody(m, p, input.note),
+          p.full_name,
+          p.organization ?? null,
+          i.settings.defaultUnitId ?? null,
+          creator,
+        ],
+        db,
+      );
+      await query(
+        `INSERT INTO meeting_invitation_letters (meeting_external_id, invitee_external_id, invitee_name, letter_id, requested_by) VALUES ($1,$2,$3,$4,$5)`,
+        [m.id, p.id, p.full_name, letter.id, input.requestedBy ?? null],
+        db,
+      );
+      created.push({ id: letter.id, invitee: p.full_name });
+    }
+    if (created.length) {
+      await audit(db, null, { action: 'letter.invitations_created', entity: 'meeting', entityId: m.id, after: { letters: created, requestedBy: input.requestedBy }, userId: creator });
+      const secretariat = await query<{ user_id: string }>(`SELECT ur.user_id FROM user_roles ur JOIN roles r ON r.id = ur.role_id WHERE r.key = 'secretariat'`, [], db);
+      await notify(
+        {
+          userIds: secretariat.map((r) => r.user_id),
+          event: 'meeting.invitation_letters',
+          vars: { count: created.length, meeting: m.title, commission: m.commission_name, date: m.scheduled_at ? formatJalaliDate(m.scheduled_at) : '' },
+          data: { letterId: created[0].id, meetingId: m.id },
+        },
+        db,
+      );
+    }
+    return created;
+  });
+  return { created: result.length, letters: result };
 }
 
 async function syncReferral(issueId: string) {

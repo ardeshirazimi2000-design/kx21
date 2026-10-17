@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { CONFIDENTIALITY } from '../components/labels';
+import { SignatureEditor } from '../components/signature';
 import { Badge, Button, Card, ErrorBox, Field, PageHeader } from '../components/ui';
 import { post } from '../lib/api';
 import { useAuth } from '../lib/auth';
@@ -72,6 +73,11 @@ export function ProfilePage({ forceMfa }: { forceMfa?: boolean }) {
           )}
         </Card>
       </div>
+      {!forceMfa && (
+        <Card title="نمونه امضای من" className="mt">
+          <SignatureEditor userId={me!.id} hasSignature={me!.has_signature} onChange={() => void refreshMe()} />
+        </Card>
+      )}
       {!forceMfa && (
         <Card title="تغییر رمز عبور" className="mt">
           <div className="grid grid-3">

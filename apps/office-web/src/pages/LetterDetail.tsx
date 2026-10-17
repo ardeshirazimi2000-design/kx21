@@ -5,6 +5,7 @@ import {
   STEP_STATUS, STEP_TYPE, WF_STATUS,
 } from '../components/labels';
 import { PositionSelect, UserSelect } from '../components/pickers';
+import { AuthImage } from '../components/signature';
 import { Badge, Button, Card, Empty, ErrorBox, Field, JalaliDateTimeInput, Loading, Modal, PageHeader, dateFa, dateTimeFa, fa } from '../components/ui';
 import { download, fetchText, openFile, patch, post, upload } from '../lib/api';
 import { useAuth } from '../lib/auth';
@@ -197,13 +198,16 @@ export function LetterDetailPage() {
         {l.summary && <p className="muted">خلاصه: {l.summary}</p>}
         <div className="letter-body">{l.body || '—'}</div>
         {l.signatures.length > 0 && (
-          <div className="mt">
+          <div className="letter-signatures">
             {l.signatures.map((s: any) => (
-              <div key={s.id} className="row gap-sm">
+              <div key={s.id} className="letter-signature">
+                {s.has_image && s.valid && s.intact && <AuthImage path={`/letters/${l.id}/signatures/${s.id}/image`} alt={`امضای ${s.full_name}`} />}
                 <strong>{s.full_name}</strong>
-                <span className="muted">{s.position_title}</span>
-                <span className="small muted">{dateTimeFa(s.signed_at)}</span>
-                {s.valid && s.intact ? <Badge tone="success">امضای معتبر</Badge> : s.valid ? <Badge tone="danger">محتوا پس از امضا تغییر کرده است</Badge> : <Badge tone="danger">امضای نامعتبر</Badge>}
+                {s.position_title && <div className="muted">{s.position_title}</div>}
+                <div className="small muted no-print">{dateTimeFa(s.signed_at)}</div>
+                <div className="no-print">
+                  {s.valid && s.intact ? <Badge tone="success">امضای معتبر</Badge> : s.valid ? <Badge tone="danger">محتوا پس از امضا تغییر کرده است</Badge> : <Badge tone="danger">امضای نامعتبر</Badge>}
+                </div>
               </div>
             ))}
           </div>

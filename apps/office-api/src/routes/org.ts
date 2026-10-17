@@ -111,7 +111,8 @@ orgRouter.patch('/org/positions/:id', async (req, res) => {
 
 // ─────────────── Users (کاربران) ───────────────
 
-const USER_COLS = `u.id, u.username, u.full_name, u.national_id, u.email, u.mobile, u.is_active, u.clearance, u.mfa_enabled, u.last_login_at, u.created_at`;
+const USER_COLS = `u.id, u.username, u.full_name, u.national_id, u.email, u.mobile, u.is_active, u.clearance, u.mfa_enabled, u.last_login_at, u.created_at,
+  u.signature_key IS NOT NULL AS has_signature, u.signature_updated_at`;
 
 /** Directory used by pickers (any signed-in user). */
 orgRouter.get('/users/directory', async (req, res) => {

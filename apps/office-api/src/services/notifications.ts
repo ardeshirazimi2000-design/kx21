@@ -13,6 +13,7 @@ export const NOTIFICATION_EVENTS = {
   'workflow.rejected': 'رد در گردش کار',
   'resolution.assigned': 'ابلاغ مصوبه کمیسیون',
   'meeting.referral_updated': 'وضعیت ارجاع به کمیسیون',
+  'meeting.invitation_letters': 'پیش‌نویس نامه‌های دعوت جلسه',
   'archive.retention_due': 'سررسید نگهداری اسناد',
 } as const;
 export type NotificationEvent = keyof typeof NOTIFICATION_EVENTS;
@@ -50,6 +51,10 @@ export const DEFAULT_TEMPLATES: Record<NotificationEvent, Partial<Record<Channel
     sms: { body: 'ابلاغ مصوبه {{resolution}} کمیسیون {{commission}} — مهلت {{due}}' },
   },
   'meeting.referral_updated': { in_app: { subject: 'ارجاع به کمیسیون: {{subject}}', body: 'وضعیت ارجاع نامه {{number}} به کمیسیون {{commission}}: {{status}}' } },
+  'meeting.invitation_letters': {
+    in_app: { subject: 'نامه‌های دعوت: {{meeting}}', body: '{{count}} پیش‌نویس نامه دعوت برای جلسه «{{meeting}}» کمیسیون {{commission}} ({{date}}) آماده ثبت و امضاست.' },
+    email: { subject: 'نامه‌های دعوت جلسه {{meeting}}', body: '{{name}} گرامی،\n{{count}} پیش‌نویس نامه دعوت برای جلسه «{{meeting}}» کمیسیون {{commission}} ({{date}}) آماده ثبت و امضاست.\n{{link}}' },
+  },
   'archive.retention_due': { in_app: { subject: 'سررسید نگهداری', body: '{{count}} سند به پایان دوره نگهداری رسیده و منتظر تصمیم (امحا/بازبینی) است.' } },
 };
 

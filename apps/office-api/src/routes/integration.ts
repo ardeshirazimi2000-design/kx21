@@ -11,6 +11,7 @@ import { scanFile, validateFile } from '../lib/files.js';
 import { putFile } from '../lib/storage.js';
 import { body, dateStr, paged, pageParams, param, uuid } from '../lib/validate.js';
 import {
+  createInvitationLetters,
   loadIntegration,
   meetingsRequest,
   pollEvents,
@@ -246,11 +247,24 @@ integrationRouter.get('/meetings/:id', async (req, res) => {
   if (req.query.refresh === '1') await syncMeeting(id);
   const m = await one('SELECT * FROM meetings_cache WHERE external_id = $1', [id]);
   if (!m) throw notFound('جلسه یافت نشد');
-  const [resolutions, referrals] = await Promise.all([
+  const [resolutions, referrals, invitations] = await Promise.all([
     query(`SELECT r.*, l.number AS letter_number FROM resolutions_cache r LEFT JOIN letters l ON l.id = r.letter_id WHERE r.meeting_external_id = $1 ORDER BY r.number`, [id]),
     query(`SELECT mr.*, l.number AS letter_number, l.subject FROM letter_meeting_refs mr JOIN letters l ON l.id = mr.letter_id WHERE mr.requested_meeting_id = $1`, [id]),
+    query(
+      `SELECT mil.invitee_external_id, mil.invitee_name, mil.requested_by, mil.created_at, l.id AS letter_id, l.number AS letter_number, l.status AS letter_status
+         FROM meeting_invitation_letters mil JOIN letters l ON l.id = mil.letter_id WHERE mil.meeting_external_id = $1 ORDER BY mil.created_at, mil.invitee_name`,
+      [id],
+    ),
   ]);
-  res.json({ ...m, id: m.external_id, resolutions, referrals });
+  res.json({ ...m, id: m.external_id, resolutions, referrals, invitations });
+});
+
+/** Drafts invitation letters from the office side (same as a request from the meetings system). */
+integrationRouter.post('/meetings/:id/invitation-letters', async (req, res) => {
+  const u = currentUser(req);
+  requirePerm(u, 'letter.register_outgoing');
+  const b = body(req, z.object({ inviteeIds: z.array(uuid).min(1).max(500), note: z.string().max(2000).nullish() }));
+  res.status(201).json(await createInvitationLetters({ meetingId: param(req, 'id'), inviteeIds: b.inviteeIds, note: b.note, requestedBy: u.fullName }));
 });
 
 /** Attachments of a meeting, fetched from the meetings system on demand. */

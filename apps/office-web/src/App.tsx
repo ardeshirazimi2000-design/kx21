@@ -19,6 +19,7 @@ import { ProfilePage } from './pages/Profile';
 import { ReportsPage } from './pages/Reports';
 import { ResolutionDetailPage, ResolutionsPage } from './pages/Resolutions';
 import { RolesPage } from './pages/Roles';
+import { SignaturesPage } from './pages/Signatures';
 import { UsersPage } from './pages/Users';
 import { VerifyPage } from './pages/Verify';
 import { WorkflowsPage } from './pages/Workflows';
@@ -53,6 +54,7 @@ export function App() {
         <Route path="/letters/:id" element={<LetterDetailPage />} />
         <Route path="/letters/:id/edit" element={<LetterFormPage />} />
         <Route path="/archive" element={<ArchivePage />} />
+        <Route path="/signatures" element={<SignaturesPage />} />
         <Route path="/workflows" element={<WorkflowsPage />} />
         <Route path="/meetings" element={<MeetingsPage />} />
         <Route path="/meetings/:id" element={<MeetingDetailPage />} />
@@ -109,11 +111,12 @@ function Shell({ children }: { children: ReactNode }) {
         </Link>
         <nav className="nav">
           {item('/', 'داشبورد')}
-          <NavGroup id="letters" title="مکاتبات" paths={['/cartable', '/letters', '/archive']}>
+          <NavGroup id="letters" title="مکاتبات" paths={['/cartable', '/letters', '/archive', '/signatures']}>
             {item('/cartable', 'کارتابل', count(cartable.data?.length))}
             {item('/letters', 'مکاتبات')}
             {item('/letters/new', 'نامه جدید')}
             {(can('archive.read') || can('archive.manage')) && item('/archive', 'بایگانی')}
+            {can('signatures.manage') && item('/signatures', 'نمونه امضاها')}
           </NavGroup>
           <NavGroup id="commissions" title="کمیسیون‌ها" paths={['/resolutions', '/meetings']}>
             {item('/resolutions', 'مصوبات کمیسیون‌ها')}
