@@ -227,7 +227,7 @@ documentsRouter.get('/documents', async (req, res) => {
   res.json(rows);
 });
 
-async function authorizedDocument(u: AuthUser, id: string) {
+export async function authorizedDocument(u: AuthUser, id: string) {
   const d = await one('SELECT * FROM documents WHERE id = $1', [id]);
   if (!d) throw notFound();
   await resolveTarget(
@@ -287,7 +287,20 @@ filesRouter.get('/files/:id', async (req, res) => {
   if (payload.typ !== 'file' || payload.doc !== id) throw notFound();
   const u = await loadAuthUser(payload.sub);
   if (!u) throw notFound();
-  await sendDocument(res, await authorizedDocument(u, id), req.query.inline === '1');
+  const d = await authorizedDocument(u, id);
+  // page=N: a page of the document rendered for live presentation.
+  if (req.query.page) {
+    const { sendPageImage } = await import('./presentation.js');
+    await sendPageImage(res, d, Number(req.query.page));
+    return;
+  }
+  // pdf=1: the PDF made from a PowerPoint/Word document for presenting.
+  if (req.query.pdf === '1') {
+    if (!d.pdf_key) throw notFound();
+    await sendDocument(res, { ...d, storage_key: d.pdf_key, mime_type: 'application/pdf', file_name: `${d.file_name.replace(/\.[^.]+$/, '')}.pdf` }, true);
+    return;
+  }
+  await sendDocument(res, d, req.query.inline === '1');
 });
 
 /**

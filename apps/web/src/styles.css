@@ -352,3 +352,18 @@ table.table { width: 100%; border-collapse: collapse; }
 .sim-card { border-color: var(--success); }
 .sim-item { border: 1px dashed var(--success); border-radius: var(--radius); padding: 12px 14px; display: grid; gap: 6px; background: var(--success-soft); }
 .input.letter-body { min-height: 340px; height: auto; resize: vertical; line-height: 2; font-size: 0.95rem; }
+
+/* Live presentation (ارائه مستقیم) */
+.pres-card { padding: 12px; }
+.pres-bar { align-items: center; margin-bottom: 10px; }
+.pres-stage { display: flex; justify-content: center; align-items: center; background: #1b2329; border-radius: 10px; min-height: 240px; overflow: hidden; }
+.pres-stage canvas, .pres-stage img { display: block; max-width: 100%; }
+.pres-stage img { width: 100%; height: auto; background: #fff; }
+.pres-stage img { max-height: 78vh; object-fit: contain; }
+.pres-card:fullscreen .pres-stage img { max-height: calc(100vh - 70px); }
+.pres-stage .muted { color: #c9d3d9; }
+.pres-hint { margin: 8px 0 0; }
+.pres-card:fullscreen { background: #11171b; padding: 10px; display: flex; flex-direction: column; }
+.pres-card:fullscreen .pres-bar { color: #fff; }
+.pres-card:fullscreen .pres-stage { flex: 1; }
+.pres-card:fullscreen .pres-hint { display: none; }

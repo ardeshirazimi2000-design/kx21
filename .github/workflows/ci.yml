@@ -26,6 +26,8 @@ jobs:
         with:
           node-version: 22
           cache: npm
+      # Poppler renders presented PDF pages; the API tests exercise it.
+      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends poppler-utils
       - run: npm ci
       - run: npm run build -w @kx/shared
       - run: npm run typecheck

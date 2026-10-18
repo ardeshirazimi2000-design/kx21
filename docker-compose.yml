@@ -18,6 +18,8 @@ services:
     build:
       context: .
       dockerfile: apps/api/Dockerfile
+      args:
+        OFFICE_CONVERT: ${OFFICE_CONVERT:-1}
     environment:
       DATABASE_URL: postgres://kx:${POSTGRES_PASSWORD:-kx}@db:5432/kx
       JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET (at least 32 characters)}

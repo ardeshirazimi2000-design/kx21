@@ -21,6 +21,7 @@ import { reportsRouter } from './routes/reports.js';
 import { resolutionsRouter } from './routes/resolutions.js';
 import { networksRouter } from './routes/networks.js';
 import { notificationSettingsRouter } from './routes/notificationSettings.js';
+import { presentationRouter } from './routes/presentation.js';
 import { rolesRouter } from './routes/roles.js';
 import { structureRouter } from './routes/structure.js';
 import rateLimit, { ipKeyGenerator } from 'express-rate-limit';
@@ -96,6 +97,7 @@ export function createApp() {
   api.use(minutesRouter);
   api.use(resolutionsRouter);
   api.use(networksRouter);
+  api.use(presentationRouter);
   api.use(documentsRouter);
   api.use(reportsRouter);
   api.use(rolesRouter);

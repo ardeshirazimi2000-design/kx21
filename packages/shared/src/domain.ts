@@ -189,4 +189,5 @@ export const SOCKET_EVENTS = {
   voteProgress: 'vote.progress',
   voteClosed: 'vote.closed',
   notification: 'notification',
+  presentationUpdated: 'presentation.updated',
 } as const;

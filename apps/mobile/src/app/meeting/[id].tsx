@@ -15,7 +15,7 @@ import {
 } from '@kx/shared';
 import { Stack, useLocalSearchParams } from 'expo-router';
 import { useEffect, useRef, useState } from 'react';
-import { Alert, Linking, Modal, Pressable, ScrollView, View } from 'react-native';
+import { Alert, Image, Linking, Modal, Pressable, ScrollView, View } from 'react-native';
 import { Badge, Button, Card, Empty, ErrorText, fa, Input, KeyboardScroll, KeyboardSpacer, Loading, Row, Screen, T, useKeyboard, type Tone } from '../../components/ui';
 import * as DocumentPicker from 'expo-document-picker';
 import * as ImagePicker from 'expo-image-picker';
@@ -320,6 +320,8 @@ export default function MeetingRoomScreen() {
           ))}
         </Card>
       )}
+
+      {m.status !== 'cancelled' && <LivePresentation meetingId={m.id} />}
 
       {(m.documents.length > 0 || can('meeting.manage')) && <MeetingDocuments m={m} canUpload={can('meeting.manage')} onChanged={reload} />}
 
@@ -645,6 +647,61 @@ function DelegateCard({ m, onChanged }: { m: any; onChanged: () => Promise<void>
 }
 
 // ─────────────────────────────── Documents, slides and photos ───────────────────────────────
+
+/**
+ * Live presentation (ارائه مستقیم): the slide the chair/secretary is showing, rendered on the server,
+ * following page changes in real time. Tap for full screen (turn the phone sideways for wide slides).
+ */
+function LivePresentation({ meetingId }: { meetingId: string }) {
+  const t = useTheme();
+  const { data, reload } = useApi<{ presentation: any }>(`/meetings/${meetingId}/presentation`);
+  const [pres, setPres] = useState<any>(undefined);
+  const [link, setLink] = useState<{ type: string; url: string; pages: number | null; docId: string } | null>(null);
+  const [ratio, setRatio] = useState(16 / 9);
+  const [full, setFull] = useState(false);
+  useRealtime({ 'presentation.updated': (p) => p.meetingId === meetingId && setPres(p.presentation) }, { meetingId, onReconnect: () => void reload() });
+  const cur = pres === undefined ? data?.presentation : pres;
+  useEffect(() => {
+    if (!cur?.documentId || link?.docId === cur.documentId) return;
+    post(`/documents/${cur.documentId}/present-link`).then(
+      (l: any) => setLink({ ...l, docId: cur.documentId }),
+      () => undefined,
+    );
+  }, [cur?.documentId, link?.docId]);
+  if (!cur) return null;
+  const uri = link && (link.type === 'pages' ? `${getApiUrl()}${link.url}${cur.page}` : link.type === 'image' ? `${getApiUrl()}${link.url}` : null);
+  const slide = (style: object) =>
+    uri ? (
+      <Image
+        source={{ uri }}
+        resizeMode="contain"
+        onLoad={(e) => {
+          const { width, height } = e.nativeEvent.source;
+          if (width && height) setRatio(width / height);
+        }}
+        style={style}
+      />
+    ) : null;
+  return (
+    <Card title={`📽️ ارائه: ${cur.document?.title ?? cur.document?.file_name ?? ''}`} right={<T muted size={12}>{link?.pages ? `${fa(cur.page)} / ${fa(link.pages)}` : ''}</T>}>
+      {link?.type === 'pdf' ? (
+        <Button title="باز کردن فایل ارائه" variant="secondary" onPress={() => void Linking.openURL(`${getApiUrl()}${link.url}`)} />
+      ) : (
+        <Pressable onPress={() => setFull(true)} accessibilityLabel="نمایش تمام‌صفحه">
+          {slide({ width: '100%', aspectRatio: ratio, backgroundColor: t.surface2, borderRadius: 8 }) ?? <Loading />}
+        </Pressable>
+      )}
+      <T muted size={12} style={{ marginTop: 6 }}>
+        ارائه‌دهنده: {cur.presenterName} — صفحه‌ها همراه با ارائه‌دهنده ورق می‌خورد.
+      </T>
+      <Modal visible={full} onRequestClose={() => setFull(false)} supportedOrientations={['portrait', 'landscape']} animationType="fade">
+        <Pressable style={{ flex: 1, backgroundColor: '#000', justifyContent: 'center' }} onPress={() => setFull(false)}>
+          {slide({ width: '100%', height: '100%' })}
+        </Pressable>
+      </Modal>
+    </Card>
+  );
+}
 
 const KIND_ICON: Record<string, string> = { presentation: '📊', photo: '🖼️', letter: '✉️', report: '📑', recording: '🎬' };
 const VIEWABLE = ['application/pdf', 'image/png', 'image/jpeg', 'image/webp', 'video/webm', 'video/mp4'];

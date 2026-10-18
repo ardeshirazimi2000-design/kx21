@@ -15,6 +15,7 @@ import {
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { DocKind, UploadFiles, ViewButton } from '../components/docs';
+import { PresentationCard } from '../components/Presentation';
 import { AgendaBadge, AttendanceBadge, MeetingStatusBadge, MinutesBadge, ResolutionBadge } from '../components/status';
 import { Badge, Button, Card, dateFa, dateTimeFa, Empty, ErrorBox, Field, fa, JalaliDateInput, JalaliDateTimeInput, Loading, Modal, PageHeader, Tabs } from '../components/ui';
 import { ApiError, del, download, get, patch, post, upload } from '../lib/api';
@@ -165,6 +166,7 @@ export function MeetingRoomPage() {
         </div>
       )}
       {m.webinar && (m.my.role || can('meeting.manage') || can('meeting.control')) && <WebinarCard m={m} onJoined={reload} />}
+      {m.status !== 'cancelled' && <PresentationCard meetingId={m.id} />}
       {m.my.role && !m.my.delegateFor && m.settings.allowProxy && OPEN_FOR_DELEGATES.includes(m.status) && <MyDelegate m={m} reload={reload} />}
       <QuorumPanel quorum={m.quorum} detailed={can('attendance.view_all')} />
       <div className="mt" />
