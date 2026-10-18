@@ -8,6 +8,7 @@ import { badRequest, conflict, forbidden, notFound } from '../lib/errors.js';
 import { body, dateStr, param, uuid } from '../lib/validate.js';
 import { commissionAccess, isChamberAdmin, requireSuperAdmin } from '../services/access.js';
 import { notify } from '../services/notifications.js';
+import { engineInfo, similarPairs } from '../services/similarity.js';
 
 /**
  * Thematic networks of commissions (شبکه‌های موضوعی کمیسیون‌ها). The Super Admin defines networks and their
@@ -393,23 +394,53 @@ networksRouter.post('/resolutions/:id/share', async (req, res) => {
     await audit(c, req, { chamberId: r.chamber_id, action: 'resolution.shared', entity: 'resolution', entityId: id, after: { note: b.note ?? null } });
     return { r, after, first, networks: networks.map((n) => n.network_id), commissionName: ca.commission.name };
   });
-  if (result.first) {
-    // Officers of the other commissions in the same networks hear about it.
-    const others = await query<{ commission_id: string }>(
-      `SELECT DISTINCT commission_id FROM network_commissions WHERE network_id = ANY($1) AND commission_id <> $2`,
-      [result.networks, result.r.commission_id],
-    );
+  if (result.first) await announceShared(id, result);
+  res.json(result.after);
+});
+
+/**
+ * Officers of the other commissions in the same networks hear about a newly shared resolution; those whose
+ * own resolutions are similar get a targeted «مشابه مسئله شما» notification instead of the generic one.
+ */
+async function announceShared(id: string, result: { r: any; networks: string[]; commissionName: string }) {
+  const others = await query<{ commission_id: string }>(
+    `SELECT DISTINCT commission_id FROM network_commissions WHERE network_id = ANY($1) AND commission_id <> $2`,
+    [result.networks, result.r.commission_id],
+  );
+  const otherIds = others.map((o) => o.commission_id);
+  const own = otherIds.length
+    ? await query<{ id: string; commission_id: string; number: string }>(
+        `SELECT id, commission_id, number FROM (
+           SELECT id, commission_id, number, row_number() OVER (PARTITION BY commission_id ORDER BY created_at DESC) AS n
+             FROM resolutions WHERE commission_id = ANY($1) AND status <> 'cancelled') x WHERE n <= 100`,
+        [otherIds],
+      )
+    : [];
+  const { pairs } = await similarPairs(own.map((o) => o.id), [id]).catch(() => ({ pairs: [] as { source: string }[] }));
+  const similar = new Map<string, string>(); // commission → its most similar resolution number
+  for (const p of pairs) {
+    const o = own.find((x) => x.id === p.source)!;
+    if (!similar.has(o.commission_id)) similar.set(o.commission_id, o.number);
+  }
+  for (const [commissionId, number] of similar) {
     await notify({
       chamberId: result.r.chamber_id,
-      userIds: await officersOf(others.map((o) => o.commission_id)),
-      event: 'network.resolution_shared',
-      title: `مصوبه جدید در شبکه: ${result.commissionName}`,
-      body: `${result.r.number}: ${String(result.r.text).slice(0, 140)}`,
+      userIds: await officersOf([commissionId]),
+      event: 'network.similar_found',
+      title: `مصوبه‌ای مشابه مسئله کمیسیون شما در شبکه منتشر شد`,
+      body: `${result.commissionName}، مصوبه ${result.r.number} — مشابه مصوبه ${number} شما: ${String(result.r.text).slice(0, 120)}`,
       data: { networkId: result.networks[0], resolutionId: id },
     });
   }
-  res.json(result.after);
-});
+  await notify({
+    chamberId: result.r.chamber_id,
+    userIds: await officersOf(otherIds.filter((c) => !similar.has(c))),
+    event: 'network.resolution_shared',
+    title: `مصوبه جدید در شبکه: ${result.commissionName}`,
+    body: `${result.r.number}: ${String(result.r.text).slice(0, 140)}`,
+    data: { networkId: result.networks[0], resolutionId: id },
+  });
+}
 
 networksRouter.delete('/resolutions/:id/share', async (req, res) => {
   const u = currentUser(req);
@@ -588,4 +619,108 @@ networksRouter.get('/networks/:id/dashboard', async (req, res) => {
     [a.network.id],
   );
   res.json({ from, to, commissions: rows, proposals });
+});
+
+// ─────────────────────────────── Similar resolutions (موتور هوشمند) ───────────────────────────────
+
+/** Details of shared resolutions for similarity results. */
+async function resolutionCards(ids: string[], forCommission: string | null) {
+  if (!ids.length) return [];
+  return query(
+    `SELECT r.id, r.number, r.text, r.status, r.progress, r.shared_at, c.id AS commission_id, c.name AS commission_name,
+            ch.name AS chamber_name, ch.province,
+            ($2::uuid IS NOT NULL AND EXISTS (SELECT 1 FROM resolution_endorsements e WHERE e.resolution_id = r.id AND e.commission_id = $2)) AS endorsed,
+            EXISTS (SELECT 1 FROM network_proposals p WHERE p.resolution_id = r.id) AS is_proposal
+       FROM resolutions r JOIN commissions c ON c.id = r.commission_id JOIN chambers ch ON ch.id = r.chamber_id
+      WHERE r.id = ANY($1)`,
+    [ids, forCommission],
+  );
+}
+
+/** Shared resolutions of other commissions in the networks of `commissionId`, with one network each. */
+async function networkCandidates(commissionId: string, networkId?: string) {
+  return query<{ id: string; network_id: string }>(
+    `SELECT DISTINCT ON (x.id) x.id, nc2.network_id
+       FROM resolutions x
+       JOIN network_commissions nc2 ON nc2.commission_id = x.commission_id
+       JOIN network_commissions nc1 ON nc1.network_id = nc2.network_id AND nc1.commission_id = $1
+       JOIN networks n ON n.id = nc2.network_id AND n.status = 'active'
+      WHERE x.shared_at IS NOT NULL AND x.commission_id <> $1 AND x.status <> 'cancelled'
+        AND ($2::uuid IS NULL OR nc2.network_id = $2)
+      ORDER BY x.id, nc2.network_id`,
+    [commissionId, networkId ?? null],
+  );
+}
+
+/** Resolutions shared in other provinces that resemble this one (shown on the resolution page). */
+networksRouter.get('/resolutions/:id/similar', async (req, res) => {
+  const u = currentUser(req);
+  const r = await one('SELECT id, commission_id FROM resolutions WHERE id = $1', [param(req, 'id')]);
+  if (!r) throw notFound('مصوبه یافت نشد');
+  if (!(await commissionAccess(u, r.commission_id).catch(() => null))) throw notFound('مصوبه یافت نشد');
+  const cands = await networkCandidates(r.commission_id);
+  const { engine, pairs } = await similarPairs([r.id], cands.map((c) => c.id));
+  const top = pairs.slice(0, 5);
+  const cards = await resolutionCards(top.map((p) => p.candidate), r.commission_id);
+  res.json({
+    ...engineInfo(),
+    engine,
+    items: top.map((p) => ({
+      ...cards.find((c: any) => c.id === p.candidate),
+      score: Math.round(p.score * 100) / 100,
+      network_id: cands.find((c) => c.id === p.candidate)!.network_id,
+    })),
+  });
+});
+
+/** «پیشنهاد هوشمند»: shared resolutions of the network resembling the own resolutions of the commissions the user acts for. */
+networksRouter.get('/networks/:id/suggestions', async (req, res) => {
+  const u = currentUser(req);
+  const a = await networkAccess(u, param(req, 'id'));
+  let engine = engineInfo().engine;
+  const items: any[] = [];
+  for (const commissionId of a.actFor) {
+    const cands = await query<{ id: string }>(
+      `SELECT x.id FROM resolutions x JOIN network_commissions nc ON nc.commission_id = x.commission_id AND nc.network_id = $1
+        WHERE x.shared_at IS NOT NULL AND x.commission_id <> $2 AND x.status <> 'cancelled'
+          AND NOT EXISTS (SELECT 1 FROM resolution_endorsements e WHERE e.resolution_id = x.id AND e.commission_id = $2)
+          AND NOT EXISTS (SELECT 1 FROM network_suggestion_dismissals d WHERE d.resolution_id = x.id AND d.commission_id = $2)`,
+      [a.network.id, commissionId],
+    );
+    if (!cands.length) continue;
+    const own = await query<{ id: string; number: string; text: string }>(
+      `SELECT id, number, text FROM resolutions WHERE commission_id = $1 AND status <> 'cancelled' ORDER BY created_at DESC LIMIT 100`,
+      [commissionId],
+    );
+    const result = await similarPairs(own.map((o) => o.id), cands.map((c) => c.id));
+    engine = result.engine;
+    const best = new Map<string, { source: string; score: number }>();
+    for (const p of result.pairs) if (!best.has(p.candidate)) best.set(p.candidate, p);
+    const cards = await resolutionCards([...best.keys()], commissionId);
+    const k = await one('SELECT name FROM commissions WHERE id = $1', [commissionId]);
+    for (const [candidate, p] of best) {
+      const mine = own.find((o) => o.id === p.source)!;
+      items.push({
+        resolution: cards.find((c: any) => c.id === candidate),
+        commission_id: commissionId,
+        commission_name: k.name,
+        matched: { id: mine.id, number: mine.number, text: mine.text },
+        score: Math.round(p.score * 100) / 100,
+      });
+    }
+  }
+  items.sort((x, y) => y.score - x.score);
+  res.json({ ...engineInfo(), engine, items: items.slice(0, 10) });
+});
+
+networksRouter.post('/networks/:id/suggestions/dismiss', async (req, res) => {
+  const u = currentUser(req);
+  const a = await networkAccess(u, param(req, 'id'));
+  const b = body(req, z.object({ resolutionId: uuid, commissionId: uuid }));
+  if (!a.actFor.includes(b.commissionId)) throw forbidden();
+  await query(
+    `INSERT INTO network_suggestion_dismissals (resolution_id, commission_id, user_id) VALUES ($1,$2,$3) ON CONFLICT DO NOTHING`,
+    [b.resolutionId, b.commissionId, u.id],
+  );
+  res.status(204).end();
 });

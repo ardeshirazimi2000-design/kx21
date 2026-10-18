@@ -59,6 +59,7 @@ export const NOTIFICATION_EVENT_LABELS: Record<NotificationEvent, string> = {
   'network.endorsed': 'حمایت کمیسیون دیگر از مصوبه',
   'network.proposal_national': 'تبدیل مصوبه به پیشنهاد ملی',
   'network.proposal_updated': 'نتیجه پیگیری پیشنهاد ملی',
+  'network.similar_found': 'انتشار مصوبه مشابه مسئله کمیسیون (موتور هوشمند)',
 };
 
 /** Variables that can be used in message texts; meeting/resolution ones apply when the event has one. */
@@ -132,6 +133,7 @@ export const DEFAULT_NOTIFICATION_SETTINGS: NotificationSettings = {
     'network.endorsed': ev(null, null),
     'network.proposal_national': ev(null, null),
     'network.proposal_updated': ev(null, null),
+    'network.similar_found': ev(null, null),
   },
 };
 

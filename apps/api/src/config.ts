@@ -48,6 +48,17 @@ export const config = {
   /** Outbox delivery to integration webhooks (run on a single instance in multi-instance deployments). */
   integrationWorkerEnabled: process.env.INTEGRATION_WORKER_ENABLED !== 'false',
   integrationWorkerIntervalSeconds: Number(process.env.INTEGRATION_WORKER_INTERVAL_SECONDS ?? '5'),
+  /**
+   * Optional AI engine for finding similar resolutions across networks: any OpenAI-compatible /embeddings API,
+   * preferably on the organisation's own server (deploy/ai: Ollama with bge-m3). Unset → text similarity.
+   */
+  ai: {
+    baseUrl: (process.env.AI_BASE_URL ?? '').replace(/\/+$/, ''),
+    apiKey: process.env.AI_API_KEY ?? '',
+    embeddingModel: process.env.AI_EMBEDDING_MODEL ?? 'bge-m3',
+    /** Minimum cosine similarity (0–1) of two resolutions to be suggested as similar. */
+    minScore: Number(process.env.AI_SIMILARITY_MIN ?? 0.6),
+  },
   webinar: {
     url: (process.env.WEBINAR_URL ?? '').replace(/\/+$/, ''),
     appId: process.env.WEBINAR_APP_ID ?? 'kx-commissions',

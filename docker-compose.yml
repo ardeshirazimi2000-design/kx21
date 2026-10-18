@@ -33,11 +33,27 @@ services:
       WEBINAR_URL: ${WEBINAR_URL:-}
       WEBINAR_APP_ID: ${WEBINAR_APP_ID:-kx-commissions}
       WEBINAR_APP_SECRET: ${WEBINAR_APP_SECRET:-}
+      # Similar resolutions across networks: AI engine on this server (bash deploy/ai/install.sh).
+      AI_BASE_URL: ${AI_BASE_URL:-}
+      AI_EMBEDDING_MODEL: ${AI_EMBEDDING_MODEL:-bge-m3}
+      AI_SIMILARITY_MIN: ${AI_SIMILARITY_MIN:-0.6}
     volumes:
       - uploads:/data/uploads
     depends_on:
       db:
         condition: service_healthy
+
+  # Optional AI engine (Ollama + multilingual embedding model), started only with the "ai" profile:
+  #   bash deploy/ai/install.sh
+  # Not published on any host port: only the api container reaches it.
+  ai:
+    image: ollama/ollama:0.34.4
+    profiles: ["ai"]
+    restart: unless-stopped
+    environment:
+      OLLAMA_KEEP_ALIVE: 24h
+    volumes:
+      - ai-models:/root/.ollama
 
   web:
     build:
@@ -100,3 +116,4 @@ volumes:
   uploads:
   office-db-data:
   office-storage:
+  ai-models:

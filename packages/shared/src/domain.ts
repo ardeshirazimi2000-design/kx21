@@ -102,6 +102,7 @@ export const NOTIFICATION_EVENTS = [
   'network.endorsed',
   'network.proposal_national',
   'network.proposal_updated',
+  'network.similar_found',
 ] as const;
 export type NotificationEvent = (typeof NOTIFICATION_EVENTS)[number];
 

@@ -3,6 +3,7 @@ import { config } from '../config.js';
 import { query } from '../db/pool.js';
 import { logger } from '../lib/logger.js';
 import { notify } from './notifications.js';
+import { backfillEmbeddings } from './similarity.js';
 
 /**
  * Periodic jobs:
@@ -71,6 +72,8 @@ export async function runScheduledJobs(): Promise<void> {
       data: { meetingId: m.meeting_id },
     });
   }
+  // Embeddings for similar-resolution suggestions; an unreachable AI server must not stop the other jobs.
+  await backfillEmbeddings().catch((e) => logger.warn({ err: (e as Error).message }, 'embedding backfill failed'));
   if (dueSoon.length || overdue.length || pending.length) {
     logger.info({ dueSoon: dueSoon.length, overdue: overdue.length, checkinReminders: pending.length }, 'scheduled jobs ran');
   }

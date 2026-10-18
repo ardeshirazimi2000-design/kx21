@@ -1,6 +1,6 @@
 import { NETWORK_PROPOSAL_STATUS_LABELS, NETWORK_PROPOSAL_STATUSES, RESOLUTION_STATUS_LABELS, type NetworkProposalStatus, type ResolutionStatus } from '@kx/shared';
 import { useState } from 'react';
-import { Link, useNavigate, useParams } from 'react-router-dom';
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { NetworkMap, NetworksMap, type NetworksMapData } from '../components/NetworkMap';
 import { del, patch, post } from '../lib/api';
 import { useAuth } from '../lib/auth';
@@ -122,8 +122,10 @@ export function NetworkDetailPage() {
   const { id } = useParams();
   const nav = useNavigate();
   const { data: n, error, reload } = useApi<any>(`/networks/${id}`);
-  const [tab, setTab] = useState<Tab>('map');
-  const [filter, setFilter] = useState('');
+  // ?q=<number> (links from the resolution page) opens the shared resolutions filtered on it.
+  const [params] = useSearchParams();
+  const [tab, setTab] = useState<Tab>(params.get('q') ? 'shared' : 'map');
+  const [filter, setFilter] = useState(params.get('q') ?? '');
   if (error) return <ErrorBox error={error} />;
   if (!n) return <Loading />;
   const p = n.permissions;
@@ -206,6 +208,7 @@ function SharedResolutions({ network, proposalsOnly, initialQ = '' }: { network:
   return (
     <>
       <ErrorBox error={err} />
+      {!proposalsOnly && actFor.length > 0 && <Suggestions network={network} onChange={() => void reload()} />}
       <Card>
         <p className="muted small" style={{ marginTop: 0 }}>
           {proposalsOnly
@@ -630,6 +633,107 @@ export function NetworkShareCard({ resolutionId }: { resolutionId: string }) {
       ) : (
         <p className="muted small">این مصوبه در شبکه منتشر نشده است.</p>
       )}
+      <SimilarResolutions resolutionId={resolutionId} />
     </Card>
+  );
+}
+
+const scorePct = (s: number) => `${fa(Math.round(s * 100))}٪`;
+
+function EngineNote({ data }: { data: { engine: 'ai' | 'text'; model: string | null } }) {
+  return (
+    <span className="muted small">
+      {data.engine === 'ai' ? `یافته‌شده با موتور هوشمند${data.model ? ` (${data.model})` : ''} بر اساس معنای متن` : 'یافته‌شده بر اساس شباهت متنی'}
+    </span>
+  );
+}
+
+/** «پیشنهاد هوشمند»: shared resolutions resembling the issues of the user's own commission. */
+function Suggestions({ network, onChange }: { network: any; onChange: () => void }) {
+  const { data, reload } = useApi<any>(`/networks/${network.id}/suggestions`);
+  const [endorsing, setEndorsing] = useState<any | null>(null);
+  const [err, setErr] = useState<Error | null>(null);
+  if (!data || data.items.length === 0) return null;
+  const commissionName = (id: string) => network.commissions.find((c: any) => c.id === id)?.name ?? '';
+  const dismiss = async (it: any) => {
+    try {
+      await post(`/networks/${network.id}/suggestions/dismiss`, { resolutionId: it.resolution.id, commissionId: it.commission_id });
+      void reload();
+    } catch (e) {
+      setErr(e as Error);
+    }
+  };
+  return (
+    <Card title="پیشنهاد هوشمند: مصوبات مرتبط با مسائل کمیسیون شما" actions={<EngineNote data={data} />} className="mb sim-card">
+      <ErrorBox error={err} />
+      <div className="net-feed">
+        {data.items.map((it: any) => (
+          <div key={`${it.resolution.id}-${it.commission_id}`} className="sim-item">
+            <div className="row wrap gap-sm" style={{ justifyContent: 'space-between' }}>
+              <span>
+                <strong>{it.resolution.commission_name}</strong> <span className="muted small">— {it.resolution.chamber_name}</span> <Badge>{it.resolution.number}</Badge>
+              </span>
+              <Badge tone="success">شباهت {scorePct(it.score)}</Badge>
+            </div>
+            <p className="net-text">{it.resolution.text}</p>
+            <p className="small muted" style={{ margin: 0 }}>
+              مشابه مصوبه <strong>{it.matched.number}</strong> {it.commission_name}: «{it.matched.text}»
+            </p>
+            <div className="row gap-sm">
+              <Button size="sm" onClick={() => setEndorsing(it)}>
+                حمایت از طرف {it.commission_name}
+              </Button>
+              <Button size="sm" variant="ghost" onClick={() => void dismiss(it)}>
+                مرتبط نیست
+              </Button>
+            </div>
+          </div>
+        ))}
+      </div>
+      {endorsing && (
+        <EndorseModal
+          network={network}
+          resolution={endorsing.resolution}
+          options={[endorsing.commission_id]}
+          commissionName={commissionName}
+          onClose={() => setEndorsing(null)}
+          onSaved={() => {
+            setEndorsing(null);
+            void reload();
+            onChange();
+          }}
+        />
+      )}
+    </Card>
+  );
+}
+
+/** On the resolution page: similar resolutions already shared by other provinces. */
+function SimilarResolutions({ resolutionId }: { resolutionId: string }) {
+  const { data } = useApi<any>(`/resolutions/${resolutionId}/similar`);
+  if (!data) return null;
+  return (
+    <div className="mt">
+      <div className="row wrap gap-sm" style={{ justifyContent: 'space-between', alignItems: 'baseline' }}>
+        <strong>مصوبات مشابه در استان‌های دیگر</strong>
+        <EngineNote data={data} />
+      </div>
+      {data.items.length === 0 ? (
+        <p className="muted small">مصوبه مشابهی در شبکه‌های این کمیسیون منتشر نشده است.</p>
+      ) : (
+        <ul className="list small">
+          {data.items.map((it: any) => (
+            <li key={it.id}>
+              <Link to={`/networks/${it.network_id}?q=${encodeURIComponent(it.number)}`}>
+                {it.number} — {it.commission_name} ({it.province})
+              </Link>{' '}
+              <Badge tone="success">شباهت {scorePct(it.score)}</Badge> {it.endorsed && <Badge tone="info">حمایت کرده‌اید</Badge>}{' '}
+              {it.is_proposal && <Badge tone="accent">پیشنهاد ملی</Badge>}
+              <div className="muted">{it.text}</div>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
   );
 }

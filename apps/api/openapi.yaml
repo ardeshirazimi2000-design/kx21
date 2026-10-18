@@ -3971,6 +3971,110 @@ paths:
         in: path
         required: true
         schema: *id004
+  /api/resolutions/{id}/similar:
+    get:
+      tags:
+      - Networks
+      summary: مصوبات مشابه منتشرشده در استان‌های دیگر (موتور هوشمند)
+      responses:
+        '200':
+          description: OK
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Forbidden
+        '404':
+          description: Not found or not visible
+        '409':
+          description: Conflict (state machine / business rule)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      description: engine = ai (embeddings, AI_BASE_URL) or text (pg_trgm fallback); score 0–1.
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: *id004
+  /api/networks/{id}/suggestions:
+    get:
+      tags:
+      - Networks
+      summary: 'پیشنهاد هوشمند: مصوبات منتشرشده مشابه مصوبات کمیسیون‌های کاربر'
+      responses:
+        '200':
+          description: OK
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Forbidden
+        '404':
+          description: Not found or not visible
+        '409':
+          description: Conflict (state machine / business rule)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      description: For officers / chamber admins of member commissions; excludes own, already endorsed and dismissed.
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: *id004
+  /api/networks/{id}/suggestions/dismiss:
+    post:
+      tags:
+      - Networks
+      summary: «مرتبط نیست» برای یک پیشنهاد
+      responses:
+        '200':
+          description: OK
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Forbidden
+        '404':
+          description: Not found or not visible
+        '409':
+          description: Conflict (state machine / business rule)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                resolutionId: *id004
+                commissionId: *id004
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: *id004
   /api/resolutions/{id}/share:
     post:
       tags:
