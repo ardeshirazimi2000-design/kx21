@@ -20,6 +20,8 @@ export const config = {
   corsOrigins: env('CORS_ORIGINS', 'http://localhost:5173').split(',').map((s) => s.trim()),
   uploadDir: env('UPLOAD_DIR', './uploads'),
   maxUploadMb: Number(env('MAX_UPLOAD_MB', '50')),
+  /** Meeting recordings (video files of kind «فیلم جلسه») may be larger than other documents. */
+  maxRecordingMb: Number(env('MAX_RECORDING_MB', '2048')),
   smsProvider: env('SMS_PROVIDER', 'log'),
   emailProvider: env('EMAIL_PROVIDER', 'log'),
   pushProvider: env('PUSH_PROVIDER', 'log'),

@@ -3,7 +3,10 @@ import type { AddressInfo } from 'node:net';
 import { io as ioClient, type Socket } from 'socket.io-client';
 import request from 'supertest';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { readdir } from 'node:fs/promises';
+import path from 'node:path';
 import { createApp } from '../src/app.js';
+import { config } from '../src/config.js';
 import { migrate } from '../src/db/migrate.js';
 import { pool } from '../src/db/pool.js';
 import { seed, SEED_PASSWORD } from '../src/db/seed.js';
@@ -773,6 +776,49 @@ describe('documents', () => {
     const url = new URL(link.body.url);
     expect((await request(app).get(url.pathname + url.search)).status).toBe(200);
     expect((await request(app).get(url.pathname + '?token=forged')).status).toBe(404);
+  });
+
+  it('stores meeting recordings as «فیلم جلسه» with their own size limit and ranged playback', async () => {
+    const meetingId = (await as('secretary').get('/api/meetings?status=approved')).body.items[0].id;
+    const post = (buf: Buffer, filename: string, contentType: string) =>
+      request(app).post('/api/documents').set('authorization', `Bearer ${tokens.secretary}`).field('meetingId', meetingId).attach('file', buf, { filename, contentType });
+    const saved = config.maxUploadMb;
+    config.maxUploadMb = 1;
+    try {
+      const big = Buffer.alloc(1.5 * 1024 * 1024, 7);
+      // An ordinary document above MAX_UPLOAD_MB is refused …
+      const pdf = await post(Buffer.concat([Buffer.from('%PDF-1.4\n'), big]), 'big.pdf', 'application/pdf');
+      expect(pdf.status).toBe(400);
+      // … while a recording of the same size is accepted (MAX_RECORDING_MB), whatever kind was chosen.
+      const webm = Buffer.concat([Buffer.from([0x1a, 0x45, 0xdf, 0xa3]), big]);
+      const rec = await request(app)
+        .post('/api/documents')
+        .set('authorization', `Bearer ${tokens.secretary}`)
+        .field('meetingId', meetingId)
+        .field('kind', 'attachment')
+        .attach('file', webm, { filename: 'جلسه ۱۲.webm', contentType: 'video/webm' });
+      expect(rec.status).toBe(201);
+      expect(rec.body.kind).toBe('recording');
+      expect(rec.body.mime_type).toBe('video/webm');
+      expect(Number(rec.body.size_bytes)).toBe(webm.length);
+      // a file named .mp4 that is not a video is refused
+      expect((await post(Buffer.from('not a video at all'), 'x.mp4', 'video/mp4')).status).toBe(400);
+      // rejected uploads leave nothing behind in the temporary folder
+      expect(await readdir(path.join(config.uploadDir, '.incoming'))).toEqual([]);
+
+      // The player fetches byte ranges through a signed link that lasts for a meeting.
+      const link = await as('secretary').post(`/api/documents/${rec.body.id}/link?inline=1`);
+      const url = new URL(link.body.url);
+      const payload = JSON.parse(Buffer.from(url.searchParams.get('token')!.split('.')[1], 'base64url').toString());
+      expect(payload.exp - payload.iat).toBe(4 * 3600);
+      const part = await request(app).get(url.pathname + url.search).set('range', 'bytes=0-99');
+      expect(part.status).toBe(206);
+      expect(part.headers['content-range']).toBe(`bytes 0-99/${webm.length}`);
+      expect(part.headers['content-type']).toBe('video/webm');
+      expect(part.headers['content-disposition']).toMatch(/^inline/);
+    } finally {
+      config.maxUploadMb = saved;
+    }
   });
 });
 

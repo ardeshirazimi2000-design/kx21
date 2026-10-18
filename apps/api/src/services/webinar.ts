@@ -67,11 +67,19 @@ export function webinarToken(
 }
 
 /** Join link with the token and a few interface settings (Persian UI, meeting title as subject). */
-export function webinarJoinUrl(m: WebinarMeeting, token: string): string {
+/** Toolbar of participants who are not officers: everything except recording (only the chair/secretary record). */
+const MEMBER_TOOLBAR = [
+  'camera', 'chat', 'closedcaptions', 'desktop', 'filmstrip', 'fullscreen', 'hangup', 'help', 'microphone',
+  'noisesuppression', 'participants-pane', 'raisehand', 'reactions', 'select-background', 'settings', 'shareaudio',
+  'stats', 'tileview', 'toggle-camera', 'videoquality',
+];
+
+export function webinarJoinUrl(m: WebinarMeeting, token: string, moderator = true): string {
   const hash = [
     `config.subject=${encodeURIComponent(JSON.stringify(`جلسه ${m.number} — ${m.title}`))}`,
     `config.defaultLanguage=${encodeURIComponent('"fa"')}`,
     'config.disableDeepLinking=true',
+    ...(moderator ? [] : [`config.toolbarButtons=${encodeURIComponent(JSON.stringify(MEMBER_TOOLBAR))}`]),
   ].join('&');
   return `${config.webinar.url}/${webinarRoom(m)}?jwt=${token}#${hash}`;
 }

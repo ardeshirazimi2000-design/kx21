@@ -138,7 +138,10 @@ ENABLE_CLOSE_PAGE=0
 ENABLE_PREJOIN_PAGE=1
 ENABLE_BREAKOUT_ROOMS=0
 ENABLE_RECORDING=0
-DISABLE_LOCAL_RECORDING=1
+# Local recording: the chair/secretary record in their own browser (Chrome/Edge); everyone is told when it starts.
+# Other participants get no record button (see webinarJoinUrl in the api).
+DISABLE_LOCAL_RECORDING=false
+ENABLE_LOCAL_RECORDING_NOTIFY_ALL_PARTICIPANT=true
 
 JICOFO_AUTH_PASSWORD=$JICOFO_PW
 JVB_AUTH_PASSWORD=$JVB_PW

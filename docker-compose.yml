@@ -34,6 +34,7 @@ services:
       WEBINAR_APP_ID: ${WEBINAR_APP_ID:-kx-commissions}
       WEBINAR_APP_SECRET: ${WEBINAR_APP_SECRET:-}
       # Similar resolutions across networks: AI engine on this server (bash deploy/ai/install.sh).
+      MAX_RECORDING_MB: ${MAX_RECORDING_MB:-2048}
       AI_BASE_URL: ${AI_BASE_URL:-}
       AI_EMBEDDING_MODEL: ${AI_EMBEDDING_MODEL:-bge-m3}
       AI_SIMILARITY_MIN: ${AI_SIMILARITY_MIN:-0.6}

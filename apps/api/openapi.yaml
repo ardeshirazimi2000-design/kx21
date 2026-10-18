@@ -4624,9 +4624,10 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
-      description: 'Fields: file, target id, optional kind (attachment|presentation|photo|letter|report|evidence; detected from the file when
-        omitted), optional title. Accepts PDF, PowerPoint (ppt/pptx/ppsx), Word, Excel, images (png/jpg/webp/heic) and text; extension + magic-byte
-        validated, size limited (MAX_UPLOAD_MB, default 50), malware scan hook.'
+      description: 'Fields: file, target id, optional kind (attachment|presentation|photo|letter|report|evidence|recording; detected from the
+        file when omitted), optional title. Accepts PDF, PowerPoint (ppt/pptx/ppsx), Word, Excel, images (png/jpg/webp/heic), text and meeting
+        recordings (webm/mp4, always kind=recording); extension + magic-byte validated, size limited (MAX_UPLOAD_MB, default 50; recordings MAX_RECORDING_MB,
+        default 2048), malware scan hook. Downloads support byte ranges.'
       requestBody:
         required: true
         content:

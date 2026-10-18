@@ -117,9 +117,35 @@ export async function download(path: string, fallbackName: string) {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
-export async function upload(fields: Record<string, string>, file: File) {
+/** Uploads a document; with onProgress (0–100) it reports progress, which matters for meeting recordings. */
+export async function upload(fields: Record<string, string>, file: File, onProgress?: (percent: number) => void, retry = true): Promise<any> {
   const fd = new FormData();
   Object.entries(fields).forEach(([k, v]) => fd.append(k, v));
   fd.append('file', file);
-  return api('/documents', { method: 'POST', body: fd });
+  if (!onProgress) return api('/documents', { method: 'POST', body: fd });
+  const s = getSession();
+  const res = await new Promise<{ status: number; body: any }>((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', '/api/documents');
+    if (s) xhr.setRequestHeader('authorization', `Bearer ${s.accessToken}`);
+    xhr.upload.onprogress = (e) => e.lengthComputable && onProgress(Math.round((100 * e.loaded) / e.total));
+    xhr.onload = () => {
+      let body: any = null;
+      try {
+        body = JSON.parse(xhr.responseText);
+      } catch {
+        /* not JSON (e.g. a proxy error page) */
+      }
+      resolve({ status: xhr.status, body });
+    };
+    xhr.onerror = () => reject(new ApiError(0, 'network', 'ارتباط با سرور در هنگام بارگذاری قطع شد'));
+    xhr.send(fd);
+  });
+  if (res.status === 401 && retry && s && (await refresh())) return upload(fields, file, onProgress, false);
+  if (res.status === 413 && !res.body) throw new ApiError(413, 'file_too_large', 'حجم فایل بیش از حد مجاز سرور است');
+  if (res.status < 200 || res.status >= 300) {
+    const e = res.body?.error;
+    throw new ApiError(res.status, e?.code ?? 'error', e?.message ?? 'خطا در بارگذاری فایل', e?.details);
+  }
+  return res.body;
 }

@@ -646,8 +646,8 @@ function DelegateCard({ m, onChanged }: { m: any; onChanged: () => Promise<void>
 
 // ─────────────────────────────── Documents, slides and photos ───────────────────────────────
 
-const KIND_ICON: Record<string, string> = { presentation: '📊', photo: '🖼️', letter: '✉️', report: '📑' };
-const VIEWABLE = ['application/pdf', 'image/png', 'image/jpeg', 'image/webp'];
+const KIND_ICON: Record<string, string> = { presentation: '📊', photo: '🖼️', letter: '✉️', report: '📑', recording: '🎬' };
+const VIEWABLE = ['application/pdf', 'image/png', 'image/jpeg', 'image/webp', 'video/webm', 'video/mp4'];
 const DOC_TYPES = [
   'application/pdf',
   'application/vnd.ms-powerpoint',
@@ -658,6 +658,9 @@ const DOC_TYPES = [
   'application/vnd.ms-excel',
   'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
   'image/*',
+  // Meeting recordings (فیلم جلسه)
+  'video/mp4',
+  'video/webm',
 ];
 
 function MeetingDocuments({ m, canUpload, onChanged }: { m: any; canUpload: boolean; onChanged: () => Promise<void> | void }) {

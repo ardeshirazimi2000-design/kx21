@@ -1,5 +1,6 @@
 import crypto from 'node:crypto';
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { createReadStream } from 'node:fs';
+import { mkdir, open, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { Router, type Response } from 'express';
 import jwt from 'jsonwebtoken';
@@ -15,7 +16,18 @@ import { commissionAccess, meetingAccess, meetingIdOfAgendaItem } from '../servi
 
 export const documentsRouter = Router();
 
-const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: config.maxUploadMb * 1024 * 1024, files: 1 } });
+const MB = 1024 * 1024;
+/** Uploads are streamed to a temporary file under the upload folder (videos can be large), then moved into place. */
+const incomingDir = () => path.join(config.uploadDir, '.incoming');
+const upload = multer({
+  storage: multer.diskStorage({
+    destination: (_req, _file, cb) => {
+      mkdir(incomingDir(), { recursive: true }).then(() => cb(null, incomingDir()), (e) => cb(e, ''));
+    },
+    filename: (_req, _file, cb) => cb(null, crypto.randomUUID()),
+  }),
+  limits: { fileSize: Math.max(config.maxUploadMb, config.maxRecordingMb) * MB, files: 1 },
+});
 
 /**
  * Allowed file types by extension, with their canonical MIME type and content signatures
@@ -41,6 +53,9 @@ const ALLOWED: Record<string, { mime: string; magic: number[][] | null; at?: num
   '.xlsx': { mime: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', magic: ZIP, kind: 'attachment' },
   '.xls': { mime: 'application/vnd.ms-excel', magic: OLE, kind: 'attachment' },
   '.txt': { mime: 'text/plain', magic: null, kind: 'attachment' },
+  // Meeting recordings: the webinar's local recording saves WebM; phones and other tools produce MP4.
+  '.webm': { mime: 'video/webm', magic: [[0x1a, 0x45, 0xdf, 0xa3]], kind: 'recording' },
+  '.mp4': { mime: 'video/mp4', magic: [[0x66, 0x74, 0x79, 0x70]], at: 4, kind: 'recording' },
 };
 
 export const ALLOWED_EXTENSIONS = Object.keys(ALLOWED);
@@ -61,10 +76,33 @@ export function validateFile(name: string, _declaredMime: string, buf: Buffer): 
 
 /**
  * Malware scanning hook. Integrate ClamAV (clamd INSTREAM) or an organisational scanner here;
- * returning 'infected' rejects the upload.
+ * returning 'infected' rejects the upload. Receives the content, or the path of a large (video) file.
  */
-export async function scanFile(_buf: Buffer): Promise<'clean' | 'infected'> {
+export async function scanFile(_input: Buffer | string): Promise<'clean' | 'infected'> {
   return 'clean';
+}
+
+/** Moves a file uploaded to the temporary folder into storage under the chamber's folder (hashing it on the way). */
+async function storeUploaded(chamberId: string, tmpPath: string) {
+  const hash = crypto.createHash('sha256');
+  for await (const chunk of createReadStream(tmpPath)) hash.update(chunk as Buffer);
+  const id = crypto.randomUUID();
+  const storageKey = path.join(chamberId, id);
+  const full = path.join(config.uploadDir, storageKey);
+  await mkdir(path.dirname(full), { recursive: true });
+  await rename(tmpPath, full);
+  return { id, storageKey, sha256: hash.digest('hex') };
+}
+
+/** First bytes of a file, for content-signature checks. */
+async function headOf(file: string, n = 8192): Promise<Buffer> {
+  const fh = await open(file, 'r');
+  try {
+    const { buffer, bytesRead } = await fh.read(Buffer.alloc(n), 0, n, 0);
+    return buffer.subarray(0, bytesRead);
+  } finally {
+    await fh.close();
+  }
 }
 
 /** Writes an uploaded file to storage under the chamber's folder. */
@@ -131,36 +169,44 @@ documentsRouter.post('/documents', upload.single('file'), async (req, res) => {
   const u = currentUser(req);
   const file = req.file;
   if (!file) throw badRequest('فایلی ارسال نشده است');
-  const meta = parse(
-    targetSchema.extend({
-      kind: z.enum(['attachment', 'presentation', 'photo', 'letter', 'report', 'evidence']).optional(),
-      title: z.string().max(200).nullish(),
-    }),
-    req.body,
-  );
-  // multer decodes names as latin1; restore UTF-8 (Persian file names).
-  const fileName = Buffer.from(file.originalname, 'latin1').toString('utf8');
-  const detected = validateFile(fileName, file.mimetype, file.buffer);
-  const kind = meta.kind ?? detected.kind;
-  if ((await scanFile(file.buffer)) !== 'clean') throw badRequest('فایل آلوده تشخیص داده شد');
-  const target = await resolveTarget(u, meta, true, kind);
-  const { id, storageKey, sha256 } = await storeFile(target.chamberId, file.buffer);
-  const row = await tx(async (c) => {
-    const r = await one(
-      `INSERT INTO documents (id, chamber_id, commission_id, meeting_id, agenda_item_id, resolution_id, issue_id, kind, title, file_name,
-          mime_type, size_bytes, storage_key, sha256, owner_id)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
-       RETURNING id, kind, title, file_name, mime_type, size_bytes, sha256, created_at`,
-      [
-        id, target.chamberId, target.commissionId, meta.agendaItemId ? null : target.meetingId, meta.agendaItemId ?? null, meta.resolutionId ?? null,
-        meta.issueId ?? null, kind, meta.title ?? null, fileName, detected.mime, file.size, storageKey, sha256, u.id,
-      ],
-      c,
+  try {
+    const meta = parse(
+      targetSchema.extend({
+        kind: z.enum(['attachment', 'presentation', 'photo', 'letter', 'report', 'evidence', 'recording']).optional(),
+        title: z.string().max(200).nullish(),
+      }),
+      req.body,
     );
-    await audit(c, req, { chamberId: target.chamberId, action: 'document.uploaded', entity: 'document', entityId: id, after: r });
-    return r;
-  });
-  res.status(201).json(row);
+    // multer decodes names as latin1; restore UTF-8 (Persian file names).
+    const fileName = Buffer.from(file.originalname, 'latin1').toString('utf8');
+    const detected = validateFile(fileName, file.mimetype, await headOf(file.path));
+    const isVideo = detected.kind === 'recording';
+    const limit = isVideo ? config.maxRecordingMb : config.maxUploadMb;
+    if (file.size > limit * MB) throw badRequest(`حجم فایل بیش از حد مجاز است (حداکثر ${limit} مگابایت${isVideo ? ' برای فیلم جلسه' : ''})`);
+    const kind = isVideo ? 'recording' : meta.kind && meta.kind !== 'recording' ? meta.kind : detected.kind;
+    if ((await scanFile(isVideo ? file.path : await readFile(file.path))) !== 'clean') throw badRequest('فایل آلوده تشخیص داده شد');
+    const target = await resolveTarget(u, meta, true, kind);
+    const { id, storageKey, sha256 } = await storeUploaded(target.chamberId, file.path);
+    const row = await tx(async (c) => {
+      const r = await one(
+        `INSERT INTO documents (id, chamber_id, commission_id, meeting_id, agenda_item_id, resolution_id, issue_id, kind, title, file_name,
+            mime_type, size_bytes, storage_key, sha256, owner_id)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
+         RETURNING id, kind, title, file_name, mime_type, size_bytes, sha256, created_at`,
+        [
+          id, target.chamberId, target.commissionId, meta.agendaItemId ? null : target.meetingId, meta.agendaItemId ?? null, meta.resolutionId ?? null,
+          meta.issueId ?? null, kind, meta.title ?? null, fileName, detected.mime, file.size, storageKey, sha256, u.id,
+        ],
+        c,
+      );
+      await audit(c, req, { chamberId: target.chamberId, action: 'document.uploaded', entity: 'document', entityId: id, after: r });
+      return r;
+    });
+    res.status(201).json(row);
+  } finally {
+    // Removes the temporary file when the upload was rejected (after a successful upload it has been moved).
+    await rm(file.path, { force: true });
+  }
 });
 
 documentsRouter.get('/documents', async (req, res) => {
@@ -194,16 +240,21 @@ async function authorizedDocument(u: AuthUser, id: string) {
   return d;
 }
 
-const INLINE_TYPES = ['application/pdf', 'image/png', 'image/jpeg', 'image/webp'];
+const INLINE_TYPES = ['application/pdf', 'image/png', 'image/jpeg', 'image/webp', 'video/webm', 'video/mp4'];
+const isVideo = (mime: string) => mime.startsWith('video/');
 
+/** Streams a stored document; byte ranges are supported so recordings can be played and seeked in the browser. */
 export async function sendDocument(res: Response, d: any, inline = false) {
-  const buf = await readFile(path.join(config.uploadDir, d.storage_key));
   const disposition = inline && INLINE_TYPES.includes(d.mime_type) ? 'inline' : 'attachment';
   res.setHeader('content-type', d.mime_type);
   res.setHeader('content-disposition', `${disposition}; filename*=UTF-8''${encodeURIComponent(d.file_name)}`);
   res.setHeader('x-content-type-options', 'nosniff');
   res.setHeader('cache-control', 'private, no-store');
-  res.send(buf);
+  await new Promise<void>((resolve, reject) =>
+    res.sendFile(path.resolve(config.uploadDir, d.storage_key), { acceptRanges: true, cacheControl: false, lastModified: false, dotfiles: 'allow' }, (e) =>
+      e && !res.headersSent ? reject(notFound('فایل یافت نشد')) : resolve(),
+    ),
+  );
 }
 
 documentsRouter.get('/documents/:id/download', async (req, res) => {
@@ -217,7 +268,8 @@ documentsRouter.get('/documents/:id/download', async (req, res) => {
 documentsRouter.post('/documents/:id/link', async (req, res) => {
   const u = currentUser(req);
   const d = await authorizedDocument(u, param(req, 'id'));
-  const token = jwt.sign({ sub: u.id, doc: d.id, typ: 'file' }, config.jwtSecret, { expiresIn: '2m', issuer: 'kx-api' });
+  // A video player keeps requesting byte ranges while it plays, so its link lives for the length of a meeting.
+  const token = jwt.sign({ sub: u.id, doc: d.id, typ: 'file' }, config.jwtSecret, { expiresIn: isVideo(d.mime_type) ? '4h' : '2m', issuer: 'kx-api' });
   const base = `${req.protocol}://${req.get('host')}`;
   res.json({ url: `${base}/api/files/${d.id}?token=${token}${req.query.inline === '1' ? '&inline=1' : ''}` });
 });

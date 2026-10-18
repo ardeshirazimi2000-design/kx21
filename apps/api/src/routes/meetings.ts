@@ -575,7 +575,7 @@ meetingsRouter.post('/meetings/:id/webinar/join', async (req, res) => {
   const name = a.delegateFor ? `${u.fullName} (نماینده ${a.delegateFor.fullName})` : u.fullName;
   const token = webinarToken(a.meeting, { id: u.id, fullName: name }, officer);
   await audit(pool, req, { chamberId: a.meeting.chamber_id, action: 'webinar.joined', entity: 'meeting', entityId: id, after: { moderator: officer } });
-  res.json({ url: webinarJoinUrl(a.meeting, token), room: webinarRoom(a.meeting), moderator: officer, attendance });
+  res.json({ url: webinarJoinUrl(a.meeting, token, officer), room: webinarRoom(a.meeting), moderator: officer, attendance });
 });
 
 meetingsRouter.get('/meetings/:id/attendance', async (req, res) => {
