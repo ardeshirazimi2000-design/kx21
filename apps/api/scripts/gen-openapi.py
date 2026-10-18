@@ -156,6 +156,7 @@ E = [
     ("get", "/api/tasks", "Resolutions", "وظایف باز من", None, None),
     # Thematic networks of commissions across chambers.
     ("get", "/api/networks", "Networks", "شبکه‌های موضوعی قابل مشاهده برای کاربر", None, None),
+    ("get", "/api/networks/map", "Networks", "داده نقشه شبکه‌ها: شبکه‌ها، اتاق‌های عضو و پیوندها", None, None),
     ("post", "/api/networks", "Networks", "تعریف شبکه (مدیر سامانه)", S(name=str_, description=str_, endorseThreshold=int_, status=str_), None),
     ("patch", "/api/networks/{id}", "Networks", "ویرایش / بایگانی شبکه (مدیر سامانه)", S(name=str_, description=str_, endorseThreshold=int_, status=str_), None),
     ("get", "/api/networks/{id}", "Networks", "جزئیات شبکه: کمیسیون‌های عضو، دبیران، کمیسیون‌های قابل افزودن و دسترسی‌ها", None, "Visible to the Super Admin, network coordinators, admins of member chambers and members of member commissions."),

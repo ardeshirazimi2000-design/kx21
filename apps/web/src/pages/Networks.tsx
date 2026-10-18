@@ -1,6 +1,7 @@
 import { NETWORK_PROPOSAL_STATUS_LABELS, NETWORK_PROPOSAL_STATUSES, RESOLUTION_STATUS_LABELS, type NetworkProposalStatus, type ResolutionStatus } from '@kx/shared';
 import { useState } from 'react';
-import { Link, useParams } from 'react-router-dom';
+import { Link, useNavigate, useParams } from 'react-router-dom';
+import { NetworkMap, NetworksMap, type NetworksMapData } from '../components/NetworkMap';
 import { del, patch, post } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { useApi } from '../lib/hooks';
@@ -15,9 +16,17 @@ const PROPOSAL_TONE: Record<NetworkProposalStatus, 'warning' | 'info' | 'success
 
 /** Thematic networks of commissions across chambers (شبکه‌های موضوعی). */
 export function NetworksPage() {
-  const { me } = useAuth();
+  const { me, setChamberId } = useAuth();
+  const nav = useNavigate();
   const { data, loading, reload } = useApi<any[]>('/networks');
+  const map = useApi<NetworksMapData>('/networks/map');
   const [open, setOpen] = useState(false);
+  // Chambers the user administers open their commissions; other chambers just highlight their links.
+  const openChamber = (id: string) => {
+    if (!me?.is_super_admin && !me?.adminChambers.includes(id)) return;
+    setChamberId(id);
+    nav('/commissions');
+  };
   return (
     <>
       <PageHeader
@@ -31,6 +40,16 @@ export function NetworksPage() {
           <Empty>
             {me?.is_super_admin ? 'هنوز شبکه‌ای تعریف نشده است.' : 'کمیسیون‌های شما هنوز عضو هیچ شبکه‌ای نیستند. مدیر اتاق می‌تواند کمیسیون را به شبکه مربوط اضافه کند.'}
           </Empty>
+        </Card>
+      )}
+      {map.data && map.data.networks.length > 0 && (
+        <Card className="mb">
+          <NetworksMap data={map.data} onNetwork={(id) => nav(`/networks/${id}`)} onChamber={me?.is_super_admin || me?.adminChambers.length ? openChamber : undefined} />
+          <div className="nm-legend">
+            <span><i style={{ background: 'var(--primary)', borderColor: 'var(--primary)' }} />اتاق ایران</span>
+            <span><i style={{ background: 'var(--accent-soft)', borderColor: 'var(--accent)' }} />شبکه موضوعی (عدد: تعداد اتاق‌ها) — با کلیک وارد شبکه شوید</span>
+            <span><i style={{ background: 'var(--info-soft)', borderColor: 'var(--info)' }} />اتاق استان (ضخامت خط: تعداد کمیسیون‌ها در شبکه)</span>
+          </div>
         </Card>
       )}
       <div className="grid grid-2">
@@ -97,16 +116,19 @@ function NetworkModal({ network, onClose, onSaved }: { network?: any; onClose: (
   );
 }
 
-type Tab = 'commissions' | 'shared' | 'proposals' | 'dashboard' | 'settings';
+type Tab = 'map' | 'commissions' | 'shared' | 'proposals' | 'dashboard' | 'settings';
 
 export function NetworkDetailPage() {
   const { id } = useParams();
+  const nav = useNavigate();
   const { data: n, error, reload } = useApi<any>(`/networks/${id}`);
-  const [tab, setTab] = useState<Tab>('shared');
+  const [tab, setTab] = useState<Tab>('map');
+  const [filter, setFilter] = useState('');
   if (error) return <ErrorBox error={error} />;
   if (!n) return <Loading />;
   const p = n.permissions;
   const tabs: { id: Tab; label: string }[] = [
+    { id: 'map', label: 'نقشه شبکه' },
     { id: 'shared', label: 'مصوبات مشترک' },
     { id: 'proposals', label: 'پیشنهادهای ملی' },
     { id: 'commissions', label: `کمیسیون‌های عضو (${fa(n.commissions.length)})` },
@@ -125,8 +147,37 @@ export function NetworkDetailPage() {
         }
         actions={n.status === 'archived' && <Badge>بایگانی</Badge>}
       />
-      <Tabs tabs={tabs} value={tab} onChange={setTab} />
-      {tab === 'shared' && <SharedResolutions network={n} proposalsOnly={false} />}
+      <Tabs tabs={tabs} value={tab} onChange={(t) => { setFilter(''); setTab(t); }} />
+      {tab === 'map' && (
+        <Card>
+          {n.commissions.length === 0 ? (
+            <Empty>هنوز کمیسیونی به این شبکه نپیوسته است.</Empty>
+          ) : (
+            <NetworkMap
+              name={n.name}
+              commissions={n.commissions}
+              links={n.links}
+              onCenter={() => setTab('shared')}
+              onChamber={() => setTab('commissions')}
+              onCommission={(k) => {
+                if (k.can_open) nav(`/commissions/${k.id}`);
+                else {
+                  setFilter(k.name);
+                  setTab('shared');
+                }
+              }}
+            />
+          )}
+          <div className="nm-legend">
+            <span><i style={{ background: 'var(--primary)', borderColor: 'var(--primary)' }} />شبکه (کلیک: مصوبات مشترک)</span>
+            <span><i style={{ background: 'var(--info-soft)', borderColor: 'var(--info)' }} />استان</span>
+            <span><i style={{ background: 'var(--success-soft)', borderColor: 'var(--success)' }} />کمیسیون شما (کلیک: ورود به کمیسیون)</span>
+            <span><i style={{ background: 'var(--surface)', borderColor: 'var(--primary)' }} />کمیسیون استان دیگر (کلیک: مصوبات منتشرشده آن) — عدد: مصوبات منتشرشده</span>
+            <span><i style={{ background: 'var(--success)', borderColor: 'var(--success)', borderRadius: 2, height: 4 }} />پیکان سبز: حمایت از مصوبات</span>
+          </div>
+        </Card>
+      )}
+      {tab === 'shared' && <SharedResolutions key={filter} network={n} proposalsOnly={false} initialQ={filter} />}
       {tab === 'proposals' && <SharedResolutions network={n} proposalsOnly />}
       {tab === 'commissions' && <MemberCommissions network={n} reload={reload} />}
       {tab === 'dashboard' && <NetworkDashboard network={n} />}
@@ -135,8 +186,8 @@ export function NetworkDetailPage() {
   );
 }
 
-function SharedResolutions({ network, proposalsOnly }: { network: any; proposalsOnly: boolean }) {
-  const [q, setQ] = useState('');
+function SharedResolutions({ network, proposalsOnly, initialQ = '' }: { network: any; proposalsOnly: boolean; initialQ?: string }) {
+  const [q, setQ] = useState(initialQ);
   const { data, reload } = useApi<any>(`/networks/${network.id}/resolutions?proposals=${proposalsOnly}&q=${encodeURIComponent(q)}`);
   const [endorsing, setEndorsing] = useState<any | null>(null);
   const [following, setFollowing] = useState<any | null>(null);

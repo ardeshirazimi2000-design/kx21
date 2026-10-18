@@ -157,6 +157,43 @@ networksRouter.patch('/networks/:id', async (req, res) => {
   res.json(row);
 });
 
+/** Map of all networks the user can see: networks and the chambers taking part in each (with commission counts). */
+networksRouter.get('/networks/map', async (req, res) => {
+  const u = currentUser(req);
+  const networks = await query(
+    `SELECT n.id, n.name, n.status,
+       (SELECT count(*) FROM resolutions r JOIN network_commissions nc ON nc.commission_id = r.commission_id
+          WHERE nc.network_id = n.id AND r.shared_at IS NOT NULL)::int AS shared_count,
+       (SELECT count(*) FROM network_proposals p WHERE p.network_id = n.id)::int AS proposal_count
+     FROM networks n
+     WHERE $2::boolean
+        OR EXISTS (SELECT 1 FROM network_coordinators k WHERE k.network_id = n.id AND k.user_id = $1)
+        OR EXISTS (SELECT 1 FROM network_commissions nc JOIN commissions c ON c.id = nc.commission_id
+                    WHERE nc.network_id = n.id AND (c.chamber_id = ANY($3::uuid[])
+                      OR EXISTS (SELECT 1 FROM commission_memberships m WHERE m.commission_id = c.id AND m.user_id = $1 AND m.status = 'active')))
+     ORDER BY n.name`,
+    [u.id, u.isSuperAdmin, u.adminChambers],
+  );
+  const ids = networks.map((n: any) => n.id);
+  const links = ids.length
+    ? await query(
+        `SELECT nc.network_id, c.chamber_id, count(*)::int AS commissions
+           FROM network_commissions nc JOIN commissions c ON c.id = nc.commission_id
+          WHERE nc.network_id = ANY($1) GROUP BY nc.network_id, c.chamber_id`,
+        [ids],
+      )
+    : [];
+  const chamberIds = [...new Set(links.map((l: any) => l.chamber_id))];
+  const chambers = chamberIds.length
+    ? await query(
+        `SELECT ch.id, ch.name, ch.province, ($2::boolean OR ch.id = ANY($3::uuid[]) OR ch.id = $4) AS mine
+           FROM chambers ch WHERE ch.id = ANY($1) ORDER BY ch.province`,
+        [chamberIds, u.isSuperAdmin, u.adminChambers, u.chamberId],
+      )
+    : [];
+  res.json({ networks, chambers, links });
+});
+
 networksRouter.get('/networks/:id', async (req, res) => {
   const u = currentUser(req);
   const a = await networkAccess(u, param(req, 'id'));
@@ -167,10 +204,21 @@ networksRouter.get('/networks/:id', async (req, res) => {
           WHERE m.commission_id = c.id AND m.status = 'active' AND m.position = 'chair' LIMIT 1) AS chair_name,
        (SELECT u.full_name FROM commission_memberships m JOIN users u ON u.id = m.user_id
           WHERE m.commission_id = c.id AND m.status = 'active' AND m.position = 'secretary' LIMIT 1) AS secretary_name,
-       (SELECT count(*) FROM resolutions r WHERE r.commission_id = c.id AND r.shared_at IS NOT NULL) AS shared_count
+       (SELECT count(*) FROM resolutions r WHERE r.commission_id = c.id AND r.shared_at IS NOT NULL) AS shared_count,
+       ($2::boolean OR c.chamber_id = ANY($3::uuid[])
+          OR EXISTS (SELECT 1 FROM commission_memberships m WHERE m.commission_id = c.id AND m.user_id = $4 AND m.status = 'active')) AS can_open
      FROM network_commissions nc JOIN commissions c ON c.id = nc.commission_id JOIN chambers ch ON ch.id = c.chamber_id
      JOIN terms t ON t.id = c.term_id
      WHERE nc.network_id = $1 ORDER BY ch.province, c.name`,
+    [a.network.id, u.isSuperAdmin, u.adminChambers, u.id],
+  );
+  // Endorsements between the network's commissions (supporter → originating commission), for the network map.
+  const links = await query(
+    `SELECT e.commission_id AS source, r.commission_id AS target, count(*)::int AS count
+       FROM resolution_endorsements e JOIN resolutions r ON r.id = e.resolution_id
+      WHERE e.commission_id IN (SELECT commission_id FROM network_commissions WHERE network_id = $1)
+        AND r.commission_id IN (SELECT commission_id FROM network_commissions WHERE network_id = $1)
+      GROUP BY e.commission_id, r.commission_id`,
     [a.network.id],
   );
   const coordinators = await query(
@@ -191,6 +239,7 @@ networksRouter.get('/networks/:id', async (req, res) => {
   res.json({
     ...a.network,
     commissions,
+    links,
     coordinators,
     joinable,
     permissions: {

@@ -142,4 +142,16 @@ describe('commission networks', () => {
     expect(r.networks[0]).toMatchObject({ name: 'شبکه ملی تجارت و صادرات', proposal_status: 'forwarded' });
     expect((await as('m1').get(`/api/resolutions/${res1}/networks`)).body.canShare).toBe(false);
   });
+
+  it('serves map data: networks with their chambers, and support links between commissions', async () => {
+    const m = (await as('isfChair').get('/api/networks/map')).body;
+    expect(m.networks.map((n: any) => n.name)).toEqual(['شبکه ملی تجارت و صادرات']);
+    expect(m.chambers.map((c: any) => c.province).sort()).toEqual(['اصفهان', 'یزد']);
+    expect(m.links).toHaveLength(2);
+    expect((await as('guest').get('/api/networks/map')).body.networks).toEqual([]);
+    const d = (await as('isfChair').get(`/api/networks/${net}`)).body;
+    expect(d.links).toEqual([{ source: trd, target: exp, count: 1 }]);
+    expect(d.commissions.find((c: any) => c.id === trd).can_open).toBe(true);
+    expect(d.commissions.find((c: any) => c.id === exp).can_open).toBe(false);
+  });
 });

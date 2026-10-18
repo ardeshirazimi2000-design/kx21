@@ -323,3 +323,29 @@ table.table { width: 100%; border-collapse: collapse; }
 .net-support .list { margin: 8px 0 0; }
 .net-meter { flex: 1; max-width: 220px; height: 8px; border-radius: 4px; background: var(--border); overflow: hidden; }
 .net-meter > span { display: block; height: 100%; background: var(--success); }
+
+/* Network maps */
+.nm { width: 100%; height: auto; display: block; max-height: 62vh; }
+.nm-edge { stroke: var(--border); stroke-width: 2; transition: opacity 0.15s; }
+.nm-edge-hub { stroke-dasharray: 4 5; }
+.nm-hot { stroke: var(--accent); }
+.nm-support { fill: none; stroke: var(--success); opacity: 0.85; }
+.nm-arrow { fill: var(--success); }
+.nm-dim { opacity: 0.18; }
+.nm-node { transition: opacity 0.15s; }
+.nm-node circle { stroke-width: 2.5; }
+.nm-hub circle { fill: var(--primary); stroke: var(--primary); }
+.nm-hub .nm-label, .nm-hub .nm-sub { fill: var(--primary-ink); }
+.nm-network circle { fill: var(--accent-soft); stroke: var(--accent); }
+.nm-chamber circle { fill: var(--info-soft); stroke: var(--info); }
+.nm-commission circle { fill: var(--surface); stroke: var(--primary); }
+.nm-mine circle { stroke: var(--success); fill: var(--success-soft); }
+.nm-click { cursor: pointer; outline: none; }
+.nm-click:hover circle, .nm-click:focus-visible circle { stroke-width: 4; filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.18)); }
+.nm-label { font-size: 13px; fill: var(--text); font-family: var(--font); }
+.nm-bold { font-weight: 700; }
+.nm-sub { font-size: 11px; font-family: var(--font); }
+.nm-small { font-size: 11px; }
+.nm-count { font-size: 13px; font-weight: 700; fill: var(--text); font-family: var(--font); }
+.nm-legend { display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: 0.8rem; color: var(--muted); }
+.nm-legend i { display: inline-block; width: 12px; height: 12px; border-radius: 50%; border: 2px solid; vertical-align: -2px; margin-inline-end: 4px; }
