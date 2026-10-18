@@ -101,7 +101,7 @@ export function MeetingRoomPage() {
           <>
             <Link to={`/commissions/${m.commission.id}`}>{m.commission.name}</Link> — جلسه شماره {fa(m.number)} — {formatJalaliLong(m.scheduled_at)} ساعت{' '}
             {formatTime(m.scheduled_at)} — {MEETING_TYPE_LABELS[m.type as MeetingType]}
-            {m.location ? ` — ${m.location}` : ''}
+            {m.location ? ` — مکان: ${m.location}` : ''}
             {m.online_link && (
               <>
                 {' '}
