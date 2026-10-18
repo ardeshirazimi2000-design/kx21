@@ -2,7 +2,7 @@ import { NETWORK_PROPOSAL_STATUS_LABELS, NETWORK_PROPOSAL_STATUSES, RESOLUTION_S
 import { useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { NetworkMap, NetworksMap, type NetworksMapData } from '../components/NetworkMap';
-import { del, patch, post } from '../lib/api';
+import { api, del, download, patch, post } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { useApi } from '../lib/hooks';
 import { Badge, Button, Card, dateFa, Empty, ErrorBox, Field, fa, Loading, Modal, PageHeader, Progress, Stat, Tabs } from '../components/ui';
@@ -193,6 +193,7 @@ function SharedResolutions({ network, proposalsOnly, initialQ = '' }: { network:
   const { data, reload } = useApi<any>(`/networks/${network.id}/resolutions?proposals=${proposalsOnly}&q=${encodeURIComponent(q)}`);
   const [endorsing, setEndorsing] = useState<any | null>(null);
   const [following, setFollowing] = useState<any | null>(null);
+  const [letterFor, setLetterFor] = useState<any | null>(null);
   const [err, setErr] = useState<Error | null>(null);
   const actFor: string[] = network.permissions.actFor;
   const commissionName = (id: string) => network.commissions.find((c: any) => c.id === id)?.name ?? '';
@@ -284,6 +285,11 @@ function SharedResolutions({ network, proposalsOnly, initialQ = '' }: { network:
                       پیگیری پیشنهاد ملی
                     </Button>
                   )}
+                  {r.proposal && network.permissions.national && (
+                    <Button size="sm" variant="secondary" onClick={() => setLetterFor(r)}>
+                      نامه پیشنهاد ملی
+                    </Button>
+                  )}
                   {own && <Link className="btn btn-ghost btn-sm" to={`/resolutions/${r.id}`}>صفحه مصوبه</Link>}
                 </div>
               </article>
@@ -294,6 +300,7 @@ function SharedResolutions({ network, proposalsOnly, initialQ = '' }: { network:
       {endorsing && (
         <EndorseModal network={network} resolution={endorsing.r} options={endorsing.options} commissionName={commissionName} onClose={() => setEndorsing(null)} onSaved={() => { setEndorsing(null); void reload(); }} />
       )}
+      {letterFor && <LetterModal network={network} resolution={letterFor} onClose={() => setLetterFor(null)} />}
       {following && <ProposalModal network={network} resolution={following} onClose={() => setFollowing(null)} onSaved={() => { setFollowing(null); void reload(); }} />}
     </>
   );
@@ -735,5 +742,75 @@ function SimilarResolutions({ resolutionId }: { resolutionId: string }) {
         </ul>
       )}
     </div>
+  );
+}
+
+/** Letter of a national proposal: drafted from the network's data, edited and exported to Word by the coordinator. */
+function LetterModal({ network, resolution, onClose }: { network: any; resolution: any; onClose: () => void }) {
+  const base = `/networks/${network.id}/proposals/${resolution.id}/letter`;
+  const { data } = useApi<any>(base);
+  const [form, setForm] = useState<{ addressee: string; subject: string; body: string } | null>(null);
+  const [err, setErr] = useState<Error | null>(null);
+  const [saved, setSaved] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const f = form ?? data?.letter;
+  if (!data || !f) return null;
+  const save = async () => {
+    setBusy(true);
+    setErr(null);
+    try {
+      await api(base, { method: 'PUT', json: f });
+      setSaved('نامه ذخیره شد.');
+    } catch (e) {
+      setErr(e as Error);
+    } finally {
+      setBusy(false);
+    }
+  };
+  const exportWord = async () => {
+    // Save edits first so the Word file has them.
+    if (form) await save();
+    await download(`${base}.docx`, `proposal-${resolution.number}.docx`);
+  };
+  return (
+    <Modal
+      wide
+      title={`نامه پیشنهاد ملی ${resolution.number}`}
+      onClose={onClose}
+      footer={
+        <div className="row gap-sm wrap">
+          <Button busy={busy} onClick={save}>
+            ذخیره
+          </Button>
+          <Button variant="secondary" onClick={() => void exportWord()}>
+            دریافت Word
+          </Button>
+          <Button
+            variant="ghost"
+            onClick={() => {
+              if (!form || confirm('متن فعلی با پیش‌نویس تازه از داده‌های شبکه جایگزین شود؟')) setForm({ ...data.draft });
+            }}
+          >
+            پیش‌نویس تازه از داده‌ها
+          </Button>
+        </div>
+      }
+    >
+      <ErrorBox error={err} />
+      {saved && <div className="alert alert-success small">{saved}</div>}
+      <p className="muted small" style={{ marginTop: 0 }}>
+        {data.saved ? `آخرین ذخیره: ${dateFa(data.updatedAt)}${data.updatedBy ? ` توسط ${data.updatedBy}` : ''}. ` : 'این پیش‌نویس از مصوبه مبدأ و حمایت‌های ثبت‌شده در شبکه ساخته شده است؛ پیش از ارسال آن را بازبینی کنید. '}
+        نامه با سربرگ اتاق ایران، تاریخ و امضای دبیر شبکه در فایل Word آماده می‌شود.
+      </p>
+      <Field label="گیرنده">
+        <input className="input" value={f.addressee} onChange={(e) => setForm({ ...f, addressee: e.target.value })} placeholder="مثلاً: ریاست محترم بانک مرکزی" />
+      </Field>
+      <Field label="موضوع">
+        <input className="input" value={f.subject} onChange={(e) => setForm({ ...f, subject: e.target.value })} />
+      </Field>
+      <Field label="متن نامه">
+        <textarea className="input letter-body" rows={14} value={f.body} onChange={(e) => setForm({ ...f, body: e.target.value })} />
+      </Field>
+    </Modal>
   );
 }

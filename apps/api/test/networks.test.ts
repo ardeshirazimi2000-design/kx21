@@ -154,4 +154,36 @@ describe('commission networks', () => {
     expect(d.commissions.find((c: any) => c.id === trd).can_open).toBe(true);
     expect(d.commissions.find((c: any) => c.id === exp).can_open).toBe(false);
   });
+
+  it('drafts, saves and exports the national proposal letter (coordinators and the Super Admin only)', async () => {
+    expect((await as('isfChair').get(`/api/networks/${net}/proposals/${res1}/letter`)).status).toBe(403);
+    const g = (await as('root').get(`/api/networks/${net}/proposals/${res1}/letter`)).body;
+    expect(g.saved).toBe(false);
+    expect(g.engine).toBe('template');
+    expect(g.letter.addressee).toBe('بانک مرکزی');
+    expect(g.letter.subject).toContain('شبکه ملی تجارت و صادرات');
+    expect(g.letter.body).toContain('مکاتبه با بانک مرکزی درباره تمدید مهلت رفع تعهد ارزی');
+    expect(g.letter.body).toContain('صادرکنندگان اصفهان هم همین مشکل را دارند');
+    expect(g.letter.body).toContain('۲ استان');
+
+    const edited = { addressee: 'رئیس کل محترم بانک مرکزی', subject: g.letter.subject, body: g.letter.body + '\n\nرونوشت: معاونت ارزی' };
+    expect((await request(app).put(`/api/networks/${net}/proposals/${res1}/letter`).set('authorization', `Bearer ${tokens.isfChair}`).send(edited)).status).toBe(403);
+    // isfAdmin was made a coordinator of this network above.
+    const put = await request(app).put(`/api/networks/${net}/proposals/${res1}/letter`).set('authorization', `Bearer ${tokens.isfAdmin}`).send(edited);
+    expect(put.status).toBe(200);
+    const again = (await as('root').get(`/api/networks/${net}/proposals/${res1}/letter`)).body;
+    expect(again.saved).toBe(true);
+    expect(again.updatedBy).toBe('مدیر اتاق اصفهان');
+    expect(again.letter.addressee).toBe('رئیس کل محترم بانک مرکزی');
+    expect(again.draft.addressee).toBe('بانک مرکزی');
+
+    const docx = await as('isfAdmin').get(`/api/networks/${net}/proposals/${res1}/letter.docx`).buffer(true).parse((r, cb) => {
+      const chunks: Buffer[] = [];
+      r.on('data', (c: Buffer) => chunks.push(c));
+      r.on('end', () => cb(null, Buffer.concat(chunks)));
+    });
+    expect(docx.status).toBe(200);
+    expect(docx.headers['content-type']).toContain('wordprocessingml');
+    expect((docx.body as Buffer).subarray(0, 2).toString()).toBe('PK');
+  });
 });

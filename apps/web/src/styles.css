@@ -351,3 +351,4 @@ table.table { width: 100%; border-collapse: collapse; }
 .nm-legend i { display: inline-block; width: 12px; height: 12px; border-radius: 50%; border: 2px solid; vertical-align: -2px; margin-inline-end: 4px; }
 .sim-card { border-color: var(--success); }
 .sim-item { border: 1px dashed var(--success); border-radius: var(--radius); padding: 12px 14px; display: grid; gap: 6px; background: var(--success-soft); }
+.input.letter-body { min-height: 340px; height: auto; resize: vertical; line-height: 2; font-size: 0.95rem; }

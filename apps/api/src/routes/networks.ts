@@ -8,6 +8,7 @@ import { badRequest, conflict, forbidden, notFound } from '../lib/errors.js';
 import { body, dateStr, param, uuid } from '../lib/validate.js';
 import { commissionAccess, isChamberAdmin, requireSuperAdmin } from '../services/access.js';
 import { notify } from '../services/notifications.js';
+import { buildLetterDocx, draftLetter, loadLetterData } from '../services/proposalLetter.js';
 import { engineInfo, similarPairs } from '../services/similarity.js';
 
 /**
@@ -723,4 +724,68 @@ networksRouter.post('/networks/:id/suggestions/dismiss', async (req, res) => {
     [b.resolutionId, b.commissionId, u.id],
   );
   res.status(204).end();
+});
+
+// ─────────────────────────────── National proposal letter ───────────────────────────────
+
+const letterSchema = z.object({ addressee: z.string().max(300).default(''), subject: z.string().min(3).max(500), body: z.string().min(10).max(20000) });
+
+/** The saved letter (or, until saved, the draft built from the network's data) plus a fresh draft. */
+networksRouter.get('/networks/:id/proposals/:rid/letter', async (req, res) => {
+  const u = currentUser(req);
+  const a = await networkAccess(u, param(req, 'id'));
+  if (!a.isNational) throw forbidden();
+  const rid = param(req, 'rid');
+  const d = await loadLetterData(a.network.id, rid);
+  const draft = draftLetter(d);
+  const saved = await one(
+    `SELECT p.letter_addressee, p.letter_subject, p.letter_body, p.letter_updated_at, u.full_name AS updated_by
+       FROM network_proposals p LEFT JOIN users u ON u.id = p.letter_updated_by WHERE p.network_id = $1 AND p.resolution_id = $2`,
+    [a.network.id, rid],
+  );
+  res.json({
+    engine: 'template',
+    saved: !!saved?.letter_body,
+    updatedAt: saved?.letter_updated_at ?? null,
+    updatedBy: saved?.updated_by ?? null,
+    letter: saved?.letter_body ? { addressee: saved.letter_addressee ?? '', subject: saved.letter_subject, body: saved.letter_body } : draft,
+    draft,
+  });
+});
+
+networksRouter.put('/networks/:id/proposals/:rid/letter', async (req, res) => {
+  const u = currentUser(req);
+  const a = await networkAccess(u, param(req, 'id'));
+  if (!a.isNational) throw forbidden();
+  const rid = param(req, 'rid');
+  const b = body(req, letterSchema);
+  const row = await tx(async (c) => {
+    const r = await one(
+      `UPDATE network_proposals SET letter_addressee = $3, letter_subject = $4, letter_body = $5, letter_updated_by = $6, letter_updated_at = now()
+        WHERE network_id = $1 AND resolution_id = $2 RETURNING letter_updated_at`,
+      [a.network.id, rid, b.addressee, b.subject, b.body, u.id],
+      c,
+    );
+    if (!r) throw notFound('پیشنهاد ملی یافت نشد');
+    await audit(c, req, { chamberId: null, action: 'network.letter_saved', entity: 'resolution', entityId: rid, after: { networkId: a.network.id, subject: b.subject } });
+    return r;
+  });
+  res.json({ ok: true, updatedAt: row.letter_updated_at });
+});
+
+networksRouter.get('/networks/:id/proposals/:rid/letter.docx', async (req, res) => {
+  const u = currentUser(req);
+  const a = await networkAccess(u, param(req, 'id'));
+  if (!a.isNational) throw forbidden();
+  const rid = param(req, 'rid');
+  const d = await loadLetterData(a.network.id, rid);
+  const saved = await one('SELECT letter_addressee, letter_subject, letter_body FROM network_proposals WHERE network_id = $1 AND resolution_id = $2', [a.network.id, rid]);
+  const letter = saved?.letter_body ? { addressee: saved.letter_addressee ?? '', subject: saved.letter_subject, body: saved.letter_body } : draftLetter(d);
+  const me = await one('SELECT full_name FROM users WHERE id = $1', [u.id]);
+  const buf = await buildLetterDocx(letter, d, a.isCoordinator ? me?.full_name : (d.coordinators[0] ?? me?.full_name));
+  await audit(pool, req, { chamberId: null, action: 'network.letter_exported', entity: 'resolution', entityId: rid, after: { networkId: a.network.id } });
+  const fileName = `نامه پیشنهاد ملی ${d.resolution.number}.docx`;
+  res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
+  res.setHeader('Content-Disposition', `attachment; filename="proposal-${d.resolution.number}.docx"; filename*=UTF-8''${encodeURIComponent(fileName)}`);
+  res.send(buf);
 });
