@@ -676,8 +676,8 @@ function LivePresentation({ meetingId }: { meetingId: string }) {
         source={{ uri }}
         resizeMode="contain"
         onLoad={(e) => {
-          const { width, height } = e.nativeEvent.source;
-          if (width && height) setRatio(width / height);
+          const src = e.nativeEvent?.source;
+          if (src?.width && src?.height) setRatio(src.width / src.height);
         }}
         style={style}
       />

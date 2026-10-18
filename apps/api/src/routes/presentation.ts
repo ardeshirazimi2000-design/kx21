@@ -45,6 +45,8 @@ export async function sendPageImage(res: import('express').Response, d: any, pag
   res.setHeader('content-type', 'image/png');
   res.setHeader('cache-control', 'private, max-age=86400');
   res.setHeader('x-content-type-options', 'nosniff');
+  // Shown by the mobile app as well (another origin when it runs as a web build); the link itself is the access token.
+  res.setHeader('cross-origin-resource-policy', 'cross-origin');
   res.sendFile(file, { dotfiles: 'allow' });
 }
 
