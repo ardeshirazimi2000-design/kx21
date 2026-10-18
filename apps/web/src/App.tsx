@@ -8,6 +8,7 @@ import { ChambersPage } from './pages/Chambers';
 import { CommissionDetailPage } from './pages/CommissionDetail';
 import { CommissionsPage } from './pages/Commissions';
 import { HomePage } from './pages/Home';
+import { IntegrationsPage } from './pages/Integrations';
 import { LoginPage } from './pages/Login';
 import { MeetingRoomPage } from './pages/MeetingRoom';
 import { MeetingsPage } from './pages/Meetings';
@@ -44,6 +45,7 @@ export function App() {
         <Route path="/people" element={<PeoplePage />} />
         <Route path="/roles" element={<RolesPage />} />
         <Route path="/notification-settings" element={<NotificationSettingsPage />} />
+        <Route path="/integrations" element={<IntegrationsPage />} />
         <Route path="/meetings" element={<MeetingsPage />} />
         <Route path="/meetings/:id" element={<MeetingRoomPage />} />
         <Route path="/resolutions" element={<ResolutionsPage />} />
@@ -104,12 +106,13 @@ function Shell({ children }: { children: ReactNode }) {
             {(isExpert || isOfficer) && item('/referrals', 'ارجاعات کارشناسی')}
             {item('/notifications', 'اعلان‌ها', unread.data?.total ? <span className="count">{fa(unread.data.total)}</span> : null)}
           </NavGroup>
-          <NavGroup id="structure" title="ساختار" paths={['/commissions', '/terms', '/people', '/roles', '/notification-settings', '/chambers']}>
+          <NavGroup id="structure" title="ساختار" paths={['/commissions', '/terms', '/people', '/roles', '/notification-settings', '/integrations', '/chambers']}>
             {item('/commissions', 'کمیسیون‌ها')}
             {isAdmin && item('/terms', 'دوره‌ها')}
             {(isAdmin || isOfficer) && item('/people', 'اشخاص و کاربران')}
             {isAdmin && item('/roles', 'نقش‌ها و دسترسی‌ها')}
             {isAdmin && item('/notification-settings', 'تنظیمات اطلاع‌رسانی')}
+            {isAdmin && item('/integrations', 'یکپارچه‌سازی')}
             {me!.is_super_admin && item('/chambers', 'اتاق‌ها')}
           </NavGroup>
           {(isAdmin || isOfficer) && (

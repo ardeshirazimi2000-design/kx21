@@ -48,6 +48,55 @@ services:
     ports:
       - "${WEB_PORT:-8000}:80"
 
+  # ───── Office automation (اتوماسیون اداری): separate service and database, integrated over REST + webhooks ─────
+  office-db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: kx
+      POSTGRES_PASSWORD: ${OFFICE_POSTGRES_PASSWORD:-kx}
+      POSTGRES_DB: kx_office
+    volumes:
+      - office-db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U kx"]
+      interval: 5s
+      retries: 10
+
+  office-api:
+    build:
+      context: .
+      dockerfile: apps/office-api/Dockerfile
+    environment:
+      DATABASE_URL: postgres://kx:${OFFICE_POSTGRES_PASSWORD:-kx}@office-db:5432/kx_office
+      JWT_SECRET: ${OFFICE_JWT_SECRET:?set OFFICE_JWT_SECRET (at least 32 characters)}
+      DATA_ENCRYPTION_KEY: ${OFFICE_DATA_ENCRYPTION_KEY:?set OFFICE_DATA_ENCRYPTION_KEY (openssl rand -hex 32)}
+      PUBLIC_URL: ${OFFICE_PUBLIC_URL:-http://localhost:8100}
+      CORS_ORIGINS: ${OFFICE_PUBLIC_URL:-http://localhost:8100}
+      MFA_REQUIRED_ROLES: ${OFFICE_MFA_REQUIRED_ROLES:-}
+      SMS_PROVIDER: ${SMS_PROVIDER:-log}
+      KAVENEGAR_API_KEY: ${KAVENEGAR_API_KEY:-}
+      KAVENEGAR_SENDER: ${KAVENEGAR_SENDER:-}
+      EMAIL_PROVIDER: ${OFFICE_EMAIL_PROVIDER:-log}
+      SMTP_URL: ${OFFICE_SMTP_URL:-}
+      ADMIN_USERNAME: ${OFFICE_ADMIN_USERNAME:-}
+      ADMIN_PASSWORD: ${OFFICE_ADMIN_PASSWORD:-}
+    volumes:
+      - office-storage:/data/storage
+    depends_on:
+      office-db:
+        condition: service_healthy
+
+  office-web:
+    build:
+      context: .
+      dockerfile: apps/office-web/Dockerfile
+    depends_on:
+      - office-api
+    ports:
+      - "${OFFICE_WEB_PORT:-8100}:80"
+
 volumes:
   db-data:
   uploads:
+  office-db-data:
+  office-storage:

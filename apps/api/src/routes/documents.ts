@@ -63,8 +63,19 @@ export function validateFile(name: string, _declaredMime: string, buf: Buffer): 
  * Malware scanning hook. Integrate ClamAV (clamd INSTREAM) or an organisational scanner here;
  * returning 'infected' rejects the upload.
  */
-async function scanFile(_buf: Buffer): Promise<'clean' | 'infected'> {
+export async function scanFile(_buf: Buffer): Promise<'clean' | 'infected'> {
   return 'clean';
+}
+
+/** Writes an uploaded file to storage under the chamber's folder. */
+export async function storeFile(chamberId: string, buf: Buffer) {
+  const sha256 = crypto.createHash('sha256').update(buf).digest('hex');
+  const id = crypto.randomUUID();
+  const storageKey = path.join(chamberId, id);
+  const full = path.join(config.uploadDir, storageKey);
+  await mkdir(path.dirname(full), { recursive: true });
+  await writeFile(full, buf, { mode: 0o600 });
+  return { id, storageKey, sha256 };
 }
 
 type Target = { chamberId: string; commissionId: string | null; meetingId: string | null };
@@ -133,12 +144,7 @@ documentsRouter.post('/documents', upload.single('file'), async (req, res) => {
   const kind = meta.kind ?? detected.kind;
   if ((await scanFile(file.buffer)) !== 'clean') throw badRequest('فایل آلوده تشخیص داده شد');
   const target = await resolveTarget(u, meta, true, kind);
-  const sha256 = crypto.createHash('sha256').update(file.buffer).digest('hex');
-  const id = crypto.randomUUID();
-  const storageKey = path.join(target.chamberId, id);
-  const full = path.join(config.uploadDir, storageKey);
-  await mkdir(path.dirname(full), { recursive: true });
-  await writeFile(full, file.buffer, { mode: 0o600 });
+  const { id, storageKey, sha256 } = await storeFile(target.chamberId, file.buffer);
   const row = await tx(async (c) => {
     const r = await one(
       `INSERT INTO documents (id, chamber_id, commission_id, meeting_id, agenda_item_id, resolution_id, issue_id, kind, title, file_name,
@@ -190,7 +196,7 @@ async function authorizedDocument(u: AuthUser, id: string) {
 
 const INLINE_TYPES = ['application/pdf', 'image/png', 'image/jpeg', 'image/webp'];
 
-async function sendDocument(res: Response, d: any, inline = false) {
+export async function sendDocument(res: Response, d: any, inline = false) {
   const buf = await readFile(path.join(config.uploadDir, d.storage_key));
   const disposition = inline && INLINE_TYPES.includes(d.mime_type) ? 'inline' : 'attachment';
   res.setHeader('content-type', d.mime_type);

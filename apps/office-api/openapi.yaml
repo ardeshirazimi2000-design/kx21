@@ -1,0 +1,3768 @@
+openapi: 3.1.0
+info:
+  title: Office Automation API — اتوماسیون اداری
+  version: 1.0.0
+  description: 'REST API of the office automation system (correspondence, workflow, archive, users and access, notifications, reports, integration).
+
+
+    Business endpoints require `Authorization: Bearer <accessToken>`. Errors: `{ error: { code, message, details? } }` with Persian messages.
+    Lists return `{ items, total, page, pageSize }`. Letters that are not visible to the caller answer 404.'
+servers:
+- url: http://localhost:4100
+security:
+- bearer: []
+components:
+  securitySchemes:
+    bearer:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+    apiKey:
+      type: apiKey
+      in: header
+      name: X-Api-Key
+  schemas:
+    Error:
+      type: object
+      properties:
+        error:
+          type: object
+          properties:
+            code: &id001
+              type: string
+            message: *id001
+            details:
+              type: array
+              items:
+                type: object
+                properties:
+                  path: *id001
+                  message: *id001
+    Paged:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            type: object
+        total: &id002
+          type: integer
+        page: *id002
+        pageSize: *id002
+    Tokens:
+      type: object
+      properties:
+        accessToken: *id001
+        refreshToken: *id001
+        mfaRequired: &id005
+          type: boolean
+        mfaToken: *id001
+    Recipient:
+      type: object
+      properties:
+        userId: &id003
+          type: string
+          format: uuid
+        positionId: *id003
+        unitId: *id003
+        kind:
+          type: string
+          enum:
+          - to
+          - cc
+    LetterCreate:
+      type: object
+      required:
+      - kind
+      - subject
+      properties:
+        kind:
+          type: string
+          enum:
+          - incoming
+          - outgoing
+          - internal
+        subject: *id001
+        body: *id001
+        summary: *id001
+        externalParty: *id001
+        externalOrg: *id001
+        externalNumber: *id001
+        externalDate: &id004
+          type: string
+          format: date
+          example: '2026-10-20'
+        source:
+          type: string
+          enum:
+          - manual
+          - email
+          - scan
+          - api
+        deliveryMethod: *id001
+        priority:
+          type: string
+          enum:
+          - low
+          - normal
+          - high
+          - urgent
+        confidentiality:
+          type: integer
+          minimum: 0
+          maximum: 2
+        ownerUnitId: *id003
+        replyToId: *id003
+        dueDate: *id004
+        recipients:
+          type: array
+          items:
+            $ref: '#/components/schemas/Recipient'
+        register: *id005
+        workflow:
+          type: string
+          description: workflow definition key to start
+        bodyFormat:
+          type: string
+          enum:
+          - text
+          - html
+          description: 'html: body from the letter editor, sanitised server-side'
+        templateId: *id003
+        signatoryId:
+          type: string
+          format: uuid
+          description: designated signatory (needs letter.sign); only they can sign
+    WorkflowStep:
+      type: object
+      properties:
+        key: *id001
+        name: *id001
+        type:
+          type: string
+          enum:
+          - review
+          - approve
+          - sign
+          - archive
+          - notify
+        assignee: &id006
+          type: object
+          properties:
+            kind:
+              type: string
+              enum:
+              - user
+              - position
+              - role
+              - unit_manager
+              - owner_unit_manager
+              - initiator_manager
+              - context_user
+            value: *id001
+        slaHours:
+          type: number
+        remindBeforeHours:
+          type: number
+        escalateTo: *id006
+        onReject:
+          type: string
+          description: '''end'' or a previous step key'
+        condition:
+          type: object
+          properties:
+            field:
+              type: string
+              enum:
+              - priority
+              - kind
+              - confidentiality
+              - source
+            op:
+              type: string
+              enum:
+              - eq
+              - neq
+              - in
+            value: {}
+        archiveFolderId: *id003
+    WorkflowDefinition:
+      type: object
+      properties:
+        key: *id001
+        name: *id001
+        description: *id001
+        appliesTo:
+          type: array
+          items:
+            type: string
+            enum:
+            - incoming
+            - outgoing
+            - internal
+        definition:
+          type: object
+          properties:
+            steps:
+              type: array
+              items:
+                $ref: '#/components/schemas/WorkflowStep'
+            completeStatus:
+              type: string
+              enum:
+              - approved
+              - signed
+              - archived
+    RouteTargets:
+      type: object
+      properties:
+        targets:
+          type: array
+          items:
+            type: object
+            properties:
+              userId: *id003
+              positionId: *id003
+              action:
+                type: string
+                enum:
+                - refer
+                - review
+                - approve
+                - sign
+                - archive
+                - info
+                - follow_up
+              instruction: *id001
+              dueAt: &id007
+                type: string
+                format: date-time
+        parentId: *id003
+        completeMine: *id005
+    EventEnvelope:
+      type: object
+      properties:
+        id: *id001
+        type:
+          type: string
+          enum:
+          - resolution.created
+          - resolution.updated
+          - meeting.updated
+          - referral.updated
+          - integration.ping
+        occurredAt: *id007
+        data:
+          type: object
+          properties:
+            id: *id001
+paths:
+  /api/auth/login:
+    post:
+      tags:
+      - Auth
+      summary: ورود (نام کاربری، ایمیل یا موبایل)
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Tokens'
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Forbidden
+        '404':
+          description: Not found or not visible
+        '409':
+          description: Conflict (state / business rule)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      description: Returns tokens, or { mfaRequired, mfaToken } when TOTP is enabled.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                identifier: *id001
+                password: *id001
+  /api/auth/mfa/verify:
+    post:
+      tags:
+      - Auth
+      summary: تکمیل ورود دومرحله‌ای
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Tokens'
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Forbidden
+        '404':
+          description: Not found or not visible
+        '409':
+          description: Conflict (state / business rule)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                mfaToken: *id001
+                code: *id001
+  /api/auth/refresh:
+    post:
+      tags:
+      - Auth
+      summary: تمدید توکن (چرخشی؛ استفاده مجدد کل نشست را باطل می‌کند)
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Tokens'
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Forbidden
+        '404':
+          description: Not found or not visible
+        '409':
+          description: Conflict (state / business rule)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                refreshToken: *id001
+  /api/auth/logout:
+    post:
+      tags:
+      - Auth
+      summary: خروج
+      responses:
+        '200':
+          description: OK
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Forbidden
+        '404':
+          description: Not found or not visible
+        '409':
+          description: Conflict (state / business rule)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                refreshToken: *id001
+  /api/auth/me:
+    get:
+      tags:
+      - Auth
+      summary: کاربر جاری با نقش‌ها، مجوزها و سمت‌ها
+      responses:
+        '200':
+          description: OK
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Forbidden
+        '404':
+          description: Not found or not visible
+        '409':
+          description: Conflict (state / business rule)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /api/auth/password:
+    post:
+      tags:
+      - Auth
+      summary: تغییر رمز عبور
+      responses:
+        '200':
+          description: OK
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Forbidden
+        '404':
+          description: Not found or not visible
+        '409':
+          description: Conflict (state / business rule)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                currentPassword: *id001
+                newPassword: *id001
+  /api/auth/mfa/setup:
+    post:
+      tags:
+      - Auth
+      summary: شروع فعال‌سازی TOTP (secret، otpauth و QR)
+      responses:
+        '200':
+          description: OK
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Forbidden
+        '404':
+          description: Not found or not visible
+        '409':
+          description: Conflict (state / business rule)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /api/auth/mfa/enable:
+    post:
+      tags:
+      - Auth
+      summary: تأیید و فعال‌سازی TOTP
+      responses:
+        '200':
+          description: OK
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Forbidden
+        '404':
+          description: Not found or not visible
+        '409':
+          description: Conflict (state / business rule)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                code: *id001
+  /api/org/units:
+    get:
+      tags:
+      - Organization
+      summary: واحدها و سمت‌ها (با متصدیان)
+      responses:
+        '200':
+          description: OK
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Forbidden
+        '404':
+          description: Not found or not visible
+        '409':
+          description: Conflict (state / business rule)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    post:
+      tags:
+      - Organization
+      summary: واحد جدید [org.manage]
+      responses:
+        '200':
+          description: OK
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Forbidden
+        '404':
+          description: Not found or not visible
+        '409':
+          description: Conflict (state / business rule)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name: *id001
+                code: *id001
+                parentId: *id003
+                kind: *id001
+  /api/org/units/{id}:
+    patch:
+      tags:
+      - Organization
+      summary: ویرایش واحد [org.manage]
+      responses:
+        '200':
+          description: OK
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Forbidden
+        '404':
+          description: Not found or not visible
+        '409':
+          description: Conflict (state / business rule)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name: *id001
+                code: *id001
+                parentId: *id003
+                kind: *id001
+                isActive: *id005
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: *id003
+  /api/org/positions:
+    post:
+      tags:
+      - Organization
+      summary: سمت جدید [org.manage]
+      responses:
+        '200':
+          description: OK
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Forbidden
+        '404':
+          description: Not found or not visible
+        '409':
+          description: Conflict (state / business rule)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                unitId: *id003
+                title: *id001
+                parentId: *id003
+                isManager: *id005
+  /api/org/positions/{id}:
+    patch:
+      tags:
+      - Organization
+      summary: ویرایش سمت [org.manage]
+      responses:
+        '200':
+          description: OK
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Forbidden
+        '404':
+          description: Not found or not visible
+        '409':
+          description: Conflict (state / business rule)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                unitId: *id003
+                title: *id001
+                isManager: *id005
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: *id003
+  /api/users/directory:
+    get:
+      tags:
+      - Organization
+      summary: فهرست کاربران برای انتخاب (?q)
+      responses:
+        '200':
+          description: OK
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Forbidden
+        '404':
+          description: Not found or not visible
+        '409':
+          description: Conflict (state / business rule)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /api/users:
+    get:
+      tags:
+      - Organization
+      summary: کاربران [users.manage]
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Paged'
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Forbidden
+        '404':
+          description: Not found or not visible
+        '409':
+          description: Conflict (state / business rule)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    post:
+      tags:
+      - Organization
+      summary: کاربر جدید با سمت‌ها و نقش‌ها [users.manage]
+      responses:
+        '200':
+          description: OK
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Forbidden
+        '404':
+          description: Not found or not visible
+        '409':
+          description: Conflict (state / business rule)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                username: *id001
+                fullName: *id001
+                nationalId: *id001
+                email: *id001
+                mobile: *id001
+                password: *id001
+                clearance: *id002
+                positions:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      positionId: *id003
+                      isPrimary: *id005
+                roles:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      roleId: *id003
+                      scopeUnitId: *id003
+  /api/users/{id}:
+    patch:
+      tags:
+      - Organization
+      summary: ویرایش کاربر / بازنشانی 2FA [users.manage]
+      responses:
+        '200':
+          description: OK
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Forbidden
+        '404':
+          description: Not found or not visible
+        '409':
+          description: Conflict (state / business rule)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                fullName: *id001
+                isActive: *id005
+                clearance: *id002
+                resetMfa: *id005
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: *id003
+  /api/roles:
+    get:
+      tags:
+      - Organization
+      summary: نقش‌ها و فهرست مجوزها
+      responses:
+        '200':
+          description: OK
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Forbidden
+        '404':
+          description: Not found or not visible
+        '409':
+          description: Conflict (state / business rule)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    post:
+      tags:
+      - Organization
+      summary: نقش جدید [roles.manage]
+      responses:
+        '200':
+          description: OK
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Forbidden
+        '404':
+          description: Not found or not visible
+        '409':
+          description: Conflict (state / business rule)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                key: *id001
+                name: *id001
+                description: *id001
+                permissions:
+                  type: array
+                  items: *id001
+  /api/roles/{id}:
+    patch:
+      tags:
+      - Organization
+      summary: ویرایش مجوزهای نقش [roles.manage]
+      responses:
+        '200':
+          description: OK
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Forbidden
+        '404':
+          description: Not found or not visible
+        '409':
+          description: Conflict (state / business rule)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name: *id001
+                permissions:
+                  type: array
+                  items: *id001
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: *id003
+  /api/letters:
+    get:
+      tags:
+      - Correspondence
+      summary: جستجوی نامه‌ها (?q&kind&status&priority&box&from&to&unitId&number&party&source&page)
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Paged'
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Forbidden
+        '404':
+          description: Not found or not visible
+        '409':
+          description: Conflict (state / business rule)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      description: Full-text search (Persian-normalised) over subject, body, summary, parties and numbers; results are filtered by RBAC + ABAC
+        visibility.
+    post:
+      tags:
+      - Correspondence
+      summary: ایجاد نامه (پیش‌نویس یا ثبت فوری؛ با شروع گردش کار)
+      responses:
+        '200':
+          description: OK
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Forbidden
+        '404':
+          description: Not found or not visible
+        '409':
+          description: Conflict (state / business rule)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LetterCreate'
+  /api/letters/{id}:
+    get:
+      tags:
+      - Correspondence
+      summary: جزئیات نامه با ارجاعات، گردش‌ها، امضاها و اقدام‌های مجاز (my)
+      responses:
+        '200':
+          description: OK
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Forbidden
+        '404':
+          description: Not found or not visible
+        '409':
+          description: Conflict (state / business rule)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: *id003
+    patch:
+      tags:
+      - Correspondence
+      summary: ویرایش (فقط پیش‌نویس/ثبت‌شده و امضانشده)
+      responses:
+        '200':
+          description: OK
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Forbidden
+        '404':
+          description: Not found or not visible
+        '409':
+          description: Conflict (state / business rule)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LetterCreate'
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: *id003
+  /api/letters/{id}/register:
+    post:
+      tags:
+      - Correspondence
+      summary: ثبت و شماره‌گذاری خودکار (و/ص/د/سال/ردیف)
+      responses:
+        '200':
+          description: OK
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Forbidden
+        '404':
+          description: Not found or not visible
+        '409':
+          description: Conflict (state / business rule)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: *id003
+  /api/letters/{id}/attachments:
+    post:
+      tags:
+      - Correspondence
+      summary: افزودن پیوست یا نسخه جدید (groupId)
+      responses:
+        '200':
+          description: OK
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Forbidden
+        '404':
+          description: Not found or not visible
+        '409':
+          description: Conflict (state / business rule)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                file:
+                  type: string
+                  format: binary
+                groupId: *id003
+                title: *id001
+                folderId: *id003
+                note: *id001
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: *id003
+  /api/letters/{id}/attachments/{attId}/download:
+    get:
+      tags:
+      - Correspondence
+      summary: دریافت پیوست (?inline=1)
+      responses:
+        '200':
+          description: OK
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Forbidden
+        '404':
+          description: Not found or not visible
+        '409':
+          description: Conflict (state / business rule)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: *id003
+      - name: attId
+        in: path
+        required: true
+        schema: *id003
+  /api/letters/{id}/barcode.svg:
+    get:
+      tags:
+      - Correspondence
+      summary: بارکد Code128 کد رهگیری
+      responses:
+        '200':
+          description: OK
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Forbidden
+        '404':
+          description: Not found or not visible
+        '409':
+          description: Conflict (state / business rule)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: *id003
+  /api/letters/{id}/qr.svg:
+    get:
+      tags:
+      - Correspondence
+      summary: کد QR صفحه صحت‌سنجی
+      responses:
+        '200':
+          description: OK
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Forbidden
+        '404':
+          description: Not found or not visible
+        '409':
+          description: Conflict (state / business rule)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: *id003
+  /api/letters/lookup/{code}:
+    get:
+      tags:
+      - Correspondence
+      summary: یافتن نامه با اسکن بارکد
+      responses:
+        '200':
+          description: OK
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Forbidden
+        '404':
+          description: Not found or not visible
+        '409':
+          description: Conflict (state / business rule)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      parameters:
+      - name: code
+        in: path
+        required: true
+        schema: *id001
+  /api/letters/{id}/routes:
+    post:
+      tags:
+      - Correspondence
+      summary: ارجاع به کاربر یا سمت
+      responses:
+        '200':
+          description: OK
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Forbidden
+        '404':
+          description: Not found or not visible
+        '409':
+          description: Conflict (state / business rule)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RouteTargets'
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: *id003
+  /api/routes/{id}:
+    patch:
+      tags:
+      - Correspondence
+      summary: پاسخ به ارجاع (seen/done/returned)
+      responses:
+        '200':
+          description: OK
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Forbidden
+        '404':
+          description: Not found or not visible
+        '409':
+          description: Conflict (state / business rule)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                status:
+                  type: string
+                  enum:
+                  - seen
+                  - done
+                  - returned
+                response: *id001
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: *id003
+  /api/cartable:
+    get:
+      tags:
+      - Correspondence
+      summary: 'کارتابل: ارجاعات و گام‌های گردش کار در انتظار'
+      responses:
+        '200':
+          description: OK
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Forbidden
+        '404':
+          description: Not found or not visible
+        '409':
+          description: Conflict (state / business rule)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /api/letters/{id}/sign:
+    post:
+      tags:
+      - Correspondence
+      summary: امضای دیجیتال (Ed25519 روی هش محتوا و پیوست‌ها)
+      responses:
+        '200':
+          description: OK
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Forbidden
+        '404':
+          description: Not found or not visible
+        '409':
+          description: Conflict (state / business rule)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: *id003
+  /api/letters/{id}/signatures/{sigId}/image:
+    get:
+      tags:
+      - Correspondence
+      summary: تصویر امضای ثبت‌شده روی نامه
+      responses:
+        '200':
+          description: OK
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Forbidden
+        '404':
+          description: Not found or not visible
+        '409':
+          description: Conflict (state / business rule)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: *id003
+      - name: sigId
+        in: path
+        required: true
+        schema: *id003
+  /api/signatures:
+    get:
+      tags:
+      - Correspondence
+      summary: فهرست نمونه امضای کاربران [signatures.manage]
+      responses:
+        '200':
+          description: OK
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Forbidden
+        '404':
+          description: Not found or not visible
+        '409':
+          description: Conflict (state / business rule)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /api/users/{id}/signature:
+    get:
+      tags:
+      - Correspondence
+      summary: تصویر نمونه امضای کاربر
+      responses:
+        '200':
+          description: OK
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Forbidden
+        '404':
+          description: Not found or not visible
+        '409':
+          description: Conflict (state / business rule)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: *id003
+    post:
+      tags:
+      - Correspondence
+      summary: ثبت یا جایگزینی نمونه امضا (PNG/JPEG، حداکثر ۱ مگابایت) [خود کاربر یا signatures.manage]
+      responses:
+        '200':
+          description: OK
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Forbidden
+        '404':
+          description: Not found or not visible
+        '409':
+          description: Conflict (state / business rule)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                file:
+                  type: string
+                  format: binary
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: *id003
+    delete:
+      tags:
+      - Correspondence
+      summary: حذف نمونه امضا
+      responses:
+        '200':
+          description: OK
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Forbidden
+        '404':
+          description: Not found or not visible
+        '409':
+          description: Conflict (state / business rule)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: *id003
+  /api/letter-templates:
+    get:
+      tags:
+      - Correspondence
+      summary: قالب‌ها و سربرگ‌های نامه (?all=1 غیرفعال‌ها هم [templates.manage])
+      responses:
+        '200':
+          description: OK
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Forbidden
+        '404':
+          description: Not found or not visible
+        '409':
+          description: Conflict (state / business rule)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    post:
+      tags:
+      - Correspondence
+      summary: قالب جدید [templates.manage]
+      responses:
+        '200':
+          description: OK
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Forbidden
+        '404':
+          description: Not found or not visible
+        '409':
+          description: Conflict (state / business rule)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      description: bodyHtml is sanitised to the letter editor's HTML subset.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name: *id001
+                description: *id001
+                kinds:
+                  type: array
+                  items:
+                    type: string
+                    enum:
+                    - outgoing
+                    - internal
+                unitId: *id003
+                pageSize:
+                  type: string
+                  enum:
+                  - A4
+                  - A5
+                headerText: *id001
+                orgName: *id001
+                orgSubtitle: *id001
+                footerText: *id001
+                showLogo: *id005
+                marginTop: *id002
+                marginBottom: *id002
+                marginSide: *id002
+                fontSize:
+                  type: number
+                showQr: *id005
+                bodyHtml: *id001
+                isDefault: *id005
+                isActive: *id005
+  /api/letter-templates/{id}:
+    get:
+      tags:
+      - Correspondence
+      summary: قالب نامه
+      responses:
+        '200':
+          description: OK
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Forbidden
+        '404':
+          description: Not found or not visible
+        '409':
+          description: Conflict (state / business rule)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: *id003
+    patch:
+      tags:
+      - Correspondence
+      summary: ویرایش قالب [templates.manage]
+      responses:
+        '200':
+          description: OK
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Forbidden
+        '404':
+          description: Not found or not visible
+        '409':
+          description: Conflict (state / business rule)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      description: Same fields as POST; omitted fields keep their value, null clears optional text.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name: *id001
+                isDefault: *id005
+                isActive: *id005
+                bodyHtml: *id001
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: *id003
+    delete:
+      tags:
+      - Correspondence
+      summary: حذف قالب (قالب استفاده‌شده فقط غیرفعال می‌شود) [templates.manage]
+      responses:
+        '200':
+          description: OK
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Forbidden
+        '404':
+          description: Not found or not visible
+        '409':
+          description: Conflict (state / business rule)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      description: 'Returns { outcome: deleted | deactivated }.'
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: *id003
+  /api/letter-templates/{id}/{image}:
+    post:
+      tags:
+      - Correspondence
+      summary: بارگذاری لوگو (image=logo، حداکثر ۲ مگابایت) یا تصویر کامل سربرگ (image=background، حداکثر ۵ مگابایت) [templates.manage]
+      responses:
+        '200':
+          description: OK
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Forbidden
+        '404':
+          description: Not found or not visible
+        '409':
+          description: Conflict (state / business rule)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                file:
+                  type: string
+                  format: binary
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: *id003
+      - name: image
+        in: path
+        required: true
+        schema:
+          type: string
+          enum:
+          - logo
+          - background
+    get:
+      tags:
+      - Correspondence
+      summary: تصویر لوگو یا سربرگ قالب
+      responses:
+        '200':
+          description: OK
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Forbidden
+        '404':
+          description: Not found or not visible
+        '409':
+          description: Conflict (state / business rule)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: *id003
+      - name: image
+        in: path
+        required: true
+        schema:
+          type: string
+          enum:
+          - logo
+          - background
+    delete:
+      tags:
+      - Correspondence
+      summary: حذف لوگو یا تصویر سربرگ [templates.manage]
+      responses:
+        '200':
+          description: OK
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Forbidden
+        '404':
+          description: Not found or not visible
+        '409':
+          description: Conflict (state / business rule)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: *id003
+      - name: image
+        in: path
+        required: true
+        schema:
+          type: string
+          enum:
+          - logo
+          - background
+  /api/letters/{id}/send:
+    post:
+      tags:
+      - Correspondence
+      summary: ثبت ارسال نامه صادره
+      responses:
+        '200':
+          description: OK
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Forbidden
+        '404':
+          description: Not found or not visible
+        '409':
+          description: Conflict (state / business rule)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                deliveryMethod: *id001
+                requireSignature: *id005
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: *id003
+  /api/letters/{id}/archive:
+    post:
+      tags:
+      - Correspondence
+      summary: بایگانی نامه
+      responses:
+        '200':
+          description: OK
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Forbidden
+        '404':
+          description: Not found or not visible
+        '409':
+          description: Conflict (state / business rule)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                folderId: *id003
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: *id003
+  /api/letters/{id}/cancel:
+    post:
+      tags:
+      - Correspondence
+      summary: ابطال
+      responses:
+        '200':
+          description: OK
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Forbidden
+        '404':
+          description: Not found or not visible
+        '409':
+          description: Conflict (state / business rule)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reason: *id001
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: *id003
+  /api/search:
+    get:
+      tags:
+      - Correspondence
+      summary: جستجوی هوشمند موضوعی (BM25 فارسی، با گسترش و رتبه‌بندی معنایی در صورت تنظیم هوش مصنوعی)
+      responses:
+        '200':
+          description: OK
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Forbidden
+        '404':
+          description: Not found or not visible
+        '409':
+          description: Conflict (state / business rule)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      description: 'Query: q (required), kind, from, to, cancelled=0|1, page (≤10), pageSize (≤50). Returns items with relevance (0–100), matched
+        terms and snippet segments, plus keywords, expanded and ai flags. Only letters visible to the user.'
+  /api/letters/{id}/related:
+    get:
+      tags:
+      - Correspondence
+      summary: نامه‌های مرتبط (پیرو/عطف، همان جلسه، موضوع مشابه)
+      responses:
+        '200':
+          description: OK
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Forbidden
+        '404':
+          description: Not found or not visible
+        '409':
+          description: Conflict (state / business rule)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      description: Each item has reasons (thread | meeting | subject) and similarity (%).
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: *id003
+  /api/search/summary:
+    post:
+      tags:
+      - Correspondence
+      summary: خلاصه هوشمند نامه‌های انتخاب‌شده درباره موضوع
+      responses:
+        '200':
+          description: OK
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Forbidden
+        '404':
+          description: Not found or not visible
+        '409':
+          description: Conflict (state / business rule)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      description: Up to 12 letters; classified letters (confidentiality > 0) are never sent to the AI. 400 if no chat model is configured.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                q: *id001
+                letterIds:
+                  type: array
+                  items: *id003
+  /api/verify/{code}:
+    get:
+      tags:
+      - Correspondence
+      summary: صحت‌سنجی عمومی نامه (QR)
+      responses:
+        '200':
+          description: OK
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Forbidden
+        '404':
+          description: Not found or not visible
+        '409':
+          description: Conflict (state / business rule)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      description: Public. Confidential letters reveal only number, date and signature validity.
+      security: []
+      parameters:
+      - name: code
+        in: path
+        required: true
+        schema: *id001
+  /api/workflows:
+    get:
+      tags:
+      - Workflow
+      summary: آخرین نسخه هر فرایند
+      responses:
+        '200':
+          description: OK
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Forbidden
+        '404':
+          description: Not found or not visible
+        '409':
+          description: Conflict (state / business rule)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    post:
+      tags:
+      - Workflow
+      summary: ذخیره نسخه جدید [workflow.manage]
+      responses:
+        '200':
+          description: OK
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Forbidden
+        '404':
+          description: Not found or not visible
+        '409':
+          description: Conflict (state / business rule)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/WorkflowDefinition'
+  /api/workflows/{key}:
+    get:
+      tags:
+      - Workflow
+      summary: تاریخچه نسخه‌ها
+      responses:
+        '200':
+          description: OK
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Forbidden
+        '404':
+          description: Not found or not visible
+        '409':
+          description: Conflict (state / business rule)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      parameters:
+      - name: key
+        in: path
+        required: true
+        schema: *id001
+  /api/workflows/{key}/activate:
+    post:
+      tags:
+      - Workflow
+      summary: فعال‌سازی نسخه (version) یا غیرفعال‌سازی (null)
+      responses:
+        '200':
+          description: OK
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Forbidden
+        '404':
+          description: Not found or not visible
+        '409':
+          description: Conflict (state / business rule)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                version: *id002
+      parameters:
+      - name: key
+        in: path
+        required: true
+        schema: *id001
+  /api/letters/{id}/workflow:
+    post:
+      tags:
+      - Workflow
+      summary: شروع گردش کار روی نامه [workflow.start]
+      responses:
+        '200':
+          description: OK
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Forbidden
+        '404':
+          description: Not found or not visible
+        '409':
+          description: Conflict (state / business rule)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                definition: *id001
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: *id003
+  /api/workflow-steps/{id}/act:
+    post:
+      tags:
+      - Workflow
+      summary: اقدام روی گام (تأیید/رد)
+      responses:
+        '200':
+          description: OK
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Forbidden
+        '404':
+          description: Not found or not visible
+        '409':
+          description: Conflict (state / business rule)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      description: Reject needs a comment; onReject returns to a previous step or ends the workflow.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                decision:
+                  type: string
+                  enum:
+                  - approve
+                  - reject
+                comment: *id001
+                archiveFolderId: *id003
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: *id003
+  /api/workflow-instances/{id}:
+    get:
+      tags:
+      - Workflow
+      summary: جزئیات نمونه گردش
+      responses:
+        '200':
+          description: OK
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Forbidden
+        '404':
+          description: Not found or not visible
+        '409':
+          description: Conflict (state / business rule)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: *id003
+  /api/workflow-instances/{id}/cancel:
+    post:
+      tags:
+      - Workflow
+      summary: لغو گردش
+      responses:
+        '200':
+          description: OK
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Forbidden
+        '404':
+          description: Not found or not visible
+        '409':
+          description: Conflict (state / business rule)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reason: *id001
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: *id003
+  /api/archive/policies:
+    get:
+      tags:
+      - Archive
+      summary: سیاست‌های نگهداری
+      responses:
+        '200':
+          description: OK
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Forbidden
+        '404':
+          description: Not found or not visible
+        '409':
+          description: Conflict (state / business rule)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    post:
+      tags:
+      - Archive
+      summary: سیاست جدید [archive.dispose]
+      responses:
+        '200':
+          description: OK
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Forbidden
+        '404':
+          description: Not found or not visible
+        '409':
+          description: Conflict (state / business rule)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name: *id001
+                retainYears: *id002
+                action:
+                  type: string
+                  enum:
+                  - destroy
+                  - review
+                  - permanent
+                description: *id001
+  /api/archive/folders:
+    get:
+      tags:
+      - Archive
+      summary: درخت پرونده‌ها
+      responses:
+        '200':
+          description: OK
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Forbidden
+        '404':
+          description: Not found or not visible
+        '409':
+          description: Conflict (state / business rule)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    post:
+      tags:
+      - Archive
+      summary: پرونده جدید [archive.manage]
+      responses:
+        '200':
+          description: OK
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Forbidden
+        '404':
+          description: Not found or not visible
+        '409':
+          description: Conflict (state / business rule)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name: *id001
+                code: *id001
+                parentId: *id003
+                unitId: *id003
+                retentionPolicyId: *id003
+  /api/archive/documents:
+    get:
+      tags:
+      - Archive
+      summary: اسناد (?folderId&recursive&status&due&q)
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Paged'
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Forbidden
+        '404':
+          description: Not found or not visible
+        '409':
+          description: Conflict (state / business rule)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    post:
+      tags:
+      - Archive
+      summary: سند جدید (multipart) [archive.manage]
+      responses:
+        '200':
+          description: OK
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Forbidden
+        '404':
+          description: Not found or not visible
+        '409':
+          description: Conflict (state / business rule)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                file:
+                  type: string
+                  format: binary
+                groupId: *id003
+                title: *id001
+                folderId: *id003
+                note: *id001
+  /api/archive/documents/{id}:
+    get:
+      tags:
+      - Archive
+      summary: سند با نسخه‌ها و امضاها
+      responses:
+        '200':
+          description: OK
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Forbidden
+        '404':
+          description: Not found or not visible
+        '409':
+          description: Conflict (state / business rule)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: *id003
+    patch:
+      tags:
+      - Archive
+      summary: ویرایش / توقیف قانونی
+      responses:
+        '200':
+          description: OK
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Forbidden
+        '404':
+          description: Not found or not visible
+        '409':
+          description: Conflict (state / business rule)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                title: *id001
+                folderId: *id003
+                retentionPolicyId: *id003
+                legalHold: *id005
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: *id003
+  /api/archive/documents/{id}/versions:
+    post:
+      tags:
+      - Archive
+      summary: نسخه جدید (multipart)
+      responses:
+        '200':
+          description: OK
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Forbidden
+        '404':
+          description: Not found or not visible
+        '409':
+          description: Conflict (state / business rule)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                file:
+                  type: string
+                  format: binary
+                groupId: *id003
+                title: *id001
+                folderId: *id003
+                note: *id001
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: *id003
+  /api/archive/versions/{id}/download:
+    get:
+      tags:
+      - Archive
+      summary: دریافت نسخه
+      responses:
+        '200':
+          description: OK
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Forbidden
+        '404':
+          description: Not found or not visible
+        '409':
+          description: Conflict (state / business rule)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: *id003
+  /api/archive/versions/{id}/sign:
+    post:
+      tags:
+      - Archive
+      summary: امضای دیجیتال نسخه
+      responses:
+        '200':
+          description: OK
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Forbidden
+        '404':
+          description: Not found or not visible
+        '409':
+          description: Conflict (state / business rule)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: *id003
+  /api/archive/documents/{id}/dispose:
+    post:
+      tags:
+      - Archive
+      summary: امحا [archive.dispose]
+      responses:
+        '200':
+          description: OK
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Forbidden
+        '404':
+          description: Not found or not visible
+        '409':
+          description: Conflict (state / business rule)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      description: Refused before the retention date unless force=true, and always refused under legal hold. File contents are deleted; metadata
+        stays for the audit trail.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reason: *id001
+                force: *id005
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: *id003
+  /api/notifications:
+    get:
+      tags:
+      - Notifications
+      summary: اعلان‌های من (?unread)
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Paged'
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Forbidden
+        '404':
+          description: Not found or not visible
+        '409':
+          description: Conflict (state / business rule)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /api/notifications/read:
+    post:
+      tags:
+      - Notifications
+      summary: خوانده‌شدن (ids یا همه)
+      responses:
+        '200':
+          description: OK
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Forbidden
+        '404':
+          description: Not found or not visible
+        '409':
+          description: Conflict (state / business rule)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                ids:
+                  type: array
+                  items: *id003
+  /api/notification-templates:
+    get:
+      tags:
+      - Notifications
+      summary: قالب‌ها [notifications.manage]
+      responses:
+        '200':
+          description: OK
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Forbidden
+        '404':
+          description: Not found or not visible
+        '409':
+          description: Conflict (state / business rule)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /api/notification-templates/{event}/{channel}:
+    put:
+      tags:
+      - Notifications
+      summary: ویرایش قالب
+      responses:
+        '200':
+          description: OK
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Forbidden
+        '404':
+          description: Not found or not visible
+        '409':
+          description: Conflict (state / business rule)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                subject: *id001
+                body: *id001
+                enabled: *id005
+      parameters:
+      - name: event
+        in: path
+        required: true
+        schema: *id001
+      - name: channel
+        in: path
+        required: true
+        schema: *id001
+  /api/reports/dashboard:
+    get:
+      tags:
+      - Reports
+      summary: شاخص‌ها (?from&to) [reports.view]
+      responses:
+        '200':
+          description: OK
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Forbidden
+        '404':
+          description: Not found or not visible
+        '409':
+          description: Conflict (state / business rule)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /api/reports/export:
+    get:
+      tags:
+      - Reports
+      summary: خروجی Excel/CSV (?report=letters|units|routing&format=xlsx|csv&from&to)
+      responses:
+        '200':
+          description: OK
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Forbidden
+        '404':
+          description: Not found or not visible
+        '409':
+          description: Conflict (state / business rule)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /api/audit:
+    get:
+      tags:
+      - Audit
+      summary: رویدادنگاری [audit.view]
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Paged'
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Forbidden
+        '404':
+          description: Not found or not visible
+        '409':
+          description: Conflict (state / business rule)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /api/audit/verify:
+    get:
+      tags:
+      - Audit
+      summary: بررسی زنجیره هش
+      responses:
+        '200':
+          description: OK
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Forbidden
+        '404':
+          description: Not found or not visible
+        '409':
+          description: Conflict (state / business rule)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /api/integrations:
+    get:
+      tags:
+      - Integration
+      summary: وضعیت اتصال‌ها [integration.manage]
+      responses:
+        '200':
+          description: OK
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Forbidden
+        '404':
+          description: Not found or not visible
+        '409':
+          description: Conflict (state / business rule)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /api/integrations/meetings:
+    put:
+      tags:
+      - Integration
+      summary: تنظیم اتصال به سامانه جلسات
+      responses:
+        '200':
+          description: OK
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Forbidden
+        '404':
+          description: Not found or not visible
+        '409':
+          description: Conflict (state / business rule)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                baseUrl: *id001
+                clientId: *id001
+                apiKey: *id001
+                webhookSecret: *id001
+                isActive: *id005
+                settings:
+                  type: object
+                  properties:
+                    resolutionWorkflowKey: *id001
+                    defaultUnitId: *id003
+                    autoFeedback: *id005
+                    auth:
+                      type: string
+                      enum:
+                      - apikey
+                      - oauth2
+                    poll: *id005
+  /api/integrations/meetings/test:
+    post:
+      tags:
+      - Integration
+      summary: آزمایش اتصال
+      responses:
+        '200':
+          description: OK
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Forbidden
+        '404':
+          description: Not found or not visible
+        '409':
+          description: Conflict (state / business rule)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /api/integrations/meetings/sync:
+    post:
+      tags:
+      - Integration
+      summary: همگام‌سازی جلسات و رویدادها
+      responses:
+        '200':
+          description: OK
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Forbidden
+        '404':
+          description: Not found or not visible
+        '409':
+          description: Conflict (state / business rule)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /api/integrations/meetings/inbox:
+    get:
+      tags:
+      - Integration
+      summary: رویدادهای دریافتی
+      responses:
+        '200':
+          description: OK
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Forbidden
+        '404':
+          description: Not found or not visible
+        '409':
+          description: Conflict (state / business rule)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /api/integrations/meetings/webhook:
+    post:
+      tags:
+      - Integration
+      summary: دریافت رویداد از سامانه جلسات (امضای HMAC)
+      responses:
+        '200':
+          description: OK
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Forbidden
+        '404':
+          description: Not found or not visible
+        '409':
+          description: Conflict (state / business rule)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      description: 'Public; verified with `x-kx-signature: t=<unix>,v1=<hex HMAC-SHA256(secret, t + ''.'' + rawBody)>` (5-minute tolerance). Idempotent
+        by event id.'
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EventEnvelope'
+  /api/integrations/ai:
+    get:
+      tags:
+      - Integration
+      summary: تنظیمات هوش مصنوعی جستجوی هوشمند و آمار نمایه
+      responses:
+        '200':
+          description: OK
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Forbidden
+        '404':
+          description: Not found or not visible
+        '409':
+          description: Conflict (state / business rule)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      description: The API key is never returned (hasApiKey only).
+    put:
+      tags:
+      - Integration
+      summary: تنظیم ارائه‌دهنده سازگار با OpenAI
+      responses:
+        '200':
+          description: OK
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Forbidden
+        '404':
+          description: Not found or not visible
+        '409':
+          description: Conflict (state / business rule)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      description: apiKey omitted keeps the stored key; null or empty removes it. At least one model is required.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                baseUrl: *id001
+                apiKey: *id001
+                embeddingModel: *id001
+                chatModel: *id001
+                isActive: *id005
+  /api/integrations/ai/test:
+    post:
+      tags:
+      - Integration
+      summary: آزمایش مدل‌های embedding و گفتگو
+      responses:
+        '200':
+          description: OK
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Forbidden
+        '404':
+          description: Not found or not visible
+        '409':
+          description: Conflict (state / business rule)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /api/integrations/intake:
+    put:
+      tags:
+      - Integration
+      summary: درگاه دریافت نامه؛ rotateKey کلید جدید برمی‌گرداند
+      responses:
+        '200':
+          description: OK
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Forbidden
+        '404':
+          description: Not found or not visible
+        '409':
+          description: Conflict (state / business rule)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                isActive: *id005
+                defaultUnitId: *id003
+                rotateKey: *id005
+  /api/intake/letters:
+    post:
+      tags:
+      - Integration
+      summary: ثبت نامه وارده از ایمیل/اسکن/سامانه دیگر (X-Api-Key)
+      responses:
+        '200':
+          description: OK
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Forbidden
+        '404':
+          description: Not found or not visible
+        '409':
+          description: Conflict (state / business rule)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      security:
+      - apiKey: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                subject: *id001
+                body: *id001
+                externalOrg: *id001
+                externalParty: *id001
+                externalNumber: *id001
+                externalDate: *id004
+                source:
+                  type: string
+                  enum:
+                  - email
+                  - scan
+                  - api
+                externalRef: *id001
+                attachments:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      fileName: *id001
+                      contentBase64: *id001
+  /api/meetings:
+    get:
+      tags:
+      - Meetings
+      summary: جلسات (کش سامانه جلسات) [meetings.view]
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Paged'
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Forbidden
+        '404':
+          description: Not found or not visible
+        '409':
+          description: Conflict (state / business rule)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /api/meetings/{id}:
+    get:
+      tags:
+      - Meetings
+      summary: جلسه (?refresh=1 دریافت مجدد)
+      responses:
+        '200':
+          description: OK
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Forbidden
+        '404':
+          description: Not found or not visible
+        '409':
+          description: Conflict (state / business rule)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: *id003
+  /api/meetings/{id}/invitation-letters:
+    post:
+      tags:
+      - Meetings
+      summary: ساخت پیش‌نویس نامه دعوت برای مدعوین [letter.register_outgoing]
+      responses:
+        '200':
+          description: OK
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Forbidden
+        '404':
+          description: Not found or not visible
+        '409':
+          description: Conflict (state / business rule)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      description: Skips invitees that already have a non-cancelled invitation letter.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                inviteeIds:
+                  type: array
+                  items: *id003
+                note: *id001
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: *id003
+  /api/commissions:
+    get:
+      tags:
+      - Meetings
+      summary: کمیسیون‌ها از سامانه جلسات [meetings.refer]
+      responses:
+        '200':
+          description: OK
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Forbidden
+        '404':
+          description: Not found or not visible
+        '409':
+          description: Conflict (state / business rule)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /api/resolutions:
+    get:
+      tags:
+      - Meetings
+      summary: مصوبات (?mine&status&q)
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Paged'
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Forbidden
+        '404':
+          description: Not found or not visible
+        '409':
+          description: Conflict (state / business rule)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /api/resolutions/{id}:
+    get:
+      tags:
+      - Meetings
+      summary: مصوبه با گزارش‌های پیگیری
+      responses:
+        '200':
+          description: OK
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Forbidden
+        '404':
+          description: Not found or not visible
+        '409':
+          description: Conflict (state / business rule)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: *id003
+  /api/resolutions/{id}/feedback:
+    post:
+      tags:
+      - Meetings
+      summary: گزارش اجرا به سامانه جلسات (صف با تلاش مجدد)
+      responses:
+        '200':
+          description: OK
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Forbidden
+        '404':
+          description: Not found or not visible
+        '409':
+          description: Conflict (state / business rule)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                progress: *id002
+                note: *id001
+                submit: *id005
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: *id003
+  /api/letters/{id}/meeting-referrals:
+    post:
+      tags:
+      - Meetings
+      summary: ارجاع مکاتبه به کمیسیون [meetings.refer]
+      responses:
+        '200':
+          description: OK
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Forbidden
+        '404':
+          description: Not found or not visible
+        '409':
+          description: Conflict (state / business rule)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                commissionId: *id003
+                requestedMeetingId: *id003
+                note: *id001
+                includeAttachments: *id005
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: *id003

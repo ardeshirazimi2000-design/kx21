@@ -4,6 +4,7 @@ import { config } from './config.js';
 import { migrate } from './db/migrate.js';
 import { logger } from './lib/logger.js';
 import { initRealtime } from './realtime.js';
+import { startIntegrationWorker } from './services/integrations.js';
 import { startScheduler } from './services/scheduler.js';
 
 async function main() {
@@ -12,6 +13,7 @@ async function main() {
   const server = http.createServer(app);
   initRealtime(server);
   if (process.env.SCHEDULER_ENABLED !== 'false') startScheduler();
+  if (config.integrationWorkerEnabled) startIntegrationWorker();
   server.listen(config.port, () => logger.info(`API listening on :${config.port}`));
 }
 

@@ -306,6 +306,41 @@ meetingsRouter.delete('/meetings/:id/invitees/:userId', async (req, res) => {
   res.status(204).end();
 });
 
+/**
+ * «نامه دعوت»: asks the connected office automation system(s) to draft formal invitation letters for
+ * the selected invitees. Delivered through the integration outbox (signed webhook, retried).
+ */
+meetingsRouter.post('/meetings/:id/invitation-letters', async (req, res) => {
+  const u = currentUser(req);
+  const id = param(req, 'id');
+  const b = body(req, z.object({ userIds: z.array(uuid).min(1).max(500), note: z.string().max(2000).nullish() }));
+  const queued = await tx(async (c) => {
+    const a = await meetingAccess(u, id, c);
+    a.require('meeting.manage');
+    if (a.meeting.status === 'draft') throw conflict('ابتدا زمان جلسه را قطعی (زمان‌بندی) کنید');
+    if (a.meeting.status === 'cancelled') throw conflict('جلسه لغو شده است');
+    const invited = await query<{ user_id: string }>('SELECT user_id FROM meeting_invitees WHERE meeting_id = $1 AND user_id = ANY($2::uuid[])', [id, b.userIds], c);
+    if (invited.length !== new Set(b.userIds).size) throw badRequest('برخی از افراد انتخاب‌شده در فهرست مدعوین این جلسه نیستند');
+    const event = 'meeting.invitation_letters_requested';
+    const [{ n }] = await query<{ n: number }>(
+      `SELECT count(*)::int AS n FROM integration_clients
+        WHERE chamber_id = $1 AND is_active AND 'events:read' = ANY(scopes) AND ('*' = ANY(events) OR $2 = ANY(events))`,
+      [a.meeting.chamber_id, event],
+      c,
+    );
+    if (!n) throw conflict('هیچ سامانه اتوماسیون اداری‌ای به این اتاق متصل نیست (ساختار ← یکپارچه‌سازی)');
+    await c.query(`SELECT integration_enqueue($1, $2, 'meeting', $3, $4::jsonb)`, [
+      a.meeting.chamber_id,
+      event,
+      id,
+      JSON.stringify({ meetingId: id, inviteeIds: invited.map((r) => r.user_id), note: b.note ?? null, requestedBy: u.fullName }),
+    ]);
+    await audit(c, req, { chamberId: a.meeting.chamber_id, action: 'meeting.invitation_letters_requested', entity: 'meeting', entityId: id, after: { userIds: b.userIds, note: b.note } });
+    return n;
+  });
+  res.status(202).json({ queued, invitees: b.userIds.length });
+});
+
 // ─────────────────────────────── Lifecycle ───────────────────────────────
 
 meetingsRouter.post('/meetings/:id/schedule', async (req, res) => {

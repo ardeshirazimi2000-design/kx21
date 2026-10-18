@@ -609,8 +609,31 @@ function Invitees({ m, run }: { m: any; run: (fn: () => Promise<unknown>) => Pro
   const roles = useRoles(m.chamber_id);
   const people = useApi(canManage && q.length >= 2 ? `/people?chamberId=${chamberId}&q=${encodeURIComponent(q)}&pageSize=6` : null);
   const preStart = ['draft', 'scheduled', 'invitation_sent', 'checkin_open'].includes(m.status);
+  const canRequestLetters = m.capabilities.includes('meeting.manage') && !['draft', 'cancelled'].includes(m.status) && m.invitees.length > 0;
+  const [lettersOpen, setLettersOpen] = useState(false);
+  const [lettersDone, setLettersDone] = useState<string | null>(null);
   return (
-    <Card title="مدعوین جلسه">
+    <Card
+      title="مدعوین جلسه"
+      actions={
+        canRequestLetters && (
+          <Button size="sm" variant="secondary" onClick={() => setLettersOpen(true)}>
+            نامه دعوت در اتوماسیون اداری
+          </Button>
+        )
+      }
+    >
+      {lettersDone && <div className="alert alert-success small mb">{lettersDone}</div>}
+      {lettersOpen && (
+        <InvitationLettersModal
+          m={m}
+          onClose={() => setLettersOpen(false)}
+          onDone={(n) => {
+            setLettersOpen(false);
+            setLettersDone(`درخواست ساخت ${fa(n)} نامه دعوت به اتوماسیون اداری ارسال شد. پیش‌نویس‌ها در دبیرخانه برای شماره، امضا و ارسال آماده می‌شوند.`);
+          }}
+        />
+      )}
       <table className="table">
         <thead>
           <tr>
@@ -669,6 +692,84 @@ function Invitees({ m, run }: { m: any; run: (fn: () => Promise<unknown>) => Pro
         </div>
       )}
     </Card>
+  );
+}
+
+/** Asks the connected office automation system to draft formal invitation letters (نامه دعوت) for chosen invitees. */
+function InvitationLettersModal({ m, onClose, onDone }: { m: any; onClose: () => void; onDone: (n: number) => void }) {
+  const [selected, setSelected] = useState<Set<string>>(() => new Set(m.invitees.map((a: any) => a.user_id)));
+  const [note, setNote] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<ApiError | null>(null);
+  const toggle = (id: string) =>
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  const submit = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      await post(`/meetings/${m.id}/invitation-letters`, { userIds: [...selected], note: note.trim() || null });
+      onDone(selected.size);
+    } catch (e) {
+      setError(e as ApiError);
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <Modal
+      title="درخواست نامه دعوت از اتوماسیون اداری"
+      onClose={onClose}
+      wide
+      footer={
+        <>
+          <Button variant="secondary" onClick={onClose}>
+            انصراف
+          </Button>
+          <Button onClick={() => void submit()} disabled={busy || !selected.size}>
+            {busy ? 'در حال ارسال…' : `ارسال (${fa(selected.size)} نفر)`}
+          </Button>
+        </>
+      }
+    >
+      <p className="muted small mb">
+        برای هر فرد انتخاب‌شده یک پیش‌نویس نامه دعوت صادره با زمان، مکان و دستور جلسه در اتوماسیون اداری ساخته می‌شود تا دبیرخانه آن را شماره، امضا و ارسال کند. برای کسی که
+        قبلاً نامه دعوت این جلسه را دارد، نامه تکراری ساخته نمی‌شود.
+      </p>
+      <ErrorBox error={error} />
+      <div className="row gap-sm mb">
+        <Button size="sm" variant="ghost" onClick={() => setSelected(new Set(m.invitees.map((a: any) => a.user_id)))}>
+          انتخاب همه
+        </Button>
+        <Button size="sm" variant="ghost" onClick={() => setSelected(new Set(m.invitees.filter((a: any) => a.role === 'guest').map((a: any) => a.user_id)))}>
+          فقط مهمانان
+        </Button>
+        <Button size="sm" variant="ghost" onClick={() => setSelected(new Set())}>
+          هیچ‌کدام
+        </Button>
+      </div>
+      <table className="table">
+        <tbody>
+          {m.invitees.map((a: any) => (
+            <tr key={a.user_id}>
+              <td style={{ width: 32 }}>
+                <input type="checkbox" checked={selected.has(a.user_id)} onChange={() => toggle(a.user_id)} aria-label={a.full_name} />
+              </td>
+              <td>{a.full_name}</td>
+              <td className="muted">{a.organization}</td>
+              <td>{roleLabel(a.role, a.role_title)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      <Field label="توضیح اضافه در متن نامه (اختیاری)">
+        <textarea className="input" rows={3} value={note} onChange={(e) => setNote(e.target.value)} maxLength={2000} />
+      </Field>
+    </Modal>
   );
 }
 

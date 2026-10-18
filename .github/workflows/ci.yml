@@ -33,8 +33,12 @@ jobs:
         run: npm test -w @kx/shared
       - name: Integration & E2E API tests (PostgreSQL + Socket.IO)
         run: npm test -w @kx/api
+      - name: Office automation tests (incl. end-to-end with the meetings API)
+        run: npm test -w @kx/office-api
       - run: npm run build -w @kx/api
       - run: npm run build -w @kx/web
+      - run: npm run build -w @kx/office-api
+      - run: npm run build -w @kx/office-web
 
   mobile:
     runs-on: ubuntu-latest

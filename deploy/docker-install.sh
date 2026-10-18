@@ -23,6 +23,22 @@ ENV
   FIRST_INSTALL=1
   echo "Created .env (keep it: it holds the database password and token secret)."
 fi
+
+# Office automation (اتوماسیون اداری): add its secrets once, also to an .env created before it existed.
+if ! grep -q '^OFFICE_JWT_SECRET=' .env; then
+  IP="$(hostname -I 2>/dev/null | awk '{print $1}')"
+  OPORT="${OFFICE_WEB_PORT:-8100}"
+  cat >> .env <<ENV
+# Office automation (اتوماسیون اداری)
+OFFICE_WEB_PORT=$OPORT
+OFFICE_PUBLIC_URL=http://${IP:-localhost}:$OPORT
+OFFICE_JWT_SECRET=$(openssl rand -hex 32)
+OFFICE_DATA_ENCRYPTION_KEY=$(openssl rand -hex 32)
+OFFICE_POSTGRES_PASSWORD=$(openssl rand -hex 16)
+ENV
+  OFFICE_FIRST_INSTALL=1
+  echo "Added office automation secrets to .env."
+fi
 set -a; . ./.env; set +a
 
 docker compose up --build -d
@@ -38,8 +54,24 @@ if [ "${FIRST_INSTALL:-0}" = "1" ] && [ "${SEED:-1}" = "1" ]; then
   docker compose exec -T api node dist/db/seed.js
 fi
 
+if [ "${OFFICE_FIRST_INSTALL:-0}" = "1" ] && [ "${SEED:-1}" = "1" ]; then
+  echo "Waiting for office automation..."
+  for _ in $(seq 1 60); do
+    curl -fs "http://127.0.0.1:${OFFICE_WEB_PORT}/health" >/dev/null && break
+    sleep 2
+  done
+  docker compose exec -T office-api node dist/db/seed.js
+  # Connect office automation to the meetings system (API key + signed webhooks).
+  # MEETINGS_ADMIN_EMAIL / MEETINGS_ADMIN_PASSWORD: a chamber admin of the meetings system.
+  docker compose exec -T -e MEETINGS_URL=http://api:4000 \
+    -e MEETINGS_ADMIN_EMAIL="${MEETINGS_ADMIN_EMAIL:-admin@kx.local}" -e MEETINGS_ADMIN_PASSWORD="${MEETINGS_ADMIN_PASSWORD:-Passw0rd!}" \
+    -e OFFICE_WEBHOOK_URL=http://office-api:4100/api/integrations/meetings/webhook office-api node dist/db/connect-meetings.js \
+    || echo "Could not connect to the meetings system automatically; connect it from the office automation «یکپارچه‌سازی» page."
+fi
+
 IP="$(hostname -I 2>/dev/null | awk '{print $1}')"
 echo
 echo "Ready:  http://${IP:-localhost}:${WEB_PORT}"
 echo "Demo login: admin@kx.local / Passw0rd!   (also chair@, secretary@, member1@kx.local)"
+echo "Office automation: http://${IP:-localhost}:${OFFICE_WEB_PORT:-8100}   (admin, clerk, cmshead, expert … / Passw0rd!)"
 echo "Logs:   docker compose logs -f api"
