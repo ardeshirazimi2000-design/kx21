@@ -51,7 +51,8 @@ services:
     profiles: ["ai"]
     restart: unless-stopped
     environment:
-      OLLAMA_KEEP_ALIVE: 24h
+      # Unload the model after idle minutes so its memory is free for the rest of the stack (it reloads in seconds).
+      OLLAMA_KEEP_ALIVE: ${AI_KEEP_ALIVE:-5m}
     volumes:
       - ai-models:/root/.ollama
 
