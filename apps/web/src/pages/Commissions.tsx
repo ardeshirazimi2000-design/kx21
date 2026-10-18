@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { roleLabel } from '@kx/shared';
 import { post } from '../lib/api';
 import { useAuth } from '../lib/auth';
+import { ChamberField } from './Structure';
 import { useApi } from '../lib/hooks';
 import { Badge, Button, Card, Empty, ErrorBox, Field, fa, Loading, Modal, PageHeader, Pager } from '../components/ui';
 
@@ -92,7 +93,6 @@ function NewCommissionModal({ chamberId: initialChamber, chambers, onClose, onSa
   const [form, setForm] = useState({ termId: '', name: '', code: '', domain: '', description: '' });
   const [err, setErr] = useState<Error | null>(null);
   const termId = form.termId || terms.data?.find((t) => t.status === 'active')?.id || '';
-  const chamberName = chambers.find((c) => c.id === chamberId)?.name;
   const save = async () => {
     try {
       const r = await post('/commissions', { chamberId, ...form, termId });
@@ -104,19 +104,12 @@ function NewCommissionModal({ chamberId: initialChamber, chambers, onClose, onSa
   return (
     <Modal title="کمیسیون جدید" onClose={onClose} footer={<Button onClick={save}>ایجاد</Button>}>
       <ErrorBox error={err} />
-      <Field label="اتاق" hint="کمیسیون در این اتاق ثبت می‌شود و فقط مدیران همین اتاق و اعضای خود کمیسیون آن را می‌بینند">
-        {chambers.length > 1 ? (
-          <select className="input" value={chamberId} onChange={(e) => { setChamberId(e.target.value); setForm({ ...form, termId: '' }); }}>
-            {chambers.map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.name}
-              </option>
-            ))}
-          </select>
-        ) : (
-          <input className="input" value={chamberName ?? ''} readOnly />
-        )}
-      </Field>
+      <ChamberField
+        chambers={chambers}
+        value={chamberId}
+        onChange={(id) => { setChamberId(id); setForm({ ...form, termId: '' }); }}
+        hint="کمیسیون در این اتاق ثبت می‌شود و فقط مدیران همین اتاق و اعضای خود کمیسیون آن را می‌بینند"
+      />
       {terms.data && terms.data.length === 0 && (
         <p className="alert alert-warning small">برای این اتاق هنوز دوره‌ای تعریف نشده است؛ ابتدا مدیر اتاق باید از منوی «دوره‌ها» دوره را تعریف کند.</p>
       )}

@@ -184,18 +184,44 @@ function ChamberAdminModal({ chamber, onClose, onSaved }: { chamber: any; onClos
   );
 }
 
+/** Chamber of a new record: a list when the user administers several chambers, otherwise the chamber's name. */
+export function ChamberField({ chambers, value, onChange, hint }: { chambers: any[]; value: string; onChange: (id: string) => void; hint?: string }) {
+  return (
+    <Field label="اتاق" hint={hint}>
+      {chambers.length > 1 ? (
+        <select className="input" value={value} onChange={(e) => onChange(e.target.value)}>
+          {chambers.map((c) => (
+            <option key={c.id} value={c.id}>
+              {c.name}
+            </option>
+          ))}
+        </select>
+      ) : (
+        <input className="input" readOnly value={chambers.find((c) => c.id === value)?.name ?? chambers[0]?.name ?? ''} />
+      )}
+    </Field>
+  );
+}
+
 /** Terms (دوره‌ها) */
 export function TermsPage() {
-  const { chamberId } = useAuth();
+  const { chamberId, setChamberId, me } = useAuth();
   const { data, reload } = useApi<any[]>(chamberId ? `/terms?chamberId=${chamberId}` : null);
+  const chambers = useApi<any[]>('/chambers');
+  const adminChambers = (chambers.data ?? []).filter((c) => me?.is_super_admin || me?.adminChambers.includes(c.id));
+  const currentChamber = chambers.data?.find((c) => c.id === chamberId)?.name;
   const [open, setOpen] = useState(false);
+  const [target, setTarget] = useState('');
   const [form, setForm] = useState({ number: '', title: '', startDate: '', endDate: '', status: 'planned' });
   const [err, setErr] = useState<Error | null>(null);
+  const termChamber = target || chamberId;
   const save = async () => {
     try {
-      await post('/terms', { chamberId, number: Number(form.number), title: form.title, startDate: form.startDate, endDate: form.endDate || null, status: form.status });
+      await post('/terms', { chamberId: termChamber, number: Number(form.number), title: form.title, startDate: form.startDate, endDate: form.endDate || null, status: form.status });
       setOpen(false);
-      void reload();
+      // Show the list of the chamber the term was created in.
+      if (termChamber && termChamber !== chamberId) setChamberId(termChamber);
+      else void reload();
     } catch (e) {
       setErr(e as Error);
     }
@@ -207,7 +233,11 @@ export function TermsPage() {
   };
   return (
     <>
-      <PageHeader title="دوره‌ها" subtitle="هر دوره، کمیسیون‌ها و عضویت‌های خود را دارد؛ سوابق دوره‌های قبل حفظ می‌شود." actions={<Button onClick={() => setOpen(true)}>دوره جدید</Button>} />
+      <PageHeader
+        title="دوره‌ها"
+        subtitle={`${currentChamber ? `دوره‌های ${currentChamber} — ` : ''}هر دوره، کمیسیون‌ها و عضویت‌های خود را دارد؛ سوابق دوره‌های قبل حفظ می‌شود.`}
+        actions={<Button onClick={() => { setTarget(chamberId ?? ''); setOpen(true); }}>{currentChamber ? `دوره جدید در ${currentChamber}` : 'دوره جدید'}</Button>}
+      />
       <Card>
         <table className="table">
           <thead>
@@ -246,6 +276,7 @@ export function TermsPage() {
       {open && (
         <Modal title="دوره جدید" onClose={() => setOpen(false)} footer={<Button onClick={save}>ذخیره</Button>}>
           <ErrorBox error={err} />
+          <ChamberField chambers={adminChambers} value={termChamber ?? ''} onChange={setTarget} hint="دوره برای این اتاق تعریف می‌شود و فعال‌سازی آن فقط دوره‌های همین اتاق را می‌بندد" />
           <div className="grid grid-2">
             <Field label="شماره دوره">
               <input className="input" type="number" value={form.number} onChange={(e) => setForm({ ...form, number: e.target.value })} />
@@ -345,7 +376,7 @@ export function PeoplePage() {
         </div>
         {data && <Pager page={page} pageSize={data.pageSize} total={data.total} onPage={setPage} />}
       </Card>
-      {edit && <PersonModal person={edit} chamberId={chamberId!} chambers={superAdmin ? chambers.data ?? [] : []} canSetPassword={isAdmin} onClose={() => setEdit(null)} onSaved={() => { setEdit(null); void reload(); }} />}
+      {edit && <PersonModal person={edit} chamberId={chamberId!} chambers={(chambers.data ?? []).filter((c) => superAdmin || me?.adminChambers.includes(c.id))} canMove={superAdmin} canSetPassword={isAdmin} onClose={() => setEdit(null)} onSaved={() => { setEdit(null); void reload(); }} />}
     </>
   );
 }
@@ -397,7 +428,7 @@ export function IdentityLookup({ chamberId, onResult }: { chamberId: string; onR
   );
 }
 
-export function PersonModal({ person, chamberId, chambers = [], canSetPassword, onClose, onSaved }: { person: any; chamberId: string; chambers?: any[]; canSetPassword: boolean; onClose: () => void; onSaved: (p: any) => void }) {
+export function PersonModal({ person, chamberId, chambers = [], canMove = false, canSetPassword, onClose, onSaved }: { person: any; chamberId: string; chambers?: any[]; canMove?: boolean; canSetPassword: boolean; onClose: () => void; onSaved: (p: any) => void }) {
   const [targetChamber, setTargetChamber] = useState<string>(person.chamber_id ?? chamberId);
   const [form, setForm] = useState({
     fullName: person.full_name ?? '',
@@ -449,16 +480,13 @@ export function PersonModal({ person, chamberId, chambers = [], canSetPassword, 
       footer={<Button disabled={!person.id && !identity && !(manual && form.fullName.length >= 2)} onClick={save}>ذخیره</Button>}
     >
       <ErrorBox error={err} />
-      {chambers.length > 1 ? (
-        <Field label="اتاق" hint={person.id ? 'انتقال به اتاق دیگر فقط وقتی ممکن است که شخص در اتاق فعلی عضو کمیسیون یا مدیر اتاق نباشد' : 'شخص در این اتاق ثبت می‌شود'}>
-          <select className="input" value={targetChamber} onChange={(e) => setTargetChamber(e.target.value)}>
-            {chambers.map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.name}
-              </option>
-            ))}
-          </select>
-        </Field>
+      {chambers.length > 0 && (!person.id || canMove) ? (
+        <ChamberField
+          chambers={chambers}
+          value={targetChamber}
+          onChange={setTargetChamber}
+          hint={person.id ? 'انتقال به اتاق دیگر فقط وقتی ممکن است که شخص در اتاق فعلی عضو کمیسیون یا مدیر اتاق نباشد' : 'شخص در این اتاق ثبت می‌شود'}
+        />
       ) : (
         person.chamber_name && <p className="muted small">اتاق: {person.chamber_name}</p>
       )}
