@@ -17,6 +17,7 @@ const PW = 'Sanandaj-Admin-1405';
 const as = (who: string) => ({
   get: (url: string) => request(app).get(url).set('authorization', `Bearer ${tokens[who]}`),
   post: (url: string, body: object = {}) => request(app).post(url).set('authorization', `Bearer ${tokens[who]}`).send(body),
+  patch: (url: string, body: object = {}) => request(app).patch(url).set('authorization', `Bearer ${tokens[who]}`).send(body),
 });
 
 async function login(who: string, identifier: string, password = SEED_PASSWORD) {
@@ -126,5 +127,26 @@ describe('chamber → term → commission hierarchy', () => {
     expect(await titles('yazdSecretary')).not.toContain('جلسه اول دانش بنیان');
     expect(await titles('yazdAdmin')).not.toContain('جلسه اول دانش بنیان');
     expect((await as('yazdSecretary').get(`/api/meetings/${m.body.id}`)).status).toBe(404);
+  });
+
+  it('people belong to one chamber; only the Super Admin lists all and moves a person', async () => {
+    const yazdNames = (await as('yazdAdmin').get(`/api/people?chamberId=${yazd}&pageSize=100`)).body.items.map((p: any) => p.full_name);
+    expect(yazdNames).not.toContain('دبیر دانش بنیان');
+    expect((await as('yazdAdmin').get(`/api/people?chamberId=${sdj}`)).status).toBe(403);
+    expect((await as('yazdAdmin').get('/api/people')).status).toBe(400);
+    const all = (await as('root').get('/api/people?pageSize=100')).body.items;
+    expect(all.find((p: any) => p.full_name === 'دبیر دانش بنیان')?.chamber_name).toBe('اتاق بازرگانی سنندج');
+
+    // A person registered in the wrong chamber is moved by the Super Admin.
+    const wrong = await as('yazdAdmin').post('/api/people', { chamberId: yazd, fullName: 'ثبت در اتاق اشتباه', mobile: '09184444444' });
+    expect((await as('yazdAdmin').patch(`/api/people/${wrong.body.id}`, { chamberId: sdj })).status).toBe(403);
+    const moved = await as('root').patch(`/api/people/${wrong.body.id}`, { chamberId: sdj });
+    expect(moved.status).toBe(200);
+    expect(moved.body.chamber_id).toBe(sdj);
+    expect((await as('yazdAdmin').get(`/api/people/${wrong.body.id}`)).status).toBe(404);
+    // Someone with an active role in their chamber cannot be moved.
+    const sec = all.find((p: any) => p.full_name === 'دبیر دانش بنیان');
+    const blocked = await as('root').patch(`/api/people/${sec.id}`, { chamberId: yazd });
+    expect(blocked.status).toBe(409);
   });
 });

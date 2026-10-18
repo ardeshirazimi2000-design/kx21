@@ -649,18 +649,21 @@ async function canSearchPeople(u: AuthUser, chamberId: string) {
 
 structureRouter.get('/people', async (req, res) => {
   const u = currentUser(req);
-  const chamberId = uuid.parse(req.query.chamberId);
-  if (!(await canSearchPeople(u, chamberId))) throw forbidden();
+  // Without chamberId the Super Admin lists the people of every chamber.
+  const chamberId = req.query.chamberId || !u.isSuperAdmin ? uuid.parse(req.query.chamberId) : null;
+  if (chamberId && !(await canSearchPeople(u, chamberId))) throw forbidden();
   const { page, pageSize, offset, q } = pageParams(req);
-  const where = `chamber_id = $1 AND ($2::text IS NULL OR full_name ILIKE '%' || $2 || '%' OR organization ILIKE '%' || $2 || '%'
-     OR mobile LIKE '%' || $2 || '%' OR email ILIKE '%' || $2 || '%' OR national_id = $2)`;
+  const where = `($1::uuid IS NULL OR u.chamber_id = $1) AND u.chamber_id IS NOT NULL
+     AND ($2::text IS NULL OR u.full_name ILIKE '%' || $2 || '%' OR u.organization ILIKE '%' || $2 || '%'
+     OR u.mobile LIKE '%' || $2 || '%' OR u.email ILIKE '%' || $2 || '%' OR u.national_id = $2)`;
   const items = await query(
-    `SELECT id, full_name, national_id, mobile, email, organization, job_title, is_active, (password_hash IS NOT NULL) AS can_login, identity_verified_at,
-       EXISTS (SELECT 1 FROM chamber_admins a WHERE a.user_id = users.id AND a.chamber_id = $1) AS is_chamber_admin
-     FROM users WHERE ${where} ORDER BY full_name LIMIT ${pageSize} OFFSET ${offset}`,
+    `SELECT u.id, u.chamber_id, ch.name AS chamber_name, u.full_name, u.national_id, u.mobile, u.email, u.organization, u.job_title, u.is_active,
+       (u.password_hash IS NOT NULL) AS can_login, u.identity_verified_at,
+       EXISTS (SELECT 1 FROM chamber_admins a WHERE a.user_id = u.id AND a.chamber_id = u.chamber_id) AS is_chamber_admin
+     FROM users u JOIN chambers ch ON ch.id = u.chamber_id WHERE ${where} ORDER BY u.full_name LIMIT ${pageSize} OFFSET ${offset}`,
     [chamberId, q],
   );
-  const [{ count }] = await query(`SELECT count(*) FROM users WHERE ${where}`, [chamberId, q]);
+  const [{ count }] = await query(`SELECT count(*) FROM users u WHERE ${where}`, [chamberId, q]);
   res.json(paged(items, count, page, pageSize));
 });
 
@@ -694,11 +697,25 @@ structureRouter.get('/people/:id', async (req, res) => {
 structureRouter.patch('/people/:id', async (req, res) => {
   const u = currentUser(req);
   const id = param(req, 'id');
-  const b = body(req, personSchema.partial().extend({ isActive: z.boolean().optional() }));
+  const b = body(req, personSchema.partial().extend({ isActive: z.boolean().optional(), chamberId: uuid.optional() }));
   const row = await tx(async (c) => {
     const before = await one('SELECT id, chamber_id, full_name, mobile, email, organization, job_title, is_active FROM users WHERE id = $1 FOR UPDATE', [id], c);
     if (!before || !before.chamber_id) throw notFound();
     requireChamberAdmin(u, before.chamber_id);
+    // Moving a person to another chamber (e.g. registered in the wrong one): Super Admin only, and only
+    // while they hold no active role in their current chamber.
+    if (b.chamberId && b.chamberId !== before.chamber_id) {
+      requireSuperAdmin(u);
+      if (!(await one('SELECT 1 FROM chambers WHERE id = $1', [b.chamberId], c))) throw notFound('اتاق یافت نشد');
+      const busy = await one(
+        `SELECT EXISTS (SELECT 1 FROM commission_memberships WHERE user_id = $1 AND chamber_id = $2 AND status = 'active')
+             OR EXISTS (SELECT 1 FROM chamber_admins WHERE user_id = $1 AND chamber_id = $2) AS busy`,
+        [id, before.chamber_id],
+        c,
+      );
+      if (busy.busy) throw conflict('این شخص در اتاق فعلی عضو کمیسیون یا مدیر اتاق است؛ ابتدا عضویت‌ها را پایان دهید یا حذف کنید', 'person_has_roles');
+      await c.query('UPDATE users SET chamber_id = $2 WHERE id = $1', [id, b.chamberId]);
+    }
     const hash = b.password ? await bcrypt.hash(b.password, 10) : null;
     const after = await one(
       `UPDATE users SET full_name = COALESCE($2, full_name), national_id = COALESCE($3, national_id), mobile = COALESCE($4, mobile),
@@ -714,7 +731,7 @@ structureRouter.patch('/people/:id', async (req, res) => {
       await c.query('UPDATE refresh_tokens SET revoked_at = now() WHERE user_id = $1 AND revoked_at IS NULL', [id]);
     }
     await audit(c, req, {
-      chamberId: before.chamber_id,
+      chamberId: after.chamber_id,
       action: 'person.updated',
       entity: 'user',
       entityId: id,

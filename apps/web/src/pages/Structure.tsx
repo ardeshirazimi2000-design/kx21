@@ -273,22 +273,43 @@ export function TermsPage() {
 }
 
 /** People */
+/** People belong to one chamber; chamber admins see only their chamber, the Super Admin may list all. */
 export function PeoplePage() {
-  const { chamberId, isAdmin } = useAuth();
+  const { chamberId, isAdmin, me } = useAuth();
+  const superAdmin = !!me?.is_super_admin;
   const [page, setPage] = useState(1);
   const [q, setQ] = useState('');
-  const { data, reload } = useApi(chamberId ? `/people?chamberId=${chamberId}&page=${page}&q=${encodeURIComponent(q)}` : null);
+  const [allChambers, setAllChambers] = useState(false);
+  const showChamber = superAdmin && allChambers;
+  const { data, reload } = useApi(chamberId ? `/people?${showChamber ? '' : `chamberId=${chamberId}&`}page=${page}&q=${encodeURIComponent(q)}` : null);
+  const chambers = useApi<any[]>(isAdmin ? '/chambers' : null);
+  const currentChamber = chambers.data?.find((c) => c.id === chamberId)?.name;
   const [edit, setEdit] = useState<any | null>(null);
   return (
     <>
-      <PageHeader title="اشخاص و کاربران" subtitle="اعضا، کارشناسان و مدعوین" actions={<Button onClick={() => setEdit({})}>شخص جدید</Button>} />
+      <PageHeader
+        title="اشخاص و کاربران"
+        subtitle={showChamber ? 'اشخاص همه اتاق‌ها' : `اعضا، کارشناسان و مدعوین${currentChamber ? ` ${currentChamber}` : ''}`}
+        actions={<Button onClick={() => setEdit({})}>{currentChamber ? `شخص جدید در ${currentChamber}` : 'شخص جدید'}</Button>}
+      />
       <Card>
+        {superAdmin && (
+          <div className="row gap-sm mb">
+            <Button size="sm" variant={allChambers ? 'ghost' : 'primary'} onClick={() => { setAllChambers(false); setPage(1); }}>
+              فقط {currentChamber ?? 'اتاق انتخاب‌شده'}
+            </Button>
+            <Button size="sm" variant={allChambers ? 'primary' : 'ghost'} onClick={() => { setAllChambers(true); setPage(1); }}>
+              همه اتاق‌ها
+            </Button>
+          </div>
+        )}
         <input className="input mb" placeholder="جستجو بر اساس نام، کد ملی، سازمان، موبایل یا ایمیل" value={q} onChange={(e) => { setQ(e.target.value); setPage(1); }} />
         <div className="table-wrap">
           <table className="table">
             <thead>
               <tr>
                 <th>نام</th>
+                {showChamber && <th>اتاق</th>}
                 <th>سازمان</th>
                 <th>موبایل</th>
                 <th>ایمیل</th>
@@ -300,6 +321,7 @@ export function PeoplePage() {
               {data?.items.map((p: any) => (
                 <tr key={p.id}>
                   <td>{p.full_name}</td>
+                  {showChamber && <td className="small">{p.chamber_name}</td>}
                   <td>{p.organization}</td>
                   <td className="ltr">{p.mobile}</td>
                   <td className="ltr">{p.email}</td>
@@ -323,7 +345,7 @@ export function PeoplePage() {
         </div>
         {data && <Pager page={page} pageSize={data.pageSize} total={data.total} onPage={setPage} />}
       </Card>
-      {edit && <PersonModal person={edit} chamberId={chamberId!} canSetPassword={isAdmin} onClose={() => setEdit(null)} onSaved={() => { setEdit(null); void reload(); }} />}
+      {edit && <PersonModal person={edit} chamberId={chamberId!} chambers={superAdmin ? chambers.data ?? [] : []} canSetPassword={isAdmin} onClose={() => setEdit(null)} onSaved={() => { setEdit(null); void reload(); }} />}
     </>
   );
 }
@@ -375,7 +397,8 @@ export function IdentityLookup({ chamberId, onResult }: { chamberId: string; onR
   );
 }
 
-export function PersonModal({ person, chamberId, canSetPassword, onClose, onSaved }: { person: any; chamberId: string; canSetPassword: boolean; onClose: () => void; onSaved: (p: any) => void }) {
+export function PersonModal({ person, chamberId, chambers = [], canSetPassword, onClose, onSaved }: { person: any; chamberId: string; chambers?: any[]; canSetPassword: boolean; onClose: () => void; onSaved: (p: any) => void }) {
+  const [targetChamber, setTargetChamber] = useState<string>(person.chamber_id ?? chamberId);
   const [form, setForm] = useState({
     fullName: person.full_name ?? '',
     mobile: person.mobile ?? '',
@@ -399,9 +422,15 @@ export function PersonModal({ person, chamberId, canSetPassword, onClose, onSave
     if (form.password) payload.password = form.password;
     try {
       let r;
-      if (person.id) r = await patch(`/people/${person.id}`, { ...payload, fullName: form.fullName, isActive: form.isActive });
-      else if (identity) r = await post('/people', { ...payload, chamberId, nationalId: identity.nationalCode, birthDate: identity.birthDate });
-      else r = await post('/people', { ...payload, chamberId, fullName: form.fullName });
+      if (person.id)
+        r = await patch(`/people/${person.id}`, {
+          ...payload,
+          fullName: form.fullName,
+          isActive: form.isActive,
+          ...(targetChamber !== person.chamber_id ? { chamberId: targetChamber } : {}),
+        });
+      else if (identity) r = await post('/people', { ...payload, chamberId: targetChamber, nationalId: identity.nationalCode, birthDate: identity.birthDate });
+      else r = await post('/people', { ...payload, chamberId: targetChamber, fullName: form.fullName });
       onSaved(r);
     } catch (e) {
       setErr(e as Error);
@@ -420,9 +449,22 @@ export function PersonModal({ person, chamberId, canSetPassword, onClose, onSave
       footer={<Button disabled={!person.id && !identity && !(manual && form.fullName.length >= 2)} onClick={save}>ذخیره</Button>}
     >
       <ErrorBox error={err} />
+      {chambers.length > 1 ? (
+        <Field label="اتاق" hint={person.id ? 'انتقال به اتاق دیگر فقط وقتی ممکن است که شخص در اتاق فعلی عضو کمیسیون یا مدیر اتاق نباشد' : 'شخص در این اتاق ثبت می‌شود'}>
+          <select className="input" value={targetChamber} onChange={(e) => setTargetChamber(e.target.value)}>
+            {chambers.map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.name}
+              </option>
+            ))}
+          </select>
+        </Field>
+      ) : (
+        person.chamber_name && <p className="muted small">اتاق: {person.chamber_name}</p>
+      )}
       {!person.id && !manual && (
         <>
-          <IdentityLookup chamberId={chamberId} onResult={setIdentity} />
+          <IdentityLookup chamberId={targetChamber} onResult={setIdentity} />
           <button className="btn btn-ghost btn-sm mb" onClick={() => setManual(true)}>
             ثبت دستی بدون استعلام (مثلاً مدعو خارجی)
           </button>
