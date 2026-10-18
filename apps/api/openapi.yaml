@@ -1240,7 +1240,7 @@ paths:
     get:
       tags:
       - Structure
-      summary: جستجوی اشخاص (?chamberId&q)
+      summary: جستجوی اشخاص (?chamberId&q) — مدیر سامانه بدون chamberId همه اتاق‌ها را می‌بیند
       responses:
         '200':
           description: OK
@@ -1262,6 +1262,7 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
+      description: Items include chamber_id and chamber_name.
     post:
       tags:
       - Structure
@@ -1414,7 +1415,7 @@ paths:
     patch:
       tags:
       - Structure
-      summary: ویرایش/غیرفعال‌سازی شخص
+      summary: ویرایش/غیرفعال‌سازی شخص؛ انتقال به اتاق دیگر فقط توسط مدیر سامانه
       responses:
         '200':
           description: OK
@@ -1436,6 +1437,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
+      description: chamberId moves the person (Super Admin only); 409 person_has_roles while they are an active member or admin in their current
+        chamber.
       requestBody:
         required: true
         content:
@@ -1446,6 +1449,7 @@ paths:
                 fullName: *id001
                 isActive: *id003
                 password: *id001
+                chamberId: *id004
       parameters:
       - name: id
         in: path
@@ -3428,6 +3432,590 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
+  /api/networks:
+    get:
+      tags:
+      - Networks
+      summary: شبکه‌های موضوعی قابل مشاهده برای کاربر
+      responses:
+        '200':
+          description: OK
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Forbidden
+        '404':
+          description: Not found or not visible
+        '409':
+          description: Conflict (state machine / business rule)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    post:
+      tags:
+      - Networks
+      summary: تعریف شبکه (مدیر سامانه)
+      responses:
+        '200':
+          description: OK
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Forbidden
+        '404':
+          description: Not found or not visible
+        '409':
+          description: Conflict (state machine / business rule)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name: *id001
+                description: *id001
+                endorseThreshold: *id002
+                status: *id001
+  /api/networks/{id}:
+    patch:
+      tags:
+      - Networks
+      summary: ویرایش / بایگانی شبکه (مدیر سامانه)
+      responses:
+        '200':
+          description: OK
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Forbidden
+        '404':
+          description: Not found or not visible
+        '409':
+          description: Conflict (state machine / business rule)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name: *id001
+                description: *id001
+                endorseThreshold: *id002
+                status: *id001
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: *id004
+    get:
+      tags:
+      - Networks
+      summary: 'جزئیات شبکه: کمیسیون‌های عضو، دبیران، کمیسیون‌های قابل افزودن و دسترسی‌ها'
+      responses:
+        '200':
+          description: OK
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Forbidden
+        '404':
+          description: Not found or not visible
+        '409':
+          description: Conflict (state machine / business rule)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      description: Visible to the Super Admin, network coordinators, admins of member chambers and members of member commissions.
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: *id004
+  /api/networks/{id}/commissions:
+    post:
+      tags:
+      - Networks
+      summary: پیوستن کمیسیون به شبکه (مدیر اتاق همان کمیسیون)
+      responses:
+        '200':
+          description: OK
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Forbidden
+        '404':
+          description: Not found or not visible
+        '409':
+          description: Conflict (state machine / business rule)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                commissionId: *id004
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: *id004
+  /api/networks/{id}/commissions/{commissionId}:
+    delete:
+      tags:
+      - Networks
+      summary: خروج کمیسیون از شبکه
+      responses:
+        '200':
+          description: OK
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Forbidden
+        '404':
+          description: Not found or not visible
+        '409':
+          description: Conflict (state machine / business rule)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: *id004
+      - name: commissionId
+        in: path
+        required: true
+        schema: *id004
+  /api/networks/{id}/coordinators:
+    post:
+      tags:
+      - Networks
+      summary: تعیین دبیر شبکه (مدیر سامانه)
+      responses:
+        '200':
+          description: OK
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Forbidden
+        '404':
+          description: Not found or not visible
+        '409':
+          description: Conflict (state machine / business rule)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                userId: *id004
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: *id004
+  /api/networks/{id}/coordinators/{userId}:
+    delete:
+      tags:
+      - Networks
+      summary: حذف دبیر شبکه
+      responses:
+        '200':
+          description: OK
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Forbidden
+        '404':
+          description: Not found or not visible
+        '409':
+          description: Conflict (state machine / business rule)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: *id004
+      - name: userId
+        in: path
+        required: true
+        schema: *id004
+  /api/networks/{id}/resolutions:
+    get:
+      tags:
+      - Networks
+      summary: مصوبات منتشرشده در شبکه با حمایت‌ها (?q&proposals=true)
+      responses:
+        '200':
+          description: OK
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Forbidden
+        '404':
+          description: Not found or not visible
+        '409':
+          description: Conflict (state machine / business rule)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      description: chamber_support counts distinct chambers (originating chamber included); proposal is set once the network threshold was reached.
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: *id004
+  /api/networks/{id}/resolutions/{rid}/endorsements:
+    post:
+      tags:
+      - Networks
+      summary: حمایت کمیسیون از مصوبه منتشرشده
+      responses:
+        '200':
+          description: OK
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Forbidden
+        '404':
+          description: Not found or not visible
+        '409':
+          description: Conflict (state machine / business rule)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      description: Officers (resolution.manage) or chamber admins of a member commission other than the originating one. Returns { nationalProposal
+        } when the threshold is reached.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                commissionId: *id004
+                comment: *id001
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: *id004
+      - name: rid
+        in: path
+        required: true
+        schema: *id004
+  /api/networks/{id}/resolutions/{rid}/endorsements/{commissionId}:
+    delete:
+      tags:
+      - Networks
+      summary: پس‌گرفتن حمایت
+      responses:
+        '200':
+          description: OK
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Forbidden
+        '404':
+          description: Not found or not visible
+        '409':
+          description: Conflict (state machine / business rule)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: *id004
+      - name: rid
+        in: path
+        required: true
+        schema: *id004
+      - name: commissionId
+        in: path
+        required: true
+        schema: *id004
+  /api/networks/{id}/proposals/{rid}:
+    patch:
+      tags:
+      - Networks
+      summary: پیگیری پیشنهاد ملی (دبیر شبکه / مدیر سامانه)
+      responses:
+        '200':
+          description: OK
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Forbidden
+        '404':
+          description: Not found or not visible
+        '409':
+          description: Conflict (state machine / business rule)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                status:
+                  type: string
+                  enum:
+                  - new
+                  - reviewing
+                  - forwarded
+                  - closed
+                response: *id001
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: *id004
+      - name: rid
+        in: path
+        required: true
+        schema: *id004
+  /api/networks/{id}/dashboard:
+    get:
+      tags:
+      - Networks
+      summary: داشبورد مقایسه‌ای کمیسیون‌های شبکه (?from&to)
+      responses:
+        '200':
+          description: OK
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Forbidden
+        '404':
+          description: Not found or not visible
+        '409':
+          description: Conflict (state machine / business rule)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      description: Super Admin, coordinators and admins of member chambers.
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: *id004
+  /api/resolutions/{id}/networks:
+    get:
+      tags:
+      - Networks
+      summary: شبکه‌های کمیسیون مصوبه و وضعیت انتشار
+      responses:
+        '200':
+          description: OK
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Forbidden
+        '404':
+          description: Not found or not visible
+        '409':
+          description: Conflict (state machine / business rule)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: *id004
+  /api/resolutions/{id}/share:
+    post:
+      tags:
+      - Networks
+      summary: انتشار مصوبه در شبکه‌های کمیسیون
+      responses:
+        '200':
+          description: OK
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Forbidden
+        '404':
+          description: Not found or not visible
+        '409':
+          description: Conflict (state machine / business rule)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      description: 409 not_in_network when the commission belongs to no active network.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                note: *id001
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: *id004
+    delete:
+      tags:
+      - Networks
+      summary: لغو انتشار (حمایت‌ها حذف می‌شود)
+      responses:
+        '200':
+          description: OK
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Forbidden
+        '404':
+          description: Not found or not visible
+        '409':
+          description: Conflict (state machine / business rule)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      description: 409 is_proposal once it became a national proposal.
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: *id004
   /api/commissions/{id}/issues:
     get:
       tags:

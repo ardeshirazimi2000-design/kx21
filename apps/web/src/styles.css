@@ -312,3 +312,14 @@ table.table { width: 100%; border-collapse: collapse; }
   .cal-ev { font-size: 0; padding: 0; height: 8px; border-radius: 4px; }
   .cal-add { display: none; }
 }
+
+/* Commission networks */
+.net-card { display: block; color: inherit; text-decoration: none; transition: border-color 0.15s; }
+.net-card:hover { border-color: var(--primary); }
+.net-feed { display: grid; gap: 14px; }
+.net-item { border: 1px solid var(--border); border-radius: var(--radius); padding: 14px 16px; display: grid; gap: 8px; }
+.net-text { margin: 0; line-height: 1.9; }
+.net-support { background: var(--surface-2); border-radius: 8px; padding: 10px 12px; }
+.net-support .list { margin: 8px 0 0; }
+.net-meter { flex: 1; max-width: 220px; height: 8px; border-radius: 4px; background: var(--border); overflow: hidden; }
+.net-meter > span { display: block; height: 100%; background: var(--success); }

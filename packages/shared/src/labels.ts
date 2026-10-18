@@ -112,3 +112,13 @@ export function roleLabel(key: string | null | undefined, customTitle?: string |
   if (key === 'delegate') return 'نماینده';
   return (ROLE_LABELS as Record<string, string>)[key] ?? key;
 }
+
+/** Follow-up status of a national proposal (پیشنهاد ملی) in a commission network. */
+export const NETWORK_PROPOSAL_STATUSES = ['new', 'reviewing', 'forwarded', 'closed'] as const;
+export type NetworkProposalStatus = (typeof NETWORK_PROPOSAL_STATUSES)[number];
+export const NETWORK_PROPOSAL_STATUS_LABELS: Record<NetworkProposalStatus, string> = {
+  new: 'جدید',
+  reviewing: 'در حال بررسی در اتاق ایران',
+  forwarded: 'ارسال‌شده به دستگاه مربوط',
+  closed: 'مختومه',
+};

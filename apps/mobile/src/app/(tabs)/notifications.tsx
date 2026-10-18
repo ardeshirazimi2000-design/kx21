@@ -14,7 +14,7 @@ export default function NotificationsScreen() {
   const open = async (n: any) => {
     if (!n.read_at) await post(`/notifications/${n.id}/read`).catch(() => {});
     if (n.data?.meetingId) router.push(`/meeting/${n.data.meetingId}`);
-    else if (n.data?.resolutionId) router.push(`/resolution/${n.data.resolutionId}`);
+    else if (n.data?.resolutionId && !n.data?.networkId) router.push(`/resolution/${n.data.resolutionId}`);
     else void reload();
   };
   return (

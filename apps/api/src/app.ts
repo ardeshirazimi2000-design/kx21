@@ -19,6 +19,7 @@ import { meetingsRouter } from './routes/meetings.js';
 import { minutesRouter } from './routes/minutes.js';
 import { reportsRouter } from './routes/reports.js';
 import { resolutionsRouter } from './routes/resolutions.js';
+import { networksRouter } from './routes/networks.js';
 import { notificationSettingsRouter } from './routes/notificationSettings.js';
 import { rolesRouter } from './routes/roles.js';
 import { structureRouter } from './routes/structure.js';
@@ -94,6 +95,7 @@ export function createApp() {
   api.use(agendaRouter);
   api.use(minutesRouter);
   api.use(resolutionsRouter);
+  api.use(networksRouter);
   api.use(documentsRouter);
   api.use(reportsRouter);
   api.use(rolesRouter);

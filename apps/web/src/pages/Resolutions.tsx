@@ -1,4 +1,5 @@
 import { RESOLUTION_STATUS_LABELS, RESOLUTION_STATUSES } from '@kx/shared';
+import { NetworkShareCard } from './Networks';
 import { useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { PriorityBadge, ResolutionBadge } from '../components/status';
@@ -219,6 +220,7 @@ export function ResolutionDetailPage() {
           </ul>
         </Card>
       </div>
+      <NetworkShareCard resolutionId={r.id} />
     </>
   );
 }

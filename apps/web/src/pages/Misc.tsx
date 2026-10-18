@@ -46,7 +46,7 @@ export function ReferralsPage() {
 }
 
 const EVENT_LINK = (n: any) =>
-  n.data?.meetingId ? `/meetings/${n.data.meetingId}` : n.data?.resolutionId ? `/resolutions/${n.data.resolutionId}` : n.data?.referralId ? '/referrals' : null;
+  n.data?.networkId ? `/networks/${n.data.networkId}` : n.data?.meetingId ? `/meetings/${n.data.meetingId}` : n.data?.resolutionId ? `/resolutions/${n.data.resolutionId}` : n.data?.referralId ? '/referrals' : null;
 
 export function NotificationsPage() {
   const nav = useNavigate();

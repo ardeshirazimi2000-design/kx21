@@ -55,6 +55,10 @@ export const NOTIFICATION_EVENT_LABELS: Record<NotificationEvent, string> = {
   'resolution.reviewed': 'نتیجه بررسی گزارش اجرای مصوبه',
   'referral.created': 'ارجاع کارشناسی',
   'referral.answered': 'پاسخ ارجاع کارشناسی',
+  'network.resolution_shared': 'انتشار مصوبه در شبکه کمیسیون‌ها',
+  'network.endorsed': 'حمایت کمیسیون دیگر از مصوبه',
+  'network.proposal_national': 'تبدیل مصوبه به پیشنهاد ملی',
+  'network.proposal_updated': 'نتیجه پیگیری پیشنهاد ملی',
 };
 
 /** Variables that can be used in message texts; meeting/resolution ones apply when the event has one. */
@@ -124,6 +128,10 @@ export const DEFAULT_NOTIFICATION_SETTINGS: NotificationSettings = {
     'resolution.reviewed': ev(null, null),
     'referral.created': ev(null, '{نام} گرامی،\n\n{عنوان}\n{متن}\n\n{لینک}' + SIGN),
     'referral.answered': ev(null, null),
+    'network.resolution_shared': ev(null, null),
+    'network.endorsed': ev(null, null),
+    'network.proposal_national': ev(null, null),
+    'network.proposal_updated': ev(null, null),
   },
 };
 

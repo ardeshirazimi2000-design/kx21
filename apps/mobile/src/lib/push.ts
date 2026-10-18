@@ -52,6 +52,8 @@ export function showLiveNotification(n: { id: string; title: string; body: strin
 export function routeForNotification(data: Record<string, unknown> | undefined): string | null {
   if (!data) return null;
   if (typeof data.meetingId === 'string') return `/meeting/${data.meetingId}`;
+  // Network news concerns other chambers' resolutions; the network pages are on the web.
+  if (typeof data.networkId === 'string') return '/notifications';
   if (typeof data.resolutionId === 'string') return `/resolution/${data.resolutionId}`;
   return '/notifications';
 }

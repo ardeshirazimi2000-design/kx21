@@ -166,6 +166,15 @@ export async function seed() {
       `INSERT INTO commission_memberships (chamber_id, commission_id, user_id, position, has_vote) VALUES ($1,$2,$3,'chair',true)`,
       [isf.id, isfCommission.id, isfChair],
     );
+    // National thematic network linking the trade commissions of both chambers, with one shared resolution.
+    const network = await ins(
+      `INSERT INTO networks (name, description, endorse_threshold, created_by) VALUES ($1,$2,2,$3) RETURNING id`,
+      ['شبکه ملی تجارت و صادرات', 'کمیسیون‌های تجارت، صادرات و توسعه بازار اتاق‌های استان‌ها', superAdmin],
+    );
+    await c.query('INSERT INTO network_commissions (network_id, commission_id) VALUES ($1,$2), ($1,$3)', [network.id, commission.id, isfCommission.id]);
+    await c.query(`UPDATE resolutions SET shared_at = now(), shared_by = $2, share_note = $3 WHERE id = $1`, [
+      res1.id, secretary, 'این مشکل برای صادرکنندگان خرد همه استان‌ها مطرح است؛ از کمیسیون‌های دیگر درخواست حمایت داریم.',
+    ]);
 
     await c.query('COMMIT');
     console.log('Seed complete. Accounts (password: %s):', SEED_PASSWORD);

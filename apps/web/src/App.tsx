@@ -12,6 +12,7 @@ import { IntegrationsPage } from './pages/Integrations';
 import { LoginPage } from './pages/Login';
 import { MeetingRoomPage } from './pages/MeetingRoom';
 import { MeetingsPage } from './pages/Meetings';
+import { NetworkDetailPage, NetworksPage } from './pages/Networks';
 import { NotificationSettingsPage } from './pages/NotificationSettings';
 import { NotificationsPage } from './pages/Notifications';
 import { PeoplePage } from './pages/People';
@@ -50,6 +51,8 @@ export function App() {
         <Route path="/meetings/:id" element={<MeetingRoomPage />} />
         <Route path="/resolutions" element={<ResolutionsPage />} />
         <Route path="/resolutions/:id" element={<ResolutionDetailPage />} />
+        <Route path="/networks" element={<NetworksPage />} />
+        <Route path="/networks/:id" element={<NetworkDetailPage />} />
         <Route path="/referrals" element={<ReferralsPage />} />
         <Route path="/notifications" element={<NotificationsPage />} />
         <Route path="/reports" element={<ReportsPage />} />
@@ -80,6 +83,7 @@ function Shell({ children }: { children: ReactNode }) {
   useEffect(() => setOpen(false), [loc.pathname]);
   const isOfficer = me!.memberships.some((m) => ['chair', 'vice_chair', 'secretary'].includes(m.position));
   const isExpert = me!.memberships.some((m) => m.position === 'expert');
+  const networks = useApi<any[]>('/networks');
 
   const item = (to: string, label: string, extra?: ReactNode) => (
     <NavLink to={to} end={to === '/'}>
@@ -115,6 +119,11 @@ function Shell({ children }: { children: ReactNode }) {
             {isAdmin && item('/integrations', 'یکپارچه‌سازی')}
             {me!.is_super_admin && item('/chambers', 'اتاق‌ها')}
           </NavGroup>
+          {(me!.is_super_admin || !!networks.data?.length) && (
+            <NavGroup id="networks" title="شبکه کمیسیون‌ها" paths={['/networks']}>
+              {item('/networks', 'شبکه‌های موضوعی')}
+            </NavGroup>
+          )}
           {(isAdmin || isOfficer) && (
             <NavGroup id="reports" title="گزارش و کنترل" paths={['/reports', '/audit']}>
               {item('/reports', 'گزارش‌ها')}

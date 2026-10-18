@@ -98,6 +98,10 @@ export const NOTIFICATION_EVENTS = [
   'resolution.reviewed',
   'referral.created',
   'referral.answered',
+  'network.resolution_shared',
+  'network.endorsed',
+  'network.proposal_national',
+  'network.proposal_updated',
 ] as const;
 export type NotificationEvent = (typeof NOTIFICATION_EVENTS)[number];
 
