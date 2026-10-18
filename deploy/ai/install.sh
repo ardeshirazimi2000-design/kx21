@@ -32,7 +32,15 @@ elif [ -f "deploy/ai/models/${MODEL}.gguf" ]; then
   docker compose --profile ai exec -T ai sh -c "printf 'FROM /tmp/${MODEL}.gguf\n' > /tmp/Modelfile && ollama create ${MODEL} -f /tmp/Modelfile && rm /tmp/${MODEL}.gguf"
 else
   echo "› Downloading the model ${MODEL} (about 1.2 GB)…"
-  if ! docker compose --profile ai exec -T ai ollama pull "$MODEL"; then
+  # A pull can time out in its last step («context deadline exceeded») after the download completed;
+  # the downloaded parts are kept, so a retry finishes quickly.
+  pulled=0
+  for attempt in 1 2 3 4 5; do
+    if docker compose --profile ai exec -T ai ollama pull "$MODEL"; then pulled=1; break; fi
+    echo "  Retrying (${attempt}/5)…"
+    sleep 5
+  done
+  if [ "$pulled" != 1 ]; then
     echo
     echo "The model could not be downloaded from this server."
     echo "Download a ${MODEL} GGUF file on another computer, copy it to deploy/ai/models/${MODEL}.gguf and run this script again."
