@@ -80,16 +80,19 @@ export function CommissionsPage() {
         )}
         {data && <Pager page={page} pageSize={data.pageSize} total={data.total} onPage={setPage} />}
       </Card>
-      {open && chamberId && <NewCommissionModal chamberId={chamberId} onClose={() => setOpen(false)} onSaved={(id) => { setOpen(false); void reload(); nav(`/commissions/${id}`); }} />}
+      {open && chamberId && <NewCommissionModal chamberId={chamberId} chambers={(chambers.data ?? []).filter((c) => superAdmin || me?.adminChambers.includes(c.id))} onClose={() => setOpen(false)} onSaved={(id) => { setOpen(false); void reload(); nav(`/commissions/${id}`); }} />}
     </>
   );
 }
 
-function NewCommissionModal({ chamberId, onClose, onSaved }: { chamberId: string; onClose: () => void; onSaved: (id: string) => void }) {
+/** A commission belongs to one chamber and one of that chamber's terms (دوره). */
+function NewCommissionModal({ chamberId: initialChamber, chambers, onClose, onSaved }: { chamberId: string; chambers: any[]; onClose: () => void; onSaved: (id: string) => void }) {
+  const [chamberId, setChamberId] = useState(initialChamber);
   const terms = useApi<any[]>(`/terms?chamberId=${chamberId}`);
   const [form, setForm] = useState({ termId: '', name: '', code: '', domain: '', description: '' });
   const [err, setErr] = useState<Error | null>(null);
   const termId = form.termId || terms.data?.find((t) => t.status === 'active')?.id || '';
+  const chamberName = chambers.find((c) => c.id === chamberId)?.name;
   const save = async () => {
     try {
       const r = await post('/commissions', { chamberId, ...form, termId });
@@ -101,12 +104,29 @@ function NewCommissionModal({ chamberId, onClose, onSaved }: { chamberId: string
   return (
     <Modal title="کمیسیون جدید" onClose={onClose} footer={<Button onClick={save}>ایجاد</Button>}>
       <ErrorBox error={err} />
+      <Field label="اتاق" hint="کمیسیون در این اتاق ثبت می‌شود و فقط مدیران همین اتاق و اعضای خود کمیسیون آن را می‌بینند">
+        {chambers.length > 1 ? (
+          <select className="input" value={chamberId} onChange={(e) => { setChamberId(e.target.value); setForm({ ...form, termId: '' }); }}>
+            {chambers.map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.name}
+              </option>
+            ))}
+          </select>
+        ) : (
+          <input className="input" value={chamberName ?? ''} readOnly />
+        )}
+      </Field>
+      {terms.data && terms.data.length === 0 && (
+        <p className="alert alert-warning small">برای این اتاق هنوز دوره‌ای تعریف نشده است؛ ابتدا مدیر اتاق باید از منوی «دوره‌ها» دوره را تعریف کند.</p>
+      )}
       <Field label="دوره">
         <select className="input" value={termId} onChange={(e) => setForm({ ...form, termId: e.target.value })}>
           <option value="">انتخاب کنید</option>
           {terms.data?.map((t) => (
             <option key={t.id} value={t.id}>
               {t.title}
+              {t.status === 'active' ? ' (جاری)' : ''}
             </option>
           ))}
         </select>
