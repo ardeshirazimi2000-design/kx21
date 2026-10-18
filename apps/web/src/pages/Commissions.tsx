@@ -7,16 +7,37 @@ import { useApi } from '../lib/hooks';
 import { Badge, Button, Card, Empty, ErrorBox, Field, fa, Loading, Modal, PageHeader, Pager } from '../components/ui';
 
 export function CommissionsPage() {
-  const { chamberId, isAdmin } = useAuth();
+  const { chamberId, isAdmin, me } = useAuth();
   const nav = useNavigate();
   const [page, setPage] = useState(1);
   const [q, setQ] = useState('');
-  const { data, loading, reload } = useApi(`/commissions?page=${page}&q=${encodeURIComponent(q)}${isAdmin && chamberId ? `&chamberId=${chamberId}` : ''}`);
+  // The super admin can list the commissions of every chamber at once.
+  const superAdmin = !!me?.is_super_admin;
+  const [allChambers, setAllChambers] = useState(superAdmin);
+  const scoped = isAdmin && chamberId && !(superAdmin && allChambers);
+  const { data, loading, reload } = useApi(`/commissions?page=${page}&q=${encodeURIComponent(q)}${scoped ? `&chamberId=${chamberId}` : ''}`);
+  const chambers = useApi<any[]>(isAdmin ? '/chambers' : null);
+  const currentChamber = chambers.data?.find((c) => c.id === chamberId)?.name;
+  const showChamber = superAdmin && allChambers;
   const [open, setOpen] = useState(false);
   return (
     <>
-      <PageHeader title="کمیسیون‌ها" subtitle="کمیسیون‌های تخصصی دوره جاری و دوره‌های گذشته" actions={isAdmin && <Button onClick={() => setOpen(true)}>کمیسیون جدید</Button>} />
+      <PageHeader
+        title="کمیسیون‌ها"
+        subtitle={showChamber ? 'کمیسیون‌های همه اتاق‌ها' : isAdmin && currentChamber ? `کمیسیون‌های ${currentChamber} — دوره جاری و دوره‌های گذشته` : 'کمیسیون‌های تخصصی دوره جاری و دوره‌های گذشته'}
+        actions={isAdmin && <Button onClick={() => setOpen(true)}>{currentChamber ? `کمیسیون جدید در ${currentChamber}` : 'کمیسیون جدید'}</Button>}
+      />
       <Card>
+        {superAdmin && (
+          <div className="row gap-sm mb" role="group" aria-label="دامنه نمایش">
+            <Button size="sm" variant={allChambers ? 'primary' : 'ghost'} onClick={() => { setAllChambers(true); setPage(1); }}>
+              همه اتاق‌ها
+            </Button>
+            <Button size="sm" variant={allChambers ? 'ghost' : 'primary'} onClick={() => { setAllChambers(false); setPage(1); }}>
+              فقط {currentChamber ?? 'اتاق انتخاب‌شده'}
+            </Button>
+          </div>
+        )}
         <input className="input mb" placeholder="جستجوی نام، کد یا حوزه تخصصی" value={q} onChange={(e) => { setQ(e.target.value); setPage(1); }} />
         {loading && !data ? (
           <Loading />
@@ -28,6 +49,7 @@ export function CommissionsPage() {
               <thead>
                 <tr>
                   <th>نام</th>
+                  {showChamber && <th>اتاق</th>}
                   <th>کد</th>
                   <th>دوره</th>
                   <th>رئیس</th>
@@ -43,6 +65,7 @@ export function CommissionsPage() {
                       <strong>{c.name}</strong>
                       <div className="muted small">{c.domain}</div>
                     </td>
+                    {showChamber && <td className="small">{c.chamber_name}</td>}
                     <td className="ltr">{c.code}</td>
                     <td>{c.term_title}</td>
                     <td>{c.chair_name ?? '—'}</td>

@@ -264,7 +264,7 @@ structureRouter.get('/commissions', async (req, res) => {
          OR EXISTS (SELECT 1 FROM commission_memberships m WHERE m.commission_id = c.id AND m.user_id = $6 AND m.status = 'active'))`;
   const params = [chamberId, termId, q, u.isSuperAdmin, u.adminChambers, u.id];
   const items = await query(
-    `SELECT c.*, t.title AS term_title, t.number AS term_number,
+    `SELECT c.*, t.title AS term_title, t.number AS term_number, (SELECT ch.name FROM chambers ch WHERE ch.id = c.chamber_id) AS chamber_name,
        (SELECT count(*) FROM commission_memberships m WHERE m.commission_id = c.id AND m.status = 'active') AS member_count,
        (SELECT u.full_name FROM commission_memberships m JOIN users u ON u.id = m.user_id
           WHERE m.commission_id = c.id AND m.status = 'active' AND m.position = 'chair') AS chair_name,
