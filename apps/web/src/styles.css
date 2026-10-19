@@ -138,9 +138,15 @@ h3 { font-size: 1rem; }
 .topbar .search { flex: 1; max-width: 420px; }
 .content { padding: 24px; max-width: 1400px; }
 .menu-btn { display: inline-flex; }
-/* Sidebar hidden with the ☰ button on wide screens */
-.shell.nav-hidden { grid-template-columns: 1fr; }
-.shell.nav-hidden > .sidebar { display: none; }
+/* Sidebar slid away with the ☰ button on wide screens: the column narrows to nothing and the menu slides out. */
+.shell { transition: grid-template-columns 0.28s ease; }
+.shell > .sidebar { min-width: 0; overflow-x: hidden; transition: padding 0.28s ease, opacity 0.2s ease, visibility 0s linear 0s; }
+.shell > .sidebar > * { min-width: 226px; }
+.shell.nav-hidden { grid-template-columns: 0 1fr; }
+.shell.nav-hidden > .sidebar { padding-inline: 0; opacity: 0; visibility: hidden; transition: padding 0.28s ease, opacity 0.2s ease 0.08s, visibility 0s linear 0.28s; }
+@media (prefers-reduced-motion: reduce) {
+  .shell, .shell > .sidebar { transition: none; }
+}
 
 .page-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; margin-bottom: 20px; flex-wrap: wrap; }
 
@@ -266,7 +272,9 @@ table.table { width: 100%; border-collapse: collapse; }
 
 @media (max-width: 900px) {
   .shell, .shell.nav-hidden { grid-template-columns: 1fr; }
-  .shell.nav-hidden > .sidebar { display: block; }
+  .shell.nav-hidden > .sidebar { padding-inline: 12px; opacity: 1; visibility: visible; }
+  .shell > .sidebar > * { min-width: 0; }
+  .shell > .sidebar, .shell.nav-hidden > .sidebar { transition: transform 0.2s; }
   .sidebar { position: fixed; inset: 0 0 0 auto; width: 260px; z-index: 40; transform: translateX(100%); transition: transform 0.2s; }
   .sidebar.open { transform: none; }
   .menu-btn { display: inline-flex; }
