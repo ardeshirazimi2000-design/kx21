@@ -4,11 +4,18 @@
 import { openTriageWizard, triageResultCard } from './triage-wizard.js';
 import { mediaSupported, startCall } from './video-call.js';
 import { installV2 } from './views-v2.js';
+import { icon } from './icons.js';
 import { jalaliPicker, formatJalaliDate, todayJalali, isoToJalali, MONTHS } from './jalali.js';
 
 // ---------------- utilities ----------------
 const $app = document.getElementById('app');
 const $tabs = document.getElementById('tabs');
+// The menus sit right under the header, whose height varies (notch, font size).
+{
+  const header = document.querySelector('.topbar');
+  const setH = () => document.documentElement.style.setProperty('--header-h', `${header.offsetHeight}px`);
+  if (header) { setH(); new ResizeObserver(setH).observe(header); }
+}
 const $user = document.getElementById('userbox');
 
 function h(tag, attrs = {}, ...children) {
@@ -160,16 +167,78 @@ function tabsFor(u) {
   return TABS[u.role === 'doctor' && u.doctor_status && u.doctor_status !== 'approved' ? 'doctor_pending' : u.role] ?? [];
 }
 
+// Icons for every section (navigation bar, home tiles, staff menu).
+const TAB_ICONS = {
+  home: 'home', assistant: 'assistant', doctors: 'doctors', book: 'stethoscope', appointments: 'calendar', records: 'folder',
+  prescriptions: 'rx', inbox: 'bell', profile: 'user', 'my-activity': 'history',
+  'doctor-appointments': 'stethoscope', calendar: 'calendar', 'doctor-rx': 'rx', 'doctor-profile': 'idcard', 'doctor-accounting': 'wallet',
+  'admin-doctors': 'approve', settings: 'settings', 'drug-catalog': 'catalog', payments: 'card', accounting: 'wallet',
+  escalations: 'alert', stats: 'chart', audit: 'shield', activity: 'history', staff: 'team', 'staff-create': 'team',
+};
+// Phones: a bottom bar with five sections for patients and doctors (the rest is on the home
+// screen and in the top bar). Staff have many sections: a menu (side menu on wide screens).
+const BOTTOM_NAV = {
+  patient: [['home', 'خانه'], ['appointments', 'نوبت‌ها'], ['assistant', 'دستیار هوشمند', true], ['records', 'پرونده من'], ['profile', 'پروفایل']],
+  doctor: [['doctor-appointments', 'نوبت‌ها'], ['calendar', 'تقویم'], ['doctor-rx', 'نسخه‌ها'], ['doctor-accounting', 'حسابداری'], ['doctor-profile', 'پروفایل']],
+};
+// Pages reached from the home screen highlight the bar item they belong to.
+const NAV_PARENT = { doctors: 'home', book: 'home', prescriptions: 'records', summary: 'appointments', room: 'appointments', 'my-activity': 'profile', inbox: 'home' };
+const isStaff = (u) => ['admin', 'operator'].includes(u?.role);
+function navFor(u) {
+  if (u.role === 'patient') return BOTTOM_NAV.patient;
+  if (u.role === 'doctor') return u.doctor_status && u.doctor_status !== 'approved' ? [] : BOTTOM_NAV.doctor;
+  return [['home', 'پیشخوان'], ...tabsFor(u)];
+}
+
+// Unread messages: notifications newer than the last time the inbox was opened (kept on the device).
+const badge = { count: 0, at: 0 };
+const seenKey = () => `inbox_seen:${session?.user?.id}`;
+async function refreshBadge(force = false) {
+  if (!session || (!force && Date.now() - badge.at < 60_000)) return;
+  badge.at = Date.now();
+  try {
+    const r = await api('GET', '/v1/notifications');
+    const seen = store.get(seenKey(), '');
+    badge.count = r.items.filter((n) => n.created_at > seen).length;
+    paintBadge();
+  } catch { /* offline */ }
+}
+function paintBadge() {
+  const b = document.getElementById('bell-count');
+  if (b) { b.textContent = badge.count > 9 ? '۹+' : fa(badge.count); b.hidden = !badge.count; }
+}
+
 function renderChrome() {
   $user.replaceChildren();
   $tabs.replaceChildren();
+  $tabs.className = 'tabs';
+  document.body.classList.remove('has-bottomnav', 'has-sidenav');
   if (!session) return;
   const u = session.user;
-  $user.append(h('span', {}, `${u.full_name || fa(u.phone)} · ${LABELS.role[u.role]}`), h('button', { class: 'btn small', onclick: logout }, 'خروج'));
-  for (const [id, label] of tabsFor(u)) {
-    $tabs.append(h('button', { 'aria-current': current.view === id ? 'page' : null, onclick: () => route(id) }, label));
+  const active = NAV_PARENT[current.view] && !navFor(u).some(([id]) => id === current.view) ? NAV_PARENT[current.view] : current.view;
+  const bell = h('button', { class: 'icon-btn', type: 'button', title: 'پیام‌ها و اعلان‌ها', 'aria-label': 'پیام‌ها و اعلان‌ها', onclick: () => route('inbox') },
+    icon('bell', 22), h('span', { class: 'count', id: 'bell-count', hidden: true }));
+  $user.append(
+    h('span', { class: 'who' }, `${u.full_name || fa(u.phone)} · ${LABELS.role[u.role]}`),
+    bell,
+    h('button', { class: 'icon-btn', type: 'button', title: 'خروج', 'aria-label': 'خروج', onclick: logout }, icon('logout', 22)),
+  );
+  paintBadge();
+  refreshBadge();
+  const items = navFor(u);
+  if (!items.length) return;
+  const bottom = !isStaff(u);
+  $tabs.classList.add(bottom ? 'nav-bottom' : 'nav-side');
+  document.body.classList.add(bottom ? 'has-bottomnav' : 'has-sidenav');
+  for (const [id, label, fab] of items) {
+    $tabs.append(h('button', { class: fab ? 'fab' : null, 'aria-current': active === id ? 'page' : null, onclick: () => route(id) },
+      h('span', { class: 'ic' }, icon(TAB_ICONS[id] ?? 'plus', fab ? 28 : 22)), h('span', { class: 'lbl' }, label)));
   }
 }
+
+// Home-screen tile: a coloured icon with its label.
+const tile = (id, label, tone, onclick = () => route(id), sub = null) => h('button', { class: `svc tone-${tone}`, type: 'button', onclick },
+  h('span', { class: 'svc-ic' }, icon(TAB_ICONS[id] ?? id, 30)), h('span', { class: 'svc-lbl' }, label), sub ? h('span', { class: 'svc-sub' }, sub) : null);
 
 function route(view, arg) {
   for (const c of current.cleanup) c();
@@ -191,15 +260,56 @@ VIEWS.home = async () => {
   if (!session) return route('login');
   const r = session.user.role;
   if (r === 'patient') {
-    try { await api('GET', '/v1/patients/me'); } catch (e) { if (e.code === 'profile_incomplete') return route('onboarding'); throw e; }
-    return route('assistant');
+    let me;
+    try { me = await api('GET', '/v1/patients/me'); } catch (e) { if (e.code === 'profile_incomplete') return route('onboarding'); throw e; }
+    return patientHome(me);
   }
   const me = await api('GET', '/v1/auth/me');
   setSession({ ...session, user: { ...session.user, doctor_status: me.doctor_status, full_name: me.full_name, permissions: me.permissions, staff_role: me.staff_role } });
   if (r === 'doctor' && me.doctor_status !== 'approved') return route('doctor-profile');
-  const first = tabsFor(session.user)[0];
-  route(first ? first[0] : 'my-activity');
+  if (r === 'doctor') return route('doctor-appointments');
+  // Staff: a dashboard of the sections this person may open.
+  renderChrome();
+  const tones = ['blue', 'green', 'navy', 'amber', 'violet', 'rose'];
+  $app.append(h('div', { class: 'card' }, h('h2', {}, `سلام ${me.full_name || ''}`.trim()),
+    h('p', { class: 'muted' }, me.staff_role ? `نقش شما: ${me.staff_role.name ?? me.staff_role}` : 'دسترسی کامل مدیریت'),
+    h('div', { class: 'svc-grid' }, [...tabsFor(session.user)].map(([id, label], i) => tile(id, label, tones[i % tones.length])))));
 };
+
+async function patientHome(me) {
+  const first = (me.full_name || '').split(' ')[0];
+  const next = h('div');
+  $app.append(
+    h('div', { class: 'home-hello' }, h('h2', {}, first ? `سلام ${first}` : 'سلام'), h('p', { class: 'muted' }, 'امروز چه کمکی از دست ما برمی‌آید؟')),
+    h('button', { class: 'home-banner', type: 'button', onclick: () => route('assistant') },
+      h('span', { class: 'hb-text' }, h('b', {}, 'سلامت، همیشه در دسترس'), h('span', {}, 'علائم خود را با دستیار هوشمند در میان بگذارید؛ در صورت نیاز همان‌جا نوبت ویزیت بگیرید.'), h('span', { class: 'hb-cta' }, 'شروع گفتگو ←')),
+      h('span', { class: 'hb-art' }, h('img', { src: 'brand/mark-white.svg', alt: '', width: 84, height: 84 }))),
+    next,
+    h('div', { class: 'card' }, h('h3', {}, 'خدمات'),
+      h('div', { class: 'svc-grid' },
+        tile('book', 'ویزیت با پزشک', 'blue'),
+        tile('assistant', 'بررسی علائم', 'green', () => route('assistant', 'triage')),
+        tile('doctors', 'پزشکان', 'navy'),
+        tile('prescriptions', 'نسخه‌ها', 'violet'),
+        tile('records', 'مدارک پزشکی', 'amber'),
+        tile('inbox', 'پیام‌ها', 'rose'))),
+  );
+  // The next confirmed visit, if any, right on the home screen.
+  const r = await api('GET', '/v1/appointments?limit=50').catch(() => ({ items: [] }));
+  const now = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+  const a = r.items.filter((x) => x.status === 'confirmed' && x.starts_at > now).sort((x, y) => x.starts_at.localeCompare(y.starts_at))[0]
+    ?? r.items.find((x) => x.status === 'pending');
+  if (a) {
+    next.replaceChildren(h('div', { class: 'card next-visit' },
+      h('div', { class: 'row' }, h('span', { class: 'svc-ic tone-blue' }, icon('calendar', 26)),
+        h('div', { class: 'grow' }, h('div', { class: 'muted' }, a.status === 'pending' ? 'نوبت در انتظار پرداخت' : 'نوبت بعدی شما'),
+          h('b', {}, a.doctor?.full_name ?? ''), ' ', h('span', { class: 'muted' }, a.doctor?.specialty_label ?? ''), h('br'),
+          h('span', {}, fmt.dt(a.starts_at)), ' · ', h('span', { class: 'muted' }, LABELS.channel[a.channel])),
+        a.status === 'confirmed'
+          ? h('button', { class: 'btn primary small', onclick: () => route('room', a.consultation.id) }, 'ورود به اتاق ویزیت')
+          : h('button', { class: 'btn small', onclick: () => route('appointments') }, 'مشاهده'))));
+  }
+}
 
 VIEWS.login = () => {
   let phone = '';
@@ -360,7 +470,7 @@ VIEWS.onboarding = async () => {
 };
 
 // ---------- assistant ----------
-VIEWS.assistant = async () => {
+VIEWS.assistant = async (arg) => {
   const sidKey = `ai_session:${session.user.id}`;
   let sid = store.get(sidKey);
   if (!sid) { sid = crypto.randomUUID(); store.set(sidKey, sid); }
@@ -505,6 +615,7 @@ VIEWS.assistant = async () => {
   await loadHistory();
   input.focus();
   every(5000, () => { if (!busy) loadHistory().catch(() => {}); });
+  if (arg === 'triage') startWizard(); // "بررسی علائم" on the home screen
 };
 
 // ---------- booking ----------
@@ -774,6 +885,8 @@ VIEWS['doctor-rx'] = async () => {
 // ---------- inbox ----------
 VIEWS.inbox = async () => {
   const r = await api('GET', '/v1/notifications');
+  if (r.items[0]) store.set(seenKey(), r.items[0].created_at);
+  badge.count = 0; paintBadge();
   const icon = { sms: '✉️ پیامک', email: '📧 ایمیل', push: '🔔 اعلان' };
   $app.append(h('div', { class: 'card' }, h('h2', {}, 'پیام‌ها و اعلان‌ها'),
     h('p', { class: 'muted' }, 'در محیط آزمایشی، پیامک‌ها به‌جای ارسال واقعی اینجا نمایش داده می‌شوند.'),
@@ -986,6 +1099,17 @@ VIEWS.server = () => {
 // Views from the second requirements document (doctor onboarding, admin review, tariffs, payments, records).
 const V2 = { VIEWS, h, api, toast, fa, fmt, route, guard, onCleanup, every, apiUrl, IS_NATIVE, formatJalaliDate, $app, getSession: () => session, setSession, renderChrome };
 installV2(V2);
+// Login history moved off the bar: a link at the end of the profile pages.
+for (const name of ['profile', 'doctor-profile']) {
+  const view = VIEWS[name];
+  VIEWS[name] = async (...args) => {
+    await view(...args);
+    if (current.view !== name) return;
+    $app.append(h('div', { class: 'card row' }, h('span', { class: 'svc-ic tone-navy' }, icon('history', 24)),
+      h('div', { class: 'grow' }, h('b', {}, 'امنیت حساب'), h('div', { class: 'muted' }, 'سابقه ورودهای شما با تاریخ، دستگاه و نشانی اینترنتی')),
+      h('button', { class: 'btn small', onclick: () => route('my-activity') }, 'سابقه ورود')));
+  };
+}
 // Book a slot from a doctor's profile page.
 V2.bookSlot = (slot) => {
   const channel = h('select', {}, Object.entries(LABELS.channel).map(([k, v]) => h('option', { value: k }, v)));
