@@ -137,7 +137,10 @@ h3 { font-size: 1rem; }
 .topbar { display: flex; align-items: center; gap: 12px; padding: 10px 24px; background: var(--surface); border-bottom: 1px solid var(--border); position: sticky; top: 0; z-index: 5; }
 .topbar .search { flex: 1; max-width: 420px; }
 .content { padding: 24px; max-width: 1400px; }
-.menu-btn { display: none; }
+.menu-btn { display: inline-flex; }
+/* Sidebar hidden with the ☰ button on wide screens */
+.shell.nav-hidden { grid-template-columns: 1fr; }
+.shell.nav-hidden > .sidebar { display: none; }
 
 .page-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; margin-bottom: 20px; flex-wrap: wrap; }
 
@@ -262,7 +265,8 @@ table.table { width: 100%; border-collapse: collapse; }
 .login .card { width: 100%; max-width: 400px; }
 
 @media (max-width: 900px) {
-  .shell { grid-template-columns: 1fr; }
+  .shell, .shell.nav-hidden { grid-template-columns: 1fr; }
+  .shell.nav-hidden > .sidebar { display: block; }
   .sidebar { position: fixed; inset: 0 0 0 auto; width: 260px; z-index: 40; transform: translateX(100%); transition: transform 0.2s; }
   .sidebar.open { transform: none; }
   .menu-btn { display: inline-flex; }

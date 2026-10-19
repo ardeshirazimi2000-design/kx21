@@ -74,7 +74,24 @@ function Shell({ children }: { children: ReactNode }) {
     if (!chamberId && selectable.length) setChamberId(selectable[0].id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [chamberId, selectable.length]);
+  // Narrow screens: the menu slides in over the page (open). Wide screens: the ☰ button hides or shows the sidebar (hidden, remembered).
   const [open, setOpen] = useState(false);
+  const [hidden, setHidden] = useState(() => {
+    try {
+      return localStorage.getItem('kx.nav.hidden') === '1';
+    } catch {
+      return false;
+    }
+  });
+  const toggleMenu = () => {
+    if (window.matchMedia('(max-width: 900px)').matches) return setOpen(!open);
+    setHidden(!hidden);
+    try {
+      localStorage.setItem('kx.nav.hidden', hidden ? '0' : '1');
+    } catch {
+      /* storage unavailable */
+    }
+  };
   const [q, setQ] = useState('');
   const loc = useLocation();
   const nav = useNavigate();
@@ -93,7 +110,7 @@ function Shell({ children }: { children: ReactNode }) {
   );
 
   return (
-    <div className="shell">
+    <div className={`shell ${hidden ? 'nav-hidden' : ''}`}>
       <aside className={`sidebar ${open ? 'open' : ''}`}>
         <Link to="/" className="brand">
           <img src="/iran-chamber-logo.png" width={52} height={52} alt="لوگوی اتاق ایران" />
@@ -134,7 +151,7 @@ function Shell({ children }: { children: ReactNode }) {
       </aside>
       <div className="main">
         <header className="topbar">
-          <button className="btn btn-secondary btn-sm menu-btn" onClick={() => setOpen(!open)} aria-label="منو">
+          <button className="btn btn-secondary btn-sm menu-btn" onClick={toggleMenu} aria-label={hidden ? 'نمایش منو' : 'منو'} aria-expanded={!hidden} title={hidden ? 'نمایش منو' : 'بستن منو'}>
             ☰
           </button>
           <form
