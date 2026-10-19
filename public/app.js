@@ -8,6 +8,15 @@ import { icon } from './icons.js';
 import { jalaliPicker, formatJalaliDate, todayJalali, isoToJalali, MONTHS } from './jalali.js';
 
 // ---------------- utilities ----------------
+// Optional parts are written as `cond ? node : null`. The DOM would print a null/undefined/false
+// child as the text "null" etc., so these methods skip them everywhere.
+for (const proto of [Element.prototype, DocumentFragment.prototype]) {
+  for (const m of ['append', 'prepend', 'replaceChildren', 'before', 'after']) {
+    const orig = proto[m];
+    if (typeof orig !== 'function') continue;
+    proto[m] = function (...nodes) { return orig.apply(this, nodes.filter((n) => n != null && n !== false)); };
+  }
+}
 const $app = document.getElementById('app');
 const $tabs = document.getElementById('tabs');
 // The menus sit right under the header, whose height varies (notch, font size).
