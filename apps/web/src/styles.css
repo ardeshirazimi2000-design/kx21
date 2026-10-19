@@ -379,3 +379,8 @@ table.table { width: 100%; border-collapse: collapse; }
 .pres-card:fullscreen .pres-bar { color: #fff; }
 .pres-card:fullscreen .pres-stage { flex: 1; }
 .pres-card:fullscreen .pres-hint { display: none; }
+
+/* «بازگشت» above each page title */
+.back-btn { display: inline-flex; align-items: center; gap: 4px; background: none; border: 0; padding: 2px 0; margin-bottom: 4px; color: var(--muted); font: inherit; font-size: 0.85rem; cursor: pointer; }
+.back-btn:hover, .back-btn:focus-visible { color: var(--primary); }
+.back-btn:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; border-radius: 4px; }

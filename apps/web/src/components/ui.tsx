@@ -6,6 +6,7 @@ import {
   toPersianDigits,
 } from '@kx/shared';
 import { useEffect, useState, type ButtonHTMLAttributes, type ReactNode } from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
 import type { ApiError } from '../lib/api';
 import { JalaliPicker } from './JalaliPicker';
 
@@ -46,10 +47,34 @@ export function Card({ title, actions, children, className }: { title?: ReactNod
   );
 }
 
+/**
+ * «بازگشت»: the previous page in this tab, or — for a page opened directly (link, notification, new tab) —
+ * its parent page (/meetings/123 → /meetings, a top-level page → the dashboard).
+ */
+export function BackButton() {
+  const nav = useNavigate();
+  const loc = useLocation();
+  if (loc.pathname === '/') return null;
+  const back = () => {
+    const idx = (window.history.state as { idx?: number } | null)?.idx ?? 0;
+    if (idx > 0) nav(-1);
+    else nav(loc.pathname.split('/').filter(Boolean).slice(0, -1).join('/').replace(/^/, '/'));
+  };
+  return (
+    <button type="button" className="back-btn" onClick={back} aria-label="بازگشت به صفحه قبل" title="بازگشت به صفحه قبل">
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+        <path d="M6 3l5 5-5 5" />
+      </svg>
+      بازگشت
+    </button>
+  );
+}
+
 export function PageHeader({ title, subtitle, actions }: { title: ReactNode; subtitle?: ReactNode; actions?: ReactNode }) {
   return (
     <div className="page-head">
       <div>
+        <BackButton />
         <h1>{title}</h1>
         {subtitle && <p className="muted">{subtitle}</p>}
       </div>
