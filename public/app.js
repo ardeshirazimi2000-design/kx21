@@ -82,7 +82,8 @@ const urgencyPill = (u) => { const [t, c] = LABELS.urgency[u] ?? [u, '']; return
 // Web: same origin. Native app (Capacitor): the server address comes from the build
 // (config.js) or is entered once on the "server" screen and kept on the device.
 const IS_NATIVE = !!window.Capacitor?.isNativePlatform?.();
-let API_BASE = (store.get('api_base') ?? window.TELEHEALTH_API_BASE ?? '').replace(/\/$/, '');
+// A build with the server address built in always uses it (an older install may have saved the old IP).
+let API_BASE = (window.TELEHEALTH_API_BASE || store.get('api_base') || '').replace(/\/$/, '');
 const apiUrl = (path) => API_BASE + path;
 let session = store.get('session');
 let config = { dev_mode: false };
@@ -236,6 +237,10 @@ function renderChrome() {
   }
 }
 
+// The public website, shown in the app (login screen, home screen).
+const SITE = 'darman-plus.ir';
+const siteLink = () => h('a', { class: 'muted site-link', href: `https://${SITE}`, target: '_blank', rel: 'noopener' }, '🌐 ', h('bdi', {}, SITE));
+
 // Home-screen tile: a coloured icon with its label.
 const tile = (id, label, tone, onclick = () => route(id), sub = null) => h('button', { class: `svc tone-${tone}`, type: 'button', onclick },
   h('span', { class: 'svc-ic' }, icon(TAB_ICONS[id] ?? id, 30)), h('span', { class: 'svc-lbl' }, label), sub ? h('span', { class: 'svc-sub' }, sub) : null);
@@ -293,6 +298,7 @@ async function patientHome(me) {
         tile('prescriptions', 'نسخه‌ها', 'violet'),
         tile('records', 'مدارک پزشکی', 'amber'),
         tile('inbox', 'پیام‌ها', 'rose'))),
+    h('p', { class: 'muted', style: 'text-align:center' }, 'درمان پلاس — ', siteLink()),
   );
   // The next confirmed visit, if any, right on the home screen.
   const r = await api('GET', '/v1/appointments?limit=50').catch(() => ({ items: [] }));
@@ -323,7 +329,10 @@ VIEWS.login = () => {
     : h('p', { class: 'muted' }, delivery === 'voice'
       ? `تا لحظاتی دیگر با شماره ${fa(to)} تماس گرفته می‌شود و کد تأیید خوانده می‌شود.`
       : `کد تأیید ${to ? `به شماره ${fa(to)} ` : ''}پیامک شد.`));
-  const footer = () => (IS_NATIVE ? h('button', { class: 'btn small', onclick: () => route('server') }, `سرور: ${API_BASE.replace(/^https?:\/\//, '')} — تغییر`) : installButton());
+  // App builds with the server address built in only show the website; others can change the server.
+  const footer = () => h('div', { class: 'row', style: 'justify-content:space-between' },
+    IS_NATIVE ? (window.TELEHEALTH_API_BASE ? null : h('button', { class: 'btn small', onclick: () => route('server') }, `سرور: ${API_BASE.replace(/^https?:\/\//, '')} — تغییر`)) : installButton(),
+    siteLink());
 
   // Start screen: two entries, as in the requirements.
   const stepRole = () => {

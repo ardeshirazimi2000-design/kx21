@@ -448,3 +448,4 @@ body.has-bottomnav .chat { height: calc(100vh - 260px); }
 }
 .next-visit { border-inline-start: 4px solid var(--primary); }
 @media print { .tabs.nav-bottom, .tabs.nav-side, .icon-btn { display: none !important; } }
+.site-link { text-decoration: none; direction: ltr; }

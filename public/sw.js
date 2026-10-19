@@ -1,6 +1,6 @@
 // Service worker: caches the app shell so the PWA opens instantly and offline.
 // API calls (/v1) always go to the network — health data is never cached on the device.
-const CACHE = 'clinic-shell-v22';
+const CACHE = 'clinic-shell-v23';
 const SHELL = ['/', '/index.html', '/app.js', '/triage-wizard.js', '/jalali.js', '/ble-health.js', '/video-call.js', '/views-v2.js', '/icons.js', '/brand/mark-white.svg', '/config.js', '/styles.css', '/icon.svg', '/fonts/vazirmatn.css', '/fonts/vazirmatn-arabic-400-normal.woff2', '/fonts/vazirmatn-arabic-700-normal.woff2', '/manifest.webmanifest', '/icons/icon-192.png'];
 
 self.addEventListener('install', (e) => {

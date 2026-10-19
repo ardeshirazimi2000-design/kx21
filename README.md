@@ -121,7 +121,7 @@ curl -fsSL .../deploy/install.sh | DOMAIN=clinic.example.ir EMAIL=you@example.ir
 ```bash
 cd mobile
 npm install
-API_URL=https://clinic.example.ir npm run build:www   # آدرس سرور داخل اپ ثابت می‌شود (اختیاری)
+API_URL=https://darman-plus.ir npm run build:www   # آدرس سرور داخل اپ ثابت می‌شود (اختیاری)
 npx cap sync android
 cd android && ./gradlew assembleDebug                 # خروجی: app/build/outputs/apk/debug/app-debug.apk
 ```
