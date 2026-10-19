@@ -45,7 +45,7 @@ export default function ResolutionScreen() {
         <T>{r.text}</T>
         <T muted size={13}>{r.commission_name}{r.meeting_number ? ` — جلسه ${fa(r.meeting_number)}` : ''}</T>
         <T muted size={13}>مخاطب: {r.addressee ?? '—'} — مهلت: {r.due_date ? formatJalaliDate(`${r.due_date}T12:00:00`) : '—'}</T>
-        {r.kpi && <T muted size={13}>شاخص نتیجه: {r.kpi}</T>}
+        {r.kpi && <T muted size={13}>معیار انجام: {r.kpi}</T>}
         <ProgressBar value={r.progress} />
         <T muted size={12}>پیشرفت: {fa(r.progress)}٪</T>
       </Card>

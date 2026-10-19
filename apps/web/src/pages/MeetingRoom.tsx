@@ -16,6 +16,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { DocKind, UploadFiles, ViewButton } from '../components/docs';
 import { PresentationCard } from '../components/Presentation';
+import { KPI_HINT, KPI_LABEL } from './Resolutions';
 import { AgendaBadge, AttendanceBadge, MeetingStatusBadge, MinutesBadge, ResolutionBadge } from '../components/status';
 import { Badge, Button, Card, dateFa, dateTimeFa, Empty, ErrorBox, Field, fa, JalaliDateInput, JalaliDateTimeInput, Loading, Modal, PageHeader, Tabs } from '../components/ui';
 import { ApiError, del, download, get, patch, post, upload } from '../lib/api';
@@ -1067,8 +1068,8 @@ function NewResolutionModal({ m, vote, onClose, onSaved }: { m: any; vote?: any;
           </select>
         </Field>
       </div>
-      <Field label="شاخص نتیجه">
-        <input className="input" value={form.kpi} onChange={(e) => setForm({ ...form, kpi: e.target.value })} />
+      <Field label={KPI_LABEL} hint={KPI_HINT}>
+        <input className="input" value={form.kpi} onChange={(e) => setForm({ ...form, kpi: e.target.value })} placeholder="اختیاری" />
       </Field>
     </Modal>
   );

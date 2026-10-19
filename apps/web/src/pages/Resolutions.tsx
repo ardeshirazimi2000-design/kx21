@@ -85,6 +85,64 @@ export function ResolutionsPage() {
   );
 }
 
+export const KPI_LABEL = 'معیار انجام (شاخص نتیجه)';
+export const KPI_HINT = 'چه چیزی نشان می‌دهد مصوبه انجام شده است؟ مثلاً «ارائه گزارش با آمار ۵ کالای اصلی صادراتی در جلسه بعد» یا «دریافت پاسخ کتبی بانک مرکزی»';
+
+/** The resolution's measurable completion criterion, editable by the secretary while the resolution is open. */
+function KpiLine({ r, canEdit, onSaved }: { r: any; canEdit: boolean; onSaved: () => Promise<void> | void }) {
+  const [editing, setEditing] = useState(false);
+  const [value, setValue] = useState('');
+  const [err, setErr] = useState<Error | null>(null);
+  const [busy, setBusy] = useState(false);
+  const save = async () => {
+    setBusy(true);
+    setErr(null);
+    try {
+      await patch(`/resolutions/${r.id}`, { kpi: value.trim() });
+      setEditing(false);
+      await onSaved();
+    } catch (e) {
+      setErr(e as Error);
+    } finally {
+      setBusy(false);
+    }
+  };
+  if (editing)
+    return (
+      <li>
+        <ErrorBox error={err} />
+        <Field label={KPI_LABEL} hint={KPI_HINT}>
+          <textarea className="input" rows={2} value={value} onChange={(e) => setValue(e.target.value)} autoFocus />
+        </Field>
+        <div className="row gap-sm">
+          <Button size="sm" busy={busy} onClick={save}>
+            ذخیره
+          </Button>
+          <Button size="sm" variant="ghost" onClick={() => setEditing(false)}>
+            انصراف
+          </Button>
+        </div>
+      </li>
+    );
+  return (
+    <li title={KPI_HINT}>
+      {KPI_LABEL}: {r.kpi || '—'}{' '}
+      {canEdit && (
+        <Button
+          size="sm"
+          variant="ghost"
+          onClick={() => {
+            setValue(r.kpi ?? '');
+            setEditing(true);
+          }}
+        >
+          {r.kpi ? 'ویرایش' : 'تعیین'}
+        </Button>
+      )}
+    </li>
+  );
+}
+
 export function ResolutionDetailPage() {
   const { id } = useParams();
   const { data: r, error, reload } = useApi(`/resolutions/${id}`);
@@ -146,7 +204,7 @@ export function ResolutionDetailPage() {
             <li>
               اولویت: <PriorityBadge priority={r.priority} />
             </li>
-            <li>شاخص نتیجه: {r.kpi ?? '—'}</li>
+            <KpiLine r={r} canEdit={r.canManage && r.status !== 'done' && r.status !== 'cancelled'} onSaved={reload} />
             <li>
               پیشرفت: <Progress value={r.progress} />
             </li>
