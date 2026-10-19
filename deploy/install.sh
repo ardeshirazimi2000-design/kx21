@@ -99,7 +99,7 @@ if [ ! -x "$NODE_DIR/bin/node" ] || [ "$("$NODE_DIR/bin/node" -v)" != "v$NODE_VE
 fi
 ln -sf "$NODE_DIR/bin/node" /usr/local/bin/node
 ln -sf "$NODE_DIR/bin/npm" /usr/local/bin/npm
-echo "   node $(node -v)"
+echo "   node $("$NODE_DIR/bin/node" -v)"
 
 # ---------------------------------------------------------------- user + code
 id kx21 >/dev/null 2>&1 || useradd --system --home-dir "$DATA_DIR" --shell /sbin/nologin kx21
@@ -178,7 +178,13 @@ if [ -n "$APP_BIND" ]; then BIND="$APP_BIND"; upsert APP_BIND "$APP_BIND"; upser
 sed -i "s/^HOST=.*/HOST=$BIND/" "$ENV_FILE"
 
 # ---------------------------------------------------------------- TURN relay (video visits)
-PUBLIC_IP=$(curl -fsS --max-time 5 https://api.ipify.org 2>/dev/null || hostname -I | awk '{print $1}')
+# The address clients reach this server on. Outgoing traffic may leave through a different (NAT)
+# address, so prefer: PUBLIC_IP given on the command line or saved earlier > the domain's A record
+# > what an outside service sees.
+PUBLIC_IP="${PUBLIC_IP:-$(envget PUBLIC_IP)}"
+[ -z "$PUBLIC_IP" ] && [ -n "$DOMAIN" ] && PUBLIC_IP=$(getent ahostsv4 "$DOMAIN" 2>/dev/null | awk 'NR==1{print $1}')
+[ -n "$PUBLIC_IP" ] || PUBLIC_IP=$(curl -fsS --max-time 5 https://api.ipify.org 2>/dev/null || hostname -I | awk '{print $1}')
+upsert PUBLIC_IP "$PUBLIC_IP"
 if [ "$ENABLE_TURN" = "1" ]; then
   say "Setting up TURN relay (coturn) for video visits"
   if ! command -v turnserver >/dev/null; then
@@ -193,7 +199,9 @@ if [ "$ENABLE_TURN" = "1" ]; then
     sed -i '/^TURN_URLS=/d' "$ENV_FILE"
     echo "TURN_URLS=turn:$PUBLIC_IP:3478?transport=udp,turn:$PUBLIC_IP:3478?transport=tcp" >> "$ENV_FILE"
     CONF=/etc/turnserver.conf; [ -d /etc/coturn ] && CONF=/etc/coturn/turnserver.conf
+    TURN_MANAGED=0
     if [ ! -f "$CONF" ] || grep -q 'managed by kx21' "$CONF"; then
+      TURN_MANAGED=1
       cat > "$CONF" <<EOF
 # managed by kx21 installer — re-running the installer rewrites this file
 listening-port=3478
@@ -215,11 +223,22 @@ denied-peer-ip=127.0.0.0-127.255.255.255
 EOF
       chmod 640 "$CONF"; for g in coturn turnserver; do getent group $g >/dev/null && chgrp $g "$CONF" && break; done
       [ -f /etc/default/coturn ] && sed -i 's/^#*TURNSERVER_ENABLED=.*/TURNSERVER_ENABLED=1/' /etc/default/coturn
+    elif grep -q '^use-auth-secret' "$CONF" && grep -q '^static-auth-secret=' "$CONF"; then
+      # A coturn already set up by something else on this server: leave it untouched and share its
+      # secret, so video visits can use it too.
+      upsert TURN_SECRET "$(grep '^static-auth-secret=' "$CONF" | head -1 | cut -d= -f2-)"
+      P=$(grep -E '^listening-port=' "$CONF" | head -1 | cut -d= -f2); P=${P:-3478}
+      sed -i '/^TURN_URLS=/d' "$ENV_FILE"
+      echo "TURN_URLS=turn:$PUBLIC_IP:$P?transport=udp,turn:$PUBLIC_IP:$P?transport=tcp" >> "$ENV_FILE"
+      echo "   using the existing coturn ($CONF, port $P) and its secret; its configuration was not changed"
     else
-      echo "   $CONF exists and is not managed by this installer; set static-auth-secret=$TURN_SECRET yourself"
+      echo "   WARNING: $CONF is not managed by this installer and has no use-auth-secret/static-auth-secret;"
+      echo "            video relay will not authenticate. Add those two lines to it (see README) or remove it."
     fi
-    systemctl enable -q coturn 2>/dev/null || true
-    systemctl restart coturn 2>/dev/null || echo "   WARNING: coturn did not start (journalctl -u coturn)"
+    if [ "$TURN_MANAGED" = "1" ]; then
+      systemctl enable -q coturn 2>/dev/null || true
+      systemctl restart coturn 2>/dev/null || echo "   WARNING: coturn did not start (journalctl -u coturn)"
+    fi
     TURN_OK=1
   fi
 fi
@@ -360,7 +379,7 @@ fi
 sleep 2
 CHECK_HOST=127.0.0.1; [ "$BIND" = "0.0.0.0" ] || CHECK_HOST="$BIND"
 if curl -fsS "http://$CHECK_HOST:$PORT/healthz" >/dev/null; then
-  IP=$(curl -fsS --max-time 5 https://api.ipify.org 2>/dev/null || hostname -I | awk '{print $1}')
+  IP=$PUBLIC_IP
   say "Done ✔"
   if [ -n "$DOMAIN" ]; then echo "   Open: https://$DOMAIN   (DNS A record of $DOMAIN must point to $IP)"
   else echo "   Open: http://$IP:$PORT"; fi
