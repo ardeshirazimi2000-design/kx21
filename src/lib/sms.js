@@ -7,11 +7,36 @@
 //     SMS_APIIR_SERVICE=CallOTP instead reads the code to the user in a phone call (voice).
 // The phone number and the code are the only data sent.
 
-import { randomUUID } from 'node:crypto';
+import { request as httpsRequest } from 'node:https';
+import { request as httpRequest } from 'node:http';
 
 export class SmsError extends Error {}
 
-export function createSms(config, fetchImpl = globalThis.fetch) {
+// Plain HTTPS request with exactly the headers given — like curl. Node's built-in fetch adds
+// headers of its own (sec-fetch-mode, accept-language…), and the api.ir gateway answered such
+// requests with "Duplicate request: trackId already exists" while the same call from curl worked.
+export function plainFetch(url, { method = 'GET', headers = {}, body, signal } = {}) {
+  return new Promise((resolve, reject) => {
+    const data = body == null ? null : Buffer.from(body);
+    const u = new URL(url);
+    const req = (u.protocol === 'http:' ? httpRequest : httpsRequest)(u, {
+      method, signal, headers: { ...headers, ...(data ? { 'Content-Length': data.length } : {}) },
+    }, (res) => {
+      const chunks = [];
+      res.on('data', (c) => chunks.push(c));
+      res.on('end', () => {
+        const text = Buffer.concat(chunks).toString('utf8');
+        resolve({ status: res.statusCode, ok: res.statusCode >= 200 && res.statusCode < 300, text: async () => text, json: async () => JSON.parse(text) });
+      });
+      res.on('error', reject);
+    });
+    req.on('error', reject);
+    if (data) req.write(data);
+    req.end();
+  });
+}
+
+export function createSms(config, fetchImpl = plainFetch) {
   const provider = String(config.smsProvider ?? '').toLowerCase();
   const clean = (t) => String(t ?? '').trim().replace(/^["']|["']$/g, '').replace(/^bearer\s+/i, '').trim();
   const key = clean(config.smsApiKey || (provider === 'apiir' ? config.sapiToken : ''));
@@ -49,18 +74,15 @@ export function createSms(config, fetchImpl = globalThis.fetch) {
     return { id: String(r.body?.data?.messageId ?? r.body?.data?.packId ?? '') };
   }
 
-  // api.ir de-duplicates requests by a tracking id ("Duplicate request: trackId already exists"):
-  // every request carries a fresh one, in the body and as a header.
-  async function apiir(payload, retry = true) {
+  // Sent exactly as api.ir's own curl sample (see plainFetch).
+  async function apiir(payload) {
     const base = String(config.sapiBase || 'https://s.api.ir/api/sw1').replace(/\/$/, '');
-    const trackId = randomUUID().replace(/-/g, '');
     const r = await call(`${base}/${apiirService}`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', Accept: 'application/json', Authorization: `Bearer ${key}`, trackId },
-      body: JSON.stringify({ ...payload, trackId }),
+      headers: { 'Content-Type': 'application/json', Accept: '*/*', 'User-Agent': 'curl/8.5.0', Authorization: `Bearer ${key}` },
+      body: JSON.stringify(payload),
     });
     const b = r.body;
-    if (retry && /trackId/i.test(String(b?.message ?? ''))) return apiir(payload, false);
     // Same envelope as the Shahkar service: {data, success, code, message}.
     const ok = r.status >= 200 && r.status < 300 && b && b.success !== false && (b.code === undefined || b.code === 0);
     if (!ok) throw new SmsError(`api.ir ${r.status} ${b?.code ?? ''}: ${b?.message ?? ''}`.trim());

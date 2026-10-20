@@ -26,13 +26,9 @@ test('Kavenegar verify/lookup and SMS.ir send/verify requests', async () => {
   assert.equal(sm.delivery, 'sms');
   await sm.sendOtp('09120000000', '123456');
   assert.equal(calls.at(-1).url, 'https://s.api.ir/api/sw1/SmsOTP');
-  const { trackId: t1, ...smsBody } = JSON.parse(calls.at(-1).init.body);
-  assert.deepEqual(smsBody, { code: '123456', mobile: '09120000000', template: 1 });
-  // api.ir rejects a repeated tracking id: every request carries a fresh one (body and header).
-  assert.match(t1, /^[0-9a-f]{32}$/);
-  assert.equal(calls.at(-1).init.headers.trackId, t1);
-  await sm.sendOtp('09120000000', '654321');
-  assert.notEqual(JSON.parse(calls.at(-1).init.body).trackId, t1);
+  // Exactly api.ir's curl sample: body {code, mobile, template}, curl-like headers.
+  assert.deepEqual(JSON.parse(calls.at(-1).init.body), { code: '123456', mobile: '09120000000', template: 1 });
+  assert.deepEqual(Object.keys(calls.at(-1).init.headers).sort(), ['Accept', 'Authorization', 'Content-Type', 'User-Agent']);
   // api.ir CallOTP: the code is read out in a phone call.
   const ap = createSms({ smsProvider: 'apiir', smsApiirService: 'CallOTP', sapiToken: ' "Bearer TOK" ', sapiBase: 'https://s.api.ir/api/sw1' }, fake({ data: true, success: true, code: 0, message: '' }));
   assert.equal(ap.enabled, true);
@@ -41,8 +37,7 @@ test('Kavenegar verify/lookup and SMS.ir send/verify requests', async () => {
   const last = calls.at(-1);
   assert.equal(last.url, 'https://s.api.ir/api/sw1/CallOTP');
   assert.equal(last.init.headers.Authorization, 'Bearer TOK');
-  const { trackId: _t, ...callBody } = JSON.parse(last.init.body);
-  assert.deepEqual(callBody, { code: '12345', number: '09121112222' });
+  assert.deepEqual(JSON.parse(last.init.body), { code: '12345', number: '09121112222' });
   const apBad = createSms({ smsProvider: 'apiir', sapiToken: 'T' }, fake({ data: null, success: false, code: 402, message: 'اعتبار ناکافی' }));
   await assert.rejects(apBad.sendOtp('09121112222', '1'), /اعتبار ناکافی/);
 });
@@ -138,5 +133,27 @@ test('repeated code requests: one SMS per minute, concurrent taps rejected, fail
     assert.equal(v.body.mfa_required, true);
   } finally {
     t.close();
+  }
+});
+
+test('plainFetch sends only the headers it is given (nothing added like fetch does)', async () => {
+  const http = await import('node:http');
+  const { plainFetch } = await import('../src/lib/sms.js');
+  let seen;
+  const srv = http.createServer((req, res) => {
+    let b = ''; req.on('data', (c) => { b += c; });
+    req.on('end', () => { seen = { headers: req.headers, body: b }; res.end('{"success":true,"code":0}'); });
+  });
+  await new Promise((r) => srv.listen(0, '127.0.0.1', r));
+  try {
+    const r = await plainFetch(`http://127.0.0.1:${srv.address().port}/SmsOTP`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'User-Agent': 'curl/8.5.0' }, body: '{"a":1}' });
+    assert.equal(r.status, 200);
+    assert.deepEqual(await r.json(), { success: true, code: 0 });
+    assert.equal(seen.body, '{"a":1}');
+    assert.equal(seen.headers['user-agent'], 'curl/8.5.0');
+    assert.equal(seen.headers['sec-fetch-mode'], undefined);
+    assert.equal(seen.headers['accept-language'], undefined);
+  } finally {
+    srv.close();
   }
 });
