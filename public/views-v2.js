@@ -213,16 +213,19 @@ export function installV2(x) {
       durDefault.replaceChildren(...on.map((m) => h('option', { value: m, selected: m === cur }, `${fa(m)} دقیقه`)));
     };
     durBoxes.forEach((b) => { b.onchange = syncDefault; });
+    const joinEarly = h('select', {}, [0, 5, 10, 15, 20, 30].map((m) => h('option', { value: m, selected: m === (s.visit.join_early_min ?? 10) }, m ? `${fa(m)} دقیقه قبل از نوبت` : 'سر ساعت نوبت')));
     syncDefault();
     x.$app.append(h('div', { class: 'card stack' },
       h('h2', {}, 'مدت زمان ویزیت'),
       h('p', { class: 'muted' }, 'پزشکان هنگام انتشار تقویم فقط از مدت‌های انتخاب‌شده می‌توانند استفاده کنند. اگر فقط یک مدت انتخاب کنید، همه نوبت‌ها با همان مدت ساخته می‌شوند. نوبت‌های قبلاً منتشرشده تغییر نمی‌کنند.'),
       h('div', { class: 'row', style: 'flex-wrap:wrap;gap:6px 16px' }, durBoxes.map((b) => h('label', { class: 'row', style: 'gap:6px;align-items:center' }, b, `${fa(b.value)} دقیقه`))),
       h('div', {}, h('label', {}, 'مدت پیش‌فرض'), durDefault),
+      h('div', {}, h('label', {}, 'باز شدن اتاق ویزیت'), joinEarly,
+        h('p', { class: 'muted small' }, 'بیمار و پزشک از این زمان تا ۳۰ دقیقه بعد از پایان نوبت می‌توانند وارد اتاق ویزیت شوند. در همین زمان برای هر دو اعلان «اتاق ویزیت باز شد» ارسال می‌شود؛ یک ساعت قبل هم یادآوری ارسال می‌شود.')),
       h('button', { class: 'btn primary', onclick: guard(async () => {
         const durations = durBoxes.filter((b) => b.checked).map((b) => Number(b.value));
         if (!durations.length) { toast('حداقل یک مدت را انتخاب کنید'); return; }
-        await api('PUT', '/v1/admin/settings', { visit: { durations, default: Number(durDefault.value) } });
+        await api('PUT', '/v1/admin/settings', { visit: { durations, default: Number(durDefault.value), join_early_min: Number(joinEarly.value) } });
         toast('مدت زمان ویزیت ذخیره شد');
       }) }, 'ذخیره مدت ویزیت')));
     const inputs = Object.fromEntries(Object.keys(s.tariffs).map((k) => [k, h('input', { type: 'number', min: 0, step: 1000, value: Math.round(s.tariffs[k] / 10) })]));

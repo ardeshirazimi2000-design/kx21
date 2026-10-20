@@ -84,7 +84,8 @@ export function loadConfig(env = process.env) {
     visionLlmBaseUrl: env.VISION_LLM_BASE_URL || '',
     visionLlmModel: env.VISION_LLM_MODEL || 'qwen2.5-vl-7b-instruct',
     disableSweeper: false,
-    enforceJoinWindow: env.ENFORCE_JOIN_WINDOW === 'true',
+    // Visit room opens only around the appointment time (production default; ENFORCE_JOIN_WINDOW=false turns it off).
+    enforceJoinWindow: env.ENFORCE_JOIN_WINDOW ? env.ENFORCE_JOIN_WINDOW === 'true' : !devMode,
     streamDelayMs: Number(env.STREAM_DELAY_MS ?? 12),
     logNotifications: env.LOG_NOTIFICATIONS !== 'false',
     smsProvider: env.SMS_PROVIDER || '',
@@ -121,7 +122,7 @@ export function createApp(overrides = {}) {
   domain.drugCatalog = drugCatalog.createDrugCatalog({ db });
   domain.patient = patient.createPatientDomain({ db, keys, files: () => domain.files });
   domain.payments = payments.createPaymentsDomain({ db, platform, config });
-  domain.appointment = appointment.createAppointmentDomain({ db, platform, patientDomain: domain.patient, payments: domain.payments });
+  domain.appointment = appointment.createAppointmentDomain({ db, platform, config, patientDomain: domain.patient, payments: domain.payments });
   const deps = { db, keys, platform, config, limiter, domain };
 
   auth.register(router, deps);

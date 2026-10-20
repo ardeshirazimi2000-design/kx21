@@ -8,12 +8,22 @@ import { canonical, sha256 } from '../lib/crypto.js';
 import { formatFaDateTime } from '../lib/fa.js';
 import { requireUser } from './auth.js';
 import { SPECIALTIES } from './patient.js';
-import { getVisitSettings } from '../lib/visit-settings.js';
+import { getVisitSettings, JOIN_LATE_MIN } from '../lib/visit-settings.js';
 
 const CHANNELS = ['video', 'audio', 'chat'];
 const MAX_SLOTS_PER_REQUEST = 64;
 
-export function createAppointmentDomain({ db, platform, patientDomain, payments = null }) {
+export function createAppointmentDomain({ db, platform, config = {}, patientDomain, payments = null }) {
+  // When the visit room may be entered: from N minutes before the start to 30 minutes after the end.
+  function joinWindow(tenantId, slot) {
+    if (!slot) return null;
+    const early = getVisitSettings(db, tenantId).join_early_min;
+    return {
+      opens_at: new Date(Date.parse(slot.starts_at) - early * 60000).toISOString(),
+      closes_at: new Date(Date.parse(slot.ends_at) + JOIN_LATE_MIN * 60000).toISOString(),
+      enforced: !!config.enforceJoinWindow,
+    };
+  }
   const slotView = (s) => ({ id: s.id, doctor_id: s.doctor_id, starts_at: s.starts_at, ends_at: s.ends_at });
 
   // Free future slots, optionally filtered by doctor or specialty. Used by the REST API and
@@ -49,6 +59,8 @@ export function createAppointmentDomain({ db, platform, patientDomain, payments 
       status: a.status, channel: a.channel, booked_via: a.booked_via, triage_result_id: a.triage_result_id,
       created_at: a.created_at,
       starts_at: slot?.starts_at, ends_at: slot?.ends_at,
+      join: joinWindow(a.tenant_id, slot),
+      cancel_reason: a.cancel_reason ?? null, cancelled_by: a.cancelled_by ?? null,
       doctor: doc && { id: doc.id, full_name: doc.full_name, specialty: doc.specialty, specialty_label: SPECIALTIES[doc.specialty] },
       consultation: consultation ?? null,
       payment_due_at: a.payment_due_at ?? null,
@@ -144,14 +156,56 @@ export function createAppointmentDomain({ db, platform, patientDomain, payments 
 
   function cancel(ctx, appt, reason = null) {
     if (!['pending', 'confirmed'].includes(appt.status)) throw conflict('این نوبت قابل لغو نیست', 'invalid_status');
-    db.run(`UPDATE appointments SET status = 'cancelled', updated_at = ? WHERE id = ?`, nowIso(), appt.id);
-    platform.audit(ctx, 'appointment.cancel', `appointment:${appt.id}`, { reason });
+    const by = ctx.user?.role ?? 'system';
+    reason = reason == null ? null : String(reason).trim().slice(0, 300) || null;
+    // A doctor cancelling a patient's visit must say why; the patient is told.
+    if (by === 'doctor' && reason !== 'rescheduled' && (!reason || reason.length < 3)) {
+      throw badRequest('دلیل لغو نوبت را بنویسید؛ برای بیمار ارسال می‌شود', 'cancel_reason_required');
+    }
+    db.run(`UPDATE appointments SET status = 'cancelled', cancel_reason = ?, cancelled_by = ?, updated_at = ? WHERE id = ?`, reason, by, nowIso(), appt.id);
+    platform.audit(ctx, 'appointment.cancel', `appointment:${appt.id}`, { reason, by });
+    // Paid visit: the money has to go back (refunds are made by the clinic; admins are told).
+    const paid = db.get(`SELECT id, ref_number FROM payments WHERE purpose = 'appointment' AND ref_id = ? AND status = 'paid'`, appt.id);
+    if (paid) {
+      db.run(`UPDATE payments SET status = 'refund_required' WHERE id = ?`, paid.id);
+      for (const ad of db.all(`SELECT id, phone FROM users WHERE tenant_id = ? AND role = 'admin' AND deleted_at IS NULL`, appt.tenant_id)) {
+        platform.notify(ctx, { userId: ad.id, channel: 'push', target: ad.phone, body: `نوبت پرداخت‌شده لغو شد (پرداخت ${paid.ref_number ?? ''})؛ بازگشت وجه به بیمار لازم است.` });
+      }
+    }
     const slot = db.get('SELECT starts_at FROM slots WHERE id = ?', appt.slot_id);
     platform.publish(ctx, 'appointment.cancelled', {
       appointment_id: appt.id, patient_id: appt.patient_id, doctor_id: appt.doctor_id, starts_at: slot?.starts_at,
-      cancelled_by: ctx.user?.role ?? 'system',
+      cancelled_by: by, reason, refund: !!paid,
     });
   }
+
+  // Reminders before the visit (in-app notification for both sides; SMS too when a sender line is set).
+  function remind() {
+    const now = Date.now();
+    const rows = db.all(
+      `SELECT a.*, s.starts_at FROM appointments a JOIN slots s ON s.id = a.slot_id
+       WHERE a.status = 'confirmed' AND s.starts_at > ? AND s.starts_at <= ? AND (a.reminded_60_at IS NULL OR a.reminded_room_at IS NULL)`,
+      new Date(now - 5 * 60000).toISOString(), new Date(now + 61 * 60000).toISOString(),
+    );
+    for (const a of rows) {
+      const ctx = { tenantId: a.tenant_id, user: null };
+      const p = userOfPatient(a.patient_id);
+      const d = userOfDoctor(a.doctor_id);
+      const left = Math.round((Date.parse(a.starts_at) - now) / 60000);
+      const when = formatFaDateTime(a.starts_at);
+      const early = getVisitSettings(db, a.tenant_id).join_early_min;
+      if (!a.reminded_room_at && left <= Math.max(early, 1)) {
+        db.run('UPDATE appointments SET reminded_room_at = ?, reminded_60_at = COALESCE(reminded_60_at, ?) WHERE id = ?', nowIso(), nowIso(), a.id);
+        if (p) platform.notify(ctx, { userId: p.id, channel: 'sms', target: p.phone, body: `اتاق ویزیت شما با ${d?.full_name ?? 'پزشک'} باز شد (${when}). از «نوبت‌ها» وارد شوید.` });
+        if (d) platform.notify(ctx, { userId: d.id, channel: 'push', target: d.phone, body: `اتاق ویزیت با ${p?.full_name ?? 'بیمار'} باز شد (${when}).` });
+      } else if (!a.reminded_60_at && left > Math.max(early, 1)) {
+        db.run('UPDATE appointments SET reminded_60_at = ? WHERE id = ?', nowIso(), a.id);
+        if (p) platform.notify(ctx, { userId: p.id, channel: 'sms', target: p.phone, body: `یادآوری: ویزیت شما با ${d?.full_name ?? 'پزشک'} حدود ${left} دقیقه دیگر (${when}).` });
+        if (d) platform.notify(ctx, { userId: d.id, channel: 'push', target: d.phone, body: `یادآوری: ویزیت ${p?.full_name ?? 'بیمار'} حدود ${left} دقیقه دیگر (${when}).` });
+      }
+    }
+  }
+  if (!config.disableSweeper) setInterval(() => { try { remind(); } catch (e) { console.error('[reminders]', e.message); } }, 60_000).unref();
 
   // Notification module: subscribes to appointment events.
   const userOfPatient = (pid) => db.get('SELECT u.id, u.phone, u.full_name FROM patients p JOIN users u ON u.id = p.user_id WHERE p.id = ?', pid);
@@ -168,11 +222,14 @@ export function createAppointmentDomain({ db, platform, patientDomain, payments 
     const p = userOfPatient(e.patient_id);
     const d = userOfDoctor(e.doctor_id);
     const when = e.starts_at ? formatFaDateTime(e.starts_at) : '';
-    if (p) platform.notify(ctx, { userId: p.id, channel: 'sms', target: p.phone, body: `نوبت ${when} لغو شد.` });
-    if (d) platform.notify(ctx, { userId: d.id, channel: 'push', target: d.phone, body: `نوبت ${when} (${p?.full_name ?? 'بیمار'}) لغو شد.` });
+    if (e.reason === 'rescheduled') return;
+    const why = e.reason ? ` دلیل: ${e.reason}` : '';
+    const refund = e.refund ? ' هزینه پرداختی شما بازگردانده می‌شود.' : '';
+    if (p) platform.notify(ctx, { userId: p.id, channel: 'sms', target: p.phone, body: e.cancelled_by === 'doctor' ? `نوبت ${when} با ${d?.full_name ?? 'پزشک'} توسط پزشک لغو شد.${why}${refund}` : `نوبت ${when} لغو شد.${refund}` });
+    if (d) platform.notify(ctx, { userId: d.id, channel: 'push', target: d.phone, body: `نوبت ${when} (${p?.full_name ?? 'بیمار'}) لغو شد${e.cancelled_by === 'patient' ? ' (توسط بیمار)' : ''}.` });
   });
 
-  return { checkAvailability, book, cancel, appointmentView };
+  return { checkAvailability, book, cancel, appointmentView, remind, joinWindow };
 }
 
 export function register(router, { db, platform, domain }) {
@@ -208,7 +265,7 @@ export function register(router, { db, platform, domain }) {
        FROM slots s WHERE s.doctor_id = ? AND s.ends_at > ? ORDER BY s.starts_at LIMIT 300`,
       ctx.user.did, nowIso(),
     );
-    return { body: { items: rows.map((s) => ({ id: s.id, starts_at: s.starts_at, ends_at: s.ends_at, booked: !!s.appointment_id })), visit: getVisitSettings(db, ctx.tenantId) } };
+    return { body: { items: rows.map((s) => ({ id: s.id, starts_at: s.starts_at, ends_at: s.ends_at, booked: !!s.appointment_id, appointment_id: s.appointment_id ?? null })), visit: getVisitSettings(db, ctx.tenantId) } };
   });
 
   const requireApprovedDoctor = (ctx) => {

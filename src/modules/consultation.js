@@ -6,13 +6,13 @@ import { uuid, nowIso, parseJson, isUniqueViolation } from '../lib/db.js';
 import crypto from 'node:crypto';
 import { signJwt, signPayload, verifyPayload, canonical, sha256 } from '../lib/crypto.js';
 import { requireUser } from './auth.js';
+import { formatFaDateTime } from '../lib/fa.js';
 import { checkPrescription, unknownDrugs, DRUG_KB_VERSION } from './rx/drug-kb.js';
 import { icdByCode } from './rx/icd10.js';
 
-const JOIN_EARLY_MIN = 15;
-const JOIN_LATE_MIN = 60;
 
 export function register(router, { db, keys, platform, config, domain }) {
+  const joinNotified = new Map();
   const loadConsultation = (ctx, id) => {
     requireUuid(id, 'id');
     const c = db.get(
@@ -34,11 +34,24 @@ export function register(router, { db, keys, platform, config, domain }) {
     if (c.appointment_status !== 'confirmed') throw conflict('این نوبت فعال نیست', 'appointment_not_active');
     const slot = db.get('SELECT starts_at, ends_at FROM slots WHERE id = ?', c.slot_id);
     const now = Date.now();
-    if (config.enforceJoinWindow) {
-      if (now < Date.parse(slot.starts_at) - JOIN_EARLY_MIN * 60000) {
-        throw conflict(`ورود به اتاق از ${JOIN_EARLY_MIN} دقیقه قبل از نوبت ممکن است`, 'too_early');
+    const win = domain.appointment.joinWindow(ctx.tenantId, slot);
+    if (config.enforceJoinWindow && win) {
+      if (now < Date.parse(win.opens_at)) {
+        const mins = Math.ceil((Date.parse(win.opens_at) - now) / 60000);
+        throw conflict(`اتاق ویزیت ${mins > 90 ? `در ${formatFaDateTime(win.opens_at)}` : `${mins} دقیقه دیگر`} باز می‌شود`, 'too_early');
       }
-      if (now > Date.parse(slot.ends_at) + JOIN_LATE_MIN * 60000) throw conflict('زمان این ویزیت گذشته است', 'too_late');
+      if (now > Date.parse(win.closes_at)) throw conflict('زمان این ویزیت گذشته است', 'too_late');
+    }
+    // Tell the other side that this person is in the room (at most once every 10 minutes).
+    const key = `${c.id}:${ctx.user.role}`;
+    if (!(joinNotified.get(key) > now - 10 * 60000)) {
+      joinNotified.set(key, now);
+      const other = c.isDoctor
+        ? db.get('SELECT u.id, u.phone FROM patients p JOIN users u ON u.id = p.user_id WHERE p.id = ?', c.patient_id)
+        : db.get('SELECT u.id, u.phone FROM doctors d JOIN users u ON u.id = d.user_id WHERE d.id = ?', c.doctor_id);
+      if (other) {
+        platform.notify(ctx, { userId: other.id, channel: 'push', target: other.phone, body: c.isDoctor ? 'پزشک وارد اتاق ویزیت شد؛ از «نوبت‌ها» وارد شوید.' : 'بیمار وارد اتاق ویزیت شد.' });
+      }
     }
     if (!c.started_at) {
       db.run('UPDATE consultations SET started_at = ? WHERE id = ? AND started_at IS NULL', nowIso(), c.id);

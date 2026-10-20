@@ -201,18 +201,49 @@ function navFor(u) {
 }
 
 // Unread messages: notifications newer than the last time the inbox was opened (kept on the device).
-const badge = { count: 0, at: 0 };
+const badge = { count: 0, at: 0, newest: null };
 const seenKey = () => `inbox_seen:${session?.user?.id}`;
 async function refreshBadge(force = false) {
-  if (!session || (!force && Date.now() - badge.at < 60_000)) return;
+  if (!session || (!force && Date.now() - badge.at < 25_000)) return;
   badge.at = Date.now();
   try {
     const r = await api('GET', '/v1/notifications');
     const seen = store.get(seenKey(), '');
     badge.count = r.items.filter((n) => n.created_at > seen).length;
     paintBadge();
+    // Something new since the last check (not on the first check after opening the app): show it.
+    const fresh = badge.newest ? r.items.filter((n) => n.created_at > badge.newest) : [];
+    if (r.items[0]) badge.newest = r.items[0].created_at;
+    else if (!badge.newest) badge.newest = new Date().toISOString();
+    if (fresh.length && current.view !== 'inbox') announce(fresh);
   } catch { /* offline */ }
 }
+// New notifications: an on-screen message, plus a system notification when the user allowed it
+// (browser / installed web app; inside the Android app the on-screen message is shown).
+function announce(items) {
+  const first = items[0].body;
+  toast(items.length > 1 ? `${fa(items.length)} اعلان جدید — ${first}` : `🔔 ${first}`);
+  if (typeof Notification !== 'undefined' && Notification.permission === 'granted' && document.visibilityState !== 'visible') {
+    for (const n of items.slice(0, 3)) {
+      try { new Notification('درمان پلاس', { body: n.body, icon: 'icons/icon-192.png', tag: n.id }); } catch { /* not allowed here */ }
+    }
+  }
+}
+const canNotify = () => typeof Notification !== 'undefined' && !IS_NATIVE;
+function notifyPermissionCard() {
+  if (!canNotify() || Notification.permission === 'granted') return null;
+  const card = h('div', { class: 'card row' }, h('span', { class: 'svc-ic tone-rose' }, icon('bell', 24)),
+    h('div', { class: 'grow' }, h('b', {}, 'اعلان‌ها روی این دستگاه'),
+      h('div', { class: 'muted' }, Notification.permission === 'denied'
+        ? 'اعلان‌ها در تنظیمات مرورگر برای این سایت بسته شده‌اند؛ برای دریافت یادآوری ویزیت آن را باز کنید.'
+        : 'یادآوری ویزیت، باز شدن اتاق ویزیت و پیام‌ها را حتی وقتی صفحه باز نیست دریافت کنید.')),
+    Notification.permission === 'denied' ? null : h('button', { class: 'btn primary small', onclick: guard(async () => {
+      const r = await Notification.requestPermission();
+      if (r === 'granted') { toast('اعلان‌ها فعال شد'); card.remove(); } else toast('اجازه اعلان داده نشد', true);
+    }) }, 'فعال‌سازی'));
+  return card;
+}
+setInterval(() => refreshBadge(), 30_000);
 function paintBadge() {
   const b = document.getElementById('bell-count');
   if (b) { b.textContent = badge.count > 9 ? '۹+' : fa(badge.count); b.hidden = !badge.count; }
@@ -299,6 +330,7 @@ async function patientHome(me) {
       h('span', { class: 'hb-text' }, h('b', {}, 'سلامت، همیشه در دسترس'), h('span', {}, 'علائم خود را با دستیار هوشمند در میان بگذارید؛ در صورت نیاز همان‌جا نوبت ویزیت بگیرید.'), h('span', { class: 'hb-cta' }, 'شروع گفتگو ←')),
       h('span', { class: 'hb-art' }, h('img', { src: 'brand/mark-white.svg', alt: '', width: 84, height: 84 }))),
     next,
+    notifyPermissionCard(),
     h('div', { class: 'card' }, h('h3', {}, 'خدمات'),
       h('div', { class: 'svc-grid' },
         tile('book', 'ویزیت با پزشک', 'blue'),
@@ -321,7 +353,7 @@ async function patientHome(me) {
           h('b', {}, a.doctor?.full_name ?? ''), ' ', h('span', { class: 'muted' }, a.doctor?.specialty_label ?? ''), h('br'),
           h('span', {}, fmt.dt(a.starts_at)), ' · ', h('span', { class: 'muted' }, LABELS.channel[a.channel])),
         a.status === 'confirmed'
-          ? h('button', { class: 'btn primary small', onclick: () => route('room', a.consultation.id) }, 'ورود به اتاق ویزیت')
+          ? joinButton(a)
           : h('button', { class: 'btn small', onclick: () => route('appointments') }, 'مشاهده'))));
   }
 }
@@ -710,18 +742,54 @@ VIEWS.book = async () => {
 };
 
 // ---------- appointments ----------
+// "Enter the visit room": active only from the room's opening time (set by the admin) until
+// shortly after the visit; before that it shows when it opens and switches on by itself.
+function joinButton(a, cls = 'btn primary small') {
+  const btn = h('button', { class: cls, onclick: () => route('room', a.consultation.id) }, 'ورود به اتاق ویزیت');
+  const w = a.join;
+  if (!w?.enforced) return btn;
+  const now = Date.now();
+  if (now > Date.parse(w.closes_at)) return h('span', { class: 'muted small' }, 'زمان ویزیت گذشته است');
+  const opens = Date.parse(w.opens_at);
+  if (now < opens) {
+    btn.disabled = true;
+    btn.className = cls.replace('primary', '');
+    btn.textContent = `اتاق ویزیت ${tehranDayKey(w.opens_at) === tehranDayKey(new Date()) ? `ساعت ${fmt.time(w.opens_at)}` : fmt.dt(w.opens_at)} باز می‌شود`;
+    if (opens - now < 6 * 3600e3) {
+      const id = setTimeout(() => { btn.disabled = false; btn.className = cls; btn.textContent = 'ورود به اتاق ویزیت'; toast('اتاق ویزیت باز شد'); }, opens - now + 500);
+      onCleanup(() => clearTimeout(id));
+    }
+  }
+  return btn;
+}
+
+// Cancel a visit. A doctor must give a reason, which is sent to the patient.
+function cancelAppointment(a, role, after = () => route(current.view)) {
+  const reason = h('textarea', { rows: 3, maxlength: 300, placeholder: role === 'doctor' ? 'مثلاً: شرایط اضطراری؛ لطفاً نوبت دیگری بگیرید' : 'اختیاری' });
+  const box = h('div', { class: 'wizard-overlay', role: 'dialog', 'aria-modal': 'true' }, h('div', { class: 'card pay-box stack' },
+    h('h2', {}, 'لغو نوبت'),
+    h('p', { class: 'muted' }, role === 'doctor'
+      ? 'دلیل لغو برای بیمار پیامک/اعلان می‌شود. اگر بیمار هزینه را پرداخت کرده باشد، بازگشت وجه به مدیر اطلاع داده می‌شود.'
+      : 'نوبت آزاد می‌شود و به پزشک اطلاع داده می‌شود.'),
+    h('label', {}, role === 'doctor' ? 'دلیل لغو (الزامی)' : 'دلیل لغو'), reason,
+    h('div', { class: 'row' },
+      h('button', { class: 'btn danger', onclick: guard(async () => {
+        if (role === 'doctor' && reason.value.trim().length < 3) return toast('دلیل لغو را بنویسید', true);
+        await api('POST', `/v1/appointments/${a.id}/cancel`, { reason: reason.value.trim() || null });
+        box.remove(); toast('نوبت لغو شد'); after();
+      }) }, 'لغو نوبت'),
+      h('button', { class: 'btn', onclick: () => box.remove() }, 'انصراف'))));
+  document.body.append(box);
+  reason.focus();
+}
+
 function appointmentItem(a, role) {
   const actions = [];
   if (a.status === 'confirmed') {
-    actions.push(h('button', { class: 'btn primary small', onclick: () => route('room', a.consultation.id) }, 'ورود به اتاق ویزیت'));
-    actions.push(h('button', {
-      class: 'btn danger small', onclick: guard(async () => {
-        if (!confirm('نوبت لغو شود؟')) return;
-        await api('POST', `/v1/appointments/${a.id}/cancel`, {});
-        toast('نوبت لغو شد'); route(current.view);
-      }),
-    }, 'لغو'));
+    actions.push(joinButton(a));
+    actions.push(h('button', { class: 'btn danger small', onclick: () => cancelAppointment(a, role) }, 'لغو نوبت'));
   }
+  if (a.status === 'pending' && role === 'doctor') actions.push(h('button', { class: 'btn danger small', onclick: () => cancelAppointment(a, role) }, 'لغو نوبت'));
   if (a.status === 'completed' && role === 'doctor') actions.push(h('button', { class: 'btn small', onclick: () => route('room', a.consultation.id) }, a.summary_ready ? 'پرونده ویزیت' : '📝 خلاصه ویزیت (پیش‌نویس)'));
   if (a.status === 'completed' && role === 'patient' && a.summary_ready) actions.push(h('button', { class: 'btn primary small', onclick: () => route('summary', a.consultation.id) }, '📝 خلاصه ویزیت'));
   if (role === 'patient' && ['pending', 'confirmed'].includes(a.status)) actions.push(h('button', { class: 'btn small', onclick: () => route('records') }, '📎 ارسال مدرک'));
@@ -731,7 +799,9 @@ function appointmentItem(a, role) {
       h('span', { class: 'muted' }, role === 'doctor' ? '' : a.doctor?.specialty_label), h('br'),
       h('span', {}, fmt.dt(a.starts_at)), ' · ', h('span', { class: 'muted' }, LABELS.channel[a.channel]),
       a.booked_via === 'ai_assistant' ? h('span', { class: 'pill info', style: 'margin-inline-start:6px' }, 'رزرو با دستیار') : null,
-      a.triage ? h('span', { style: 'margin-inline-start:6px' }, urgencyPill(a.triage.urgency_level)) : null),
+      a.triage ? h('span', { style: 'margin-inline-start:6px' }, urgencyPill(a.triage.urgency_level)) : null,
+      a.status === 'cancelled' && a.cancelled_by && a.cancel_reason !== 'rescheduled'
+        ? h('div', { class: 'muted small' }, `لغو توسط ${{ doctor: 'پزشک', patient: 'بیمار', admin: 'مدیر', operator: 'اپراتور' }[a.cancelled_by] ?? 'سامانه'}${a.cancel_reason ? ` — دلیل: ${a.cancel_reason}` : ''}`) : null),
     statusPill(a.status), ...actions));
 }
 
@@ -747,6 +817,7 @@ VIEWS['doctor-appointments'] = async () => {
   const upcoming = r.items.filter((a) => a.status === 'confirmed').sort((a, b) => a.starts_at.localeCompare(b.starts_at));
   const past = r.items.filter((a) => a.status !== 'confirmed');
   $app.append(
+    notifyPermissionCard(),
     h('div', { class: 'card' }, h('h2', {}, 'نوبت‌های پیش رو'),
       upcoming.length ? h('ul', { class: 'list' }, upcoming.map((a) => appointmentItem(a, 'doctor'))) : h('div', { class: 'empty' }, 'نوبت فعالی ندارید.')),
     h('div', { class: 'card' }, h('h2', {}, 'سابقه'),
@@ -905,6 +976,7 @@ VIEWS.inbox = async () => {
   const r = await api('GET', '/v1/notifications');
   if (r.items[0]) store.set(seenKey(), r.items[0].created_at);
   badge.count = 0; paintBadge();
+  $app.append(notifyPermissionCard());
   const icon = { sms: '✉️ پیامک', email: '📧 ایمیل', push: '🔔 اعلان' };
   $app.append(h('div', { class: 'card' }, h('h2', {}, 'پیام‌ها و اعلان‌ها'),
     h('p', { class: 'muted' }, 'در محیط آزمایشی، پیامک‌ها به‌جای ارسال واقعی اینجا نمایش داده می‌شوند.'),
@@ -985,23 +1057,80 @@ VIEWS.calendar = async () => {
     for (const s of r.items) { const k = tehranDayKey(s.starts_at); if (!days.has(k)) days.set(k, []); days.get(k).push(s); }
     list.replaceChildren(...[...days.values()].map((slots) => h('div', {}, h('div', { class: 'day-title' }, fmt.day(slots[0].starts_at)),
       h('div', { class: 'slots' }, slots.map((s) => h('div', { class: 'slot', style: s.booked ? 'border-color:var(--primary)' : '' },
-        fmt.time(s.starts_at), h('small', {}, s.booked ? 'رزروشده' : h('button', {
-          class: 'btn small', onclick: guard(async () => { await api('DELETE', `/v1/doctors/me/slots/${s.id}`); load(); }),
-        }, 'حذف'))))))));
+        fmt.time(s.starts_at), h('small', {}, s.booked
+          ? h('button', { class: 'btn small danger', title: 'لغو نوبت بیمار', onclick: () => cancelAppointment({ id: s.appointment_id }, 'doctor', load) }, 'رزروشده · لغو')
+          : h('button', { class: 'btn small', onclick: guard(async () => { await api('DELETE', `/v1/doctors/me/slots/${s.id}`); load(); }) }, 'حذف'))))))));
     if (!r.items.length) list.append(h('div', { class: 'empty' }, 'زمانی منتشر نشده است.'));
   };
+  // Repeat on weekdays (Saturday first, as in the Iranian week) for a number of weeks.
+  const WEEKDAYS = [[6, 'شنبه'], [0, 'یکشنبه'], [1, 'دوشنبه'], [2, 'سه‌شنبه'], [3, 'چهارشنبه'], [4, 'پنجشنبه'], [5, 'جمعه']];
+  const repeat = h('select', {}, [[0, 'فقط همین روز'], [1, 'تا ۱ هفته'], [2, 'تا ۲ هفته'], [4, 'تا ۴ هفته'], [8, 'تا ۸ هفته']].map(([v, l]) => h('option', { value: v }, l)));
+  const dayBoxes = WEEKDAYS.map(([d]) => h('input', { type: 'checkbox', value: d }));
+  const daysRow = h('div', { class: 'row', style: 'gap:4px 14px;flex-wrap:wrap' }, WEEKDAYS.map(([, l], i) => h('label', { class: 'row', style: 'gap:4px' }, dayBoxes[i], l)));
+  const weekdayOf = (key) => new Date(`${key}T12:00:00Z`).getUTCDay();
+  // The days to publish: the chosen date, plus the ticked weekdays in the following weeks.
+  const targetDays = () => {
+    const weeks = Number(repeat.value);
+    if (!weeks) return [date.value];
+    const want = new Set(dayBoxes.filter((b) => b.checked).map((b) => Number(b.value)));
+    want.add(weekdayOf(date.value));
+    const out = [];
+    for (let i = 0; i < weeks * 7; i++) {
+      const k = new Date(Date.parse(`${date.value}T12:00:00Z`) + i * 864e5).toISOString().slice(0, 10);
+      if (want.has(weekdayOf(k))) out.push(k);
+    }
+    return out;
+  };
+  // Live preview: how many visits the range makes, and at what times.
+  const preview = h('div', { class: 'banner info small' });
+  const slotTimes = () => {
+    const [fh, fm] = from.value.split(':').map(Number);
+    const [th, tm] = to.value.split(':').map(Number);
+    const total = (th * 60 + tm) - (fh * 60 + fm);
+    const d = Number(dur.value);
+    const n = total > 0 ? Math.floor(total / d) : 0;
+    return { total, d, n, times: Array.from({ length: n }, (_, i) => { const m = fh * 60 + fm + i * d; return `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`; }), rest: total > 0 ? total % d : 0 };
+  };
+  const showPreview = () => {
+    daysRow.style.display = Number(repeat.value) ? '' : 'none';
+    const p = slotTimes();
+    if (p.total <= 0) { preview.className = 'banner warn small'; preview.textContent = 'ساعت پایان باید بعد از ساعت شروع باشد.'; return; }
+    const days = targetDays().length;
+    preview.className = `banner ${p.n ? 'info' : 'warn'} small`;
+    preview.replaceChildren(
+      h('b', {}, `${fa(Math.floor(p.total / 60))} ساعت${p.total % 60 ? ` و ${fa(p.total % 60)} دقیقه` : ''} ÷ ${fa(p.d)} دقیقه = ${fa(p.n)} نوبت در روز`),
+      days > 1 ? ` × ${fa(days)} روز = ${fa(p.n * days)} نوبت` : '',
+      p.rest ? ` (${fa(p.rest)} دقیقه آخر کمتر از یک نوبت است و استفاده نمی‌شود)` : '',
+      p.n ? h('div', { class: 'muted', style: 'margin-top:4px' }, 'ساعت نوبت‌ها: ', p.times.map(fa).join('، ')) : null,
+    );
+  };
+  for (const el of [date, from, to, dur, repeat, ...dayBoxes]) el.addEventListener('change', showPreview);
   const publish = guard(async (e) => {
     e.preventDefault();
-    const r = await api('POST', '/v1/doctors/me/slots', { starts_at: toIso(date.value, from.value), ends_at: toIso(date.value, to.value), duration_min: Number(dur.value) });
-    toast(`${fa(r.created)} نوبت منتشر شد${r.skipped_overlapping ? ` (${fa(r.skipped_overlapping)} مورد تکراری رد شد)` : ''}`);
+    const p = slotTimes();
+    if (!p.n) return toast('در این بازه هیچ نوبتی جا نمی‌شود', true);
+    const days = targetDays();
+    if (days.length > 1 && !confirm(`${fa(p.n * days.length)} نوبت در ${fa(days.length)} روز منتشر شود؟`)) return;
+    let created = 0; let skipped = 0;
+    for (const d of days) {
+      const startIso = toIso(d, from.value);
+      if (Date.parse(startIso) < Date.now()) continue; // past part of today
+      const r = await api('POST', '/v1/doctors/me/slots', { starts_at: startIso, ends_at: toIso(d, to.value), duration_min: Number(dur.value) });
+      created += r.created; skipped += r.skipped_overlapping;
+    }
+    toast(`${fa(created)} نوبت منتشر شد${skipped ? ` (${fa(skipped)} مورد با نوبت‌های قبلی تداخل داشت و رد شد)` : ''}`);
     load();
   });
-  $app.append(h('form', { class: 'card', onsubmit: publish }, h('h2', {}, 'انتشار تقویم'),
-    h('div', { class: 'grid2' }, h('div', {}, h('label', {}, 'تاریخ'), date), h('div', {}, h('label', {}, 'از ساعت (تهران)'), from),
-      h('div', {}, h('label', {}, 'تا ساعت'), to), h('div', {}, h('label', {}, 'مدت هر نوبت'), dur)),
-    h('div', { style: 'margin-top:12px' }, h('button', { class: 'btn primary' }, 'انتشار'))),
+  $app.append(h('form', { class: 'card stack', onsubmit: publish }, h('h2', {}, 'انتشار تقویم'),
+    h('div', { class: 'grid2' }, h('div', {}, h('label', {}, 'تاریخ'), date), h('div', {}, h('label', {}, 'مدت هر نوبت'), dur),
+      h('div', {}, h('label', {}, 'از ساعت (تهران)'), from), h('div', {}, h('label', {}, 'تا ساعت'), to),
+      h('div', {}, h('label', {}, 'تکرار'), repeat)),
+    daysRow,
+    preview,
+    h('div', {}, h('button', { class: 'btn primary' }, 'انتشار'))),
   h('div', { class: 'card' }, h('h2', {}, 'زمان‌های من'), list));
-  load();
+  await load();
+  showPreview();
 };
 
 // ---------- operator console ----------
