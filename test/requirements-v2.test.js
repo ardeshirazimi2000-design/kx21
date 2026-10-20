@@ -58,6 +58,8 @@ test('PersonInfo (civil registry): reply parsing and Jalali birth date sent to s
   const fake = async (url, init) => { sent = { url, body: JSON.parse(init.body) }; return { ok: true, status: 200, text: async () => '{"data":{"firstName":"علی","lastName":"رضایی"},"success":true,"code":0}' }; };
   const svc = createIdentityService({ sapiToken: 'x', sapiBase: 'https://s.api.ir/api/sw1', devMode: false }, fake);
   assert.equal((await svc.inquirePerson({ nationalId: '0499370899', dobIso: '1992-03-21' })).full_name, 'علی رضایی');
+  assert.match(sent.body.trackId, /^[0-9a-f]{32}$/);
+  delete sent.body.trackId;
   assert.deepEqual(sent, { url: 'https://s.api.ir/api/sw1/PersonInfo', body: { nationalCode: '0499370899', birthDate: '1371/1/1' } });
 });
 

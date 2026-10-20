@@ -21,7 +21,7 @@ const config = {
 };
 console.log('SMS_PROVIDER     :', config.smsProvider || 'NOT SET');
 console.log('SMS_API_KEY      :', config.smsApiKey ? `set (${config.smsApiKey.length} chars)` : config.smsProvider === 'apiir' ? (config.sapiToken ? 'using SAPI_TOKEN (api.ir)' : 'NOT SET (SAPI_TOKEN missing)') : 'NOT SET');
-console.log('SMS_OTP_TEMPLATE :', config.smsOtpTemplate || 'NOT SET');
+console.log('SMS_OTP_TEMPLATE :', config.smsOtpTemplate || (String(config.smsProvider).toLowerCase() === 'apiir' ? '1 (api.ir default)' : 'NOT SET'));
 console.log('SMS_MFA_TEMPLATE :', config.smsMfaTemplate || '(same as OTP)');
 console.log('SMS_SENDER       :', config.smsSender || '(none — notifications stay in the app)');
 const sms = createSms(config);

@@ -3,6 +3,7 @@
 //  • optional identity inquiry (name / birth date from the national registry) — pluggable URL.
 // Fails closed in production: if the service is not configured or unreachable, registration
 // is refused rather than accepted unverified. In development a mock is used (valid checksum ⇒ match).
+import { randomUUID } from 'node:crypto';
 import { ApiError } from '../lib/http.js';
 import { isValidNationalId } from '../lib/fa.js';
 import { toJalali } from '../../public/jalali.js';
@@ -42,13 +43,15 @@ export const callShahkar = ({ base, token, nationalId, mobile, fetchImpl }) => c
 });
 
 export async function callSapi({ url, token, body: payload, fetchImpl = globalThis.fetch }) {
+  const trackId = randomUUID().replace(/-/g, '');
   const res = await fetchImpl(url, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json', Accept: 'application/json',
       'User-Agent': 'Mozilla/5.0 (kx21-clinic) curl-compatible', Authorization: `Bearer ${cleanToken(token)}`,
+      trackId, // api.ir rejects a request whose tracking id it has seen before
     },
-    body: JSON.stringify(payload),
+    body: JSON.stringify({ ...payload, trackId }),
     signal: AbortSignal.timeout(15000),
   });
   const text = await res.text();

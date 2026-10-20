@@ -7,6 +7,8 @@
 //     SMS_APIIR_SERVICE=CallOTP instead reads the code to the user in a phone call (voice).
 // The phone number and the code are the only data sent.
 
+import { randomUUID } from 'node:crypto';
+
 export class SmsError extends Error {}
 
 export function createSms(config, fetchImpl = globalThis.fetch) {
@@ -47,12 +49,18 @@ export function createSms(config, fetchImpl = globalThis.fetch) {
     return { id: String(r.body?.data?.messageId ?? r.body?.data?.packId ?? '') };
   }
 
-  async function apiir(payload) {
+  // api.ir de-duplicates requests by a tracking id ("Duplicate request: trackId already exists"):
+  // every request carries a fresh one, in the body and as a header.
+  async function apiir(payload, retry = true) {
     const base = String(config.sapiBase || 'https://s.api.ir/api/sw1').replace(/\/$/, '');
+    const trackId = randomUUID().replace(/-/g, '');
     const r = await call(`${base}/${apiirService}`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'application/json', Authorization: `Bearer ${key}` }, body: JSON.stringify(payload),
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json', Authorization: `Bearer ${key}`, trackId },
+      body: JSON.stringify({ ...payload, trackId }),
     });
     const b = r.body;
+    if (retry && /trackId/i.test(String(b?.message ?? ''))) return apiir(payload, false);
     // Same envelope as the Shahkar service: {data, success, code, message}.
     const ok = r.status >= 200 && r.status < 300 && b && b.success !== false && (b.code === undefined || b.code === 0);
     if (!ok) throw new SmsError(`api.ir ${r.status} ${b?.code ?? ''}: ${b?.message ?? ''}`.trim());

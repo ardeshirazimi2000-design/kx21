@@ -26,7 +26,13 @@ test('Kavenegar verify/lookup and SMS.ir send/verify requests', async () => {
   assert.equal(sm.delivery, 'sms');
   await sm.sendOtp('09120000000', '123456');
   assert.equal(calls.at(-1).url, 'https://s.api.ir/api/sw1/SmsOTP');
-  assert.deepEqual(JSON.parse(calls.at(-1).init.body), { code: '123456', mobile: '09120000000', template: 1 });
+  const { trackId: t1, ...smsBody } = JSON.parse(calls.at(-1).init.body);
+  assert.deepEqual(smsBody, { code: '123456', mobile: '09120000000', template: 1 });
+  // api.ir rejects a repeated tracking id: every request carries a fresh one (body and header).
+  assert.match(t1, /^[0-9a-f]{32}$/);
+  assert.equal(calls.at(-1).init.headers.trackId, t1);
+  await sm.sendOtp('09120000000', '654321');
+  assert.notEqual(JSON.parse(calls.at(-1).init.body).trackId, t1);
   // api.ir CallOTP: the code is read out in a phone call.
   const ap = createSms({ smsProvider: 'apiir', smsApiirService: 'CallOTP', sapiToken: ' "Bearer TOK" ', sapiBase: 'https://s.api.ir/api/sw1' }, fake({ data: true, success: true, code: 0, message: '' }));
   assert.equal(ap.enabled, true);
@@ -35,7 +41,8 @@ test('Kavenegar verify/lookup and SMS.ir send/verify requests', async () => {
   const last = calls.at(-1);
   assert.equal(last.url, 'https://s.api.ir/api/sw1/CallOTP');
   assert.equal(last.init.headers.Authorization, 'Bearer TOK');
-  assert.deepEqual(JSON.parse(last.init.body), { code: '12345', number: '09121112222' });
+  const { trackId: _t, ...callBody } = JSON.parse(last.init.body);
+  assert.deepEqual(callBody, { code: '12345', number: '09121112222' });
   const apBad = createSms({ smsProvider: 'apiir', sapiToken: 'T' }, fake({ data: null, success: false, code: 402, message: 'اعتبار ناکافی' }));
   await assert.rejects(apBad.sendOtp('09121112222', '1'), /اعتبار ناکافی/);
 });
