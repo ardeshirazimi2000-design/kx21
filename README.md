@@ -65,6 +65,17 @@ bash deploy/docker-install.sh          # وب: http://IP-سرور:8000
 - لاگ: `docker compose logs -f api` — توقف: `docker compose down` — به‌روزرسانی: `git pull && bash deploy/docker-install.sh`
 - داده‌ها در volumeهای `db-data` و `uploads` نگهداری می‌شوند؛ `docker compose down -v` همه داده‌ها را پاک می‌کند.
 
+## آماده‌سازی برای بهره‌برداری (حذف داده‌های آزمایشی)
+
+همه اطلاعات (اتاق‌ها، اشخاص، کمیسیون‌ها، جلسات، مصوبات، شبکه‌ها، اعلان‌ها و فایل‌ها) حذف می‌شود و فقط حساب مدیر سامانه (root) با رمز جدید می‌ماند:
+
+```bash
+docker compose exec -e CONFIRM_RESET=DELETE-ALL-DATA -e ROOT_PASSWORD='رمز-جدید-قوی' \
+  -e ROOT_EMAIL=it@example.ir -e ROOT_MOBILE=09xxxxxxxxx api node dist/db/reset.js
+```
+
+`ROOT_EMAIL`، `ROOT_MOBILE` و `ROOT_NAME` اختیاری‌اند. قبل از اجرا از پایگاه داده نسخه پشتیبان بگیرید؛ این کار برگشت‌پذیر نیست.
+
 ## تست
 ```bash
 npm test -w @kx/shared      # unit
