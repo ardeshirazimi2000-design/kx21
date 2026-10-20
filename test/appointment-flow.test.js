@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { startApp } from './helpers.js';
+import { startApp, randomNationalId } from './helpers.js';
 import { DEMO_ACCOUNTS } from '../src/seed.js';
 
 async function bookOne(t, startInMin) {
@@ -36,7 +36,8 @@ test('visit room opens only around the appointment time', async () => {
     assert.equal((await t.call('POST', `/v1/consultations/${appt.consultation.id}/join`, { token: doctor, body: {} })).status, 200);
     const inbox = await t.call('GET', '/v1/notifications', { token: patient });
     assert.ok(inbox.body.items.some((n) => n.body.includes('پزشک وارد اتاق ویزیت شد')));
-    // Long after the end: closed.
+    // Long after the end, the doctor never in the room: closed. (A visit the doctor is in stays open.)
+    t.app.db.run('UPDATE consultations SET doctor_joined_at = NULL WHERE id = ?', appt.consultation.id);
     const old = new Date(Date.now() - 3 * 3600e3);
     t.app.db.run('UPDATE slots SET starts_at = ?, ends_at = ? WHERE id = ?', old.toISOString(), new Date(old.getTime() + 30 * 60000).toISOString(), slotId);
     assert.equal((await t.call('POST', `/v1/consultations/${appt.consultation.id}/join`, { token: patient, body: {} })).body.code, 'too_late');
@@ -78,6 +79,62 @@ test('doctor cancels a visit with a reason; the patient is told why', async () =
     assert.ok(inbox.some((n) => n.body.includes('توسط پزشک لغو شد') && n.body.includes('جراحی اورژانسی دارم')));
     // The slot is free again.
     assert.equal(t.app.db.get(`SELECT COUNT(*) AS n FROM appointments WHERE slot_id = ? AND status IN ('pending','confirmed')`, appt.slot_id).n, 0);
+  } finally {
+    t.close();
+  }
+});
+
+test('live queue: position, people ahead, expected start, "you are next" and no-show', async () => {
+  const t = await startApp({ disableSweeper: true });
+  try {
+    const doctor = await t.login(DEMO_ACCOUNTS.doctors[0].phone, { role: 'doctor' });
+    t.app.db.run(`DELETE FROM slots WHERE doctor_id = (SELECT d.id FROM doctors d JOIN users u ON u.id = d.user_id WHERE u.phone = ?)
+      AND id NOT IN (SELECT slot_id FROM appointments)`, DEMO_ACCOUNTS.doctors[0].phone);
+    // Three 20-minute visits, the first starting in 2 minutes (kept inside today in Tehran).
+    const start = new Date(Date.now() + 2 * 60000); start.setUTCSeconds(0, 0);
+    const pub = await t.call('POST', '/v1/doctors/me/slots', { token: doctor, body: { starts_at: start.toISOString(), ends_at: new Date(start.getTime() + 60 * 60000).toISOString(), duration_min: 20 } });
+    assert.equal(pub.body.created, 3);
+    const did = t.app.db.get('SELECT doctor_id FROM slots WHERE id = ?', pub.body.items[0].id).doctor_id;
+    const people = [];
+    for (const s of pub.body.items) {
+      const { token } = await t.newPatient({ nationalId: randomNationalId() });
+      const a = await t.call('POST', '/v1/appointments', { token, body: { doctor_id: did, slot_id: s.id, channel: 'video' }, headers: { 'Idempotency-Key': t.uuid() } });
+      people.push({ token, appt: a.body });
+    }
+    const { tehranDay } = t.app.domain.appointment;
+    if (tehranDay(start.toISOString())[0] !== tehranDay(new Date(start.getTime() + 60 * 60000).toISOString())[0]) return; // too close to midnight to test
+
+    const q3 = (await t.call('GET', `/v1/appointments/${people[2].appt.id}`, { token: people[2].token })).body.queue;
+    assert.equal(q3.position, 3);
+    assert.equal(q3.total, 3);
+    assert.equal(q3.ahead_waiting, 2);
+    assert.equal(q3.state, 'waiting');
+
+    // The doctor starts the first visit 10 minutes late: the others are expected later.
+    await t.call('POST', `/v1/consultations/${people[0].appt.consultation.id}/join`, { token: doctor, body: {} });
+    t.app.db.run('UPDATE consultations SET doctor_joined_at = ? WHERE id = ?', new Date(start.getTime() + 10 * 60000).toISOString(), people[0].appt.consultation.id);
+    const q2 = (await t.call('GET', `/v1/appointments/${people[1].appt.id}`, { token: people[1].token })).body.queue;
+    assert.equal(q2.ahead_in_visit, 1);
+    assert.equal(q2.ahead_waiting, 0);
+    assert.equal(q2.delay_min, 10);
+    assert.deepEqual(q2.states, ['in_visit', 'me', 'waiting']);
+
+    // "You are next" goes to the second patient once (expected start within 15 minutes).
+    t.app.domain.appointment.queueNotify(start.getTime() + 20 * 60000);
+    t.app.domain.appointment.queueNotify(start.getTime() + 21 * 60000);
+    const inbox2 = (await t.call('GET', '/v1/notifications', { token: people[1].token })).body.items.filter((n) => n.body.startsWith('نوبت شما بعدی است'));
+    assert.equal(inbox2.length, 1);
+
+    // Doctor's view of the day.
+    const dq = (await t.call('GET', '/v1/doctors/me/queue', { token: doctor })).body.items;
+    assert.deepEqual(dq.map((x) => x.state), ['in_visit', 'waiting', 'waiting']);
+    assert.ok(dq[0].patient_name);
+
+    // No-show only after the visit's time; the queue moves on.
+    assert.equal((await t.call('POST', `/v1/appointments/${people[2].appt.id}/no-show`, { token: doctor, body: {} })).body.code, 'too_early');
+    t.app.db.run('UPDATE slots SET starts_at = ? WHERE id = ?', new Date(Date.now() - 60000).toISOString(), people[1].appt.slot_id);
+    const ns = await t.call('POST', `/v1/appointments/${people[1].appt.id}/no-show`, { token: doctor, body: {} });
+    assert.equal(ns.body.status, 'no_show');
   } finally {
     t.close();
   }

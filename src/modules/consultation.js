@@ -35,6 +35,9 @@ export function register(router, { db, keys, platform, config, domain }) {
     const slot = db.get('SELECT starts_at, ends_at FROM slots WHERE id = ?', c.slot_id);
     const now = Date.now();
     const win = domain.appointment.joinWindow(ctx.tenantId, slot);
+    // A doctor running late keeps the room open for the patients still waiting.
+    const q = domain.appointment.dayQueue(c.doctor_id, slot.starts_at, now).find((x) => x.appointment_id === c.appointment_id);
+    if (win && q?.delay_min) win.closes_at = new Date(Date.parse(win.closes_at) + q.delay_min * 60000).toISOString();
     if (config.enforceJoinWindow && win) {
       if (now < Date.parse(win.opens_at)) {
         const mins = Math.ceil((Date.parse(win.opens_at) - now) / 60000);
@@ -53,6 +56,7 @@ export function register(router, { db, keys, platform, config, domain }) {
         platform.notify(ctx, { userId: other.id, channel: 'push', target: other.phone, body: c.isDoctor ? 'پزشک وارد اتاق ویزیت شد؛ از «نوبت‌ها» وارد شوید.' : 'بیمار وارد اتاق ویزیت شد.' });
       }
     }
+    if (c.isDoctor && !c.doctor_joined_at) db.run('UPDATE consultations SET doctor_joined_at = ? WHERE id = ? AND doctor_joined_at IS NULL', nowIso(), c.id);
     if (!c.started_at) {
       db.run('UPDATE consultations SET started_at = ? WHERE id = ? AND started_at IS NULL', nowIso(), c.id);
       platform.publish(ctx, 'consultation.started', { consultation_id: c.id, appointment_id: c.appointment_id });

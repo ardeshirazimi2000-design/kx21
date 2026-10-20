@@ -465,7 +465,9 @@ const COLUMNS = {
     ['review_reason', 'TEXT'], ['reviewed_by', 'TEXT'], ['reviewed_at', 'TEXT'], ['submitted_at', 'TEXT'],
     ['sheba', 'TEXT'], // bank account (IBAN) for payouts
   ],
-  appointments: [['payment_due_at', 'TEXT'], ['cancel_reason', 'TEXT'], ['cancelled_by', 'TEXT'], ['reminded_60_at', 'TEXT'], ['reminded_room_at', 'TEXT']],
+  appointments: [['payment_due_at', 'TEXT'], ['cancel_reason', 'TEXT'], ['cancelled_by', 'TEXT'], ['reminded_60_at', 'TEXT'], ['reminded_room_at', 'TEXT'],
+    ['queue_next_at', 'TEXT'], ['queue_delay_notified', 'INTEGER']], // live queue notifications
+  consultations: [['doctor_joined_at', 'TEXT']], // the visit is "in progress" once the doctor is in the room
   otp_codes: [['payload', 'TEXT']], // pending registration (role, verified national id) until OTP is confirmed
   prescriptions: [['diagnoses', 'TEXT'], ['safety', 'TEXT']],
   // Split of each payment, fixed at creation: commission percent, platform share, doctor share.

@@ -60,6 +60,7 @@ export function createAppointmentDomain({ db, platform, config = {}, patientDoma
       created_at: a.created_at,
       starts_at: slot?.starts_at, ends_at: slot?.ends_at,
       join: joinWindow(a.tenant_id, slot),
+      queue: queueFor(a),
       cancel_reason: a.cancel_reason ?? null, cancelled_by: a.cancelled_by ?? null,
       doctor: doc && { id: doc.id, full_name: doc.full_name, specialty: doc.specialty, specialty_label: SPECIALTIES[doc.specialty] },
       consultation: consultation ?? null,
@@ -179,6 +180,62 @@ export function createAppointmentDomain({ db, platform, config = {}, patientDoma
     });
   }
 
+  // ---------------------------------------------------------------- live queue
+  // A doctor's visits of one (Tehran) day in time order, with what is happening now and when each
+  // waiting visit is expected to start: a visit runs from when the doctor enters its room; a visit
+  // whose room window passed without the doctor is skipped; waiting visits follow one another.
+  const TEHRAN_MS = 210 * 60000; // Iran has no daylight saving time
+  const tehranDay = (iso) => {
+    const d = Math.floor((Date.parse(iso) + TEHRAN_MS) / 864e5) * 864e5 - TEHRAN_MS;
+    return [new Date(d).toISOString(), new Date(d + 864e5).toISOString()];
+  };
+  function dayQueue(doctorId, anyIsoInDay, now = Date.now()) {
+    const [from, to] = tehranDay(anyIsoInDay);
+    const rows = db.all(
+      `SELECT a.id, a.status, a.patient_id, s.starts_at, s.ends_at, c.id AS consultation_id, c.doctor_joined_at, c.ended_at
+       FROM appointments a JOIN slots s ON s.id = a.slot_id LEFT JOIN consultations c ON c.appointment_id = a.id
+       WHERE a.doctor_id = ? AND s.starts_at >= ? AND s.starts_at < ? AND a.status IN ('confirmed','completed','no_show')
+       ORDER BY s.starts_at, a.id`, doctorId, from, to,
+    );
+    let free = 0; // when the doctor is expected to be free
+    return rows.map((r, i) => {
+      const start = Date.parse(r.starts_at);
+      const dur = Date.parse(r.ends_at) - start;
+      const out = { appointment_id: r.id, consultation_id: r.consultation_id, patient_id: r.patient_id, position: i + 1, total: rows.length, starts_at: r.starts_at };
+      if (r.status !== 'confirmed') {
+        free = Math.max(free, Date.parse(r.ended_at ?? r.ends_at));
+        return { ...out, state: r.status === 'no_show' ? 'no_show' : 'done' };
+      }
+      if (r.doctor_joined_at && !r.ended_at) {
+        const joined = Date.parse(r.doctor_joined_at);
+        free = Math.max(joined + dur, now + 60000);
+        return { ...out, state: 'in_visit', est_start: r.doctor_joined_at, delay_min: Math.max(0, Math.round((joined - start) / 60000)) };
+      }
+      const est = Math.max(start, free, now);
+      // The room window (with the doctor's running delay) is over and the doctor never came in.
+      if (now > Date.parse(r.ends_at) + (30 + Math.max(0, (free - start) / 60000)) * 60000) return { ...out, state: 'missed' };
+      free = est + dur;
+      return { ...out, state: 'waiting', est_start: new Date(est).toISOString(), delay_min: Math.max(0, Math.round((est - start) / 60000)) };
+    });
+  }
+  // The queue as one patient sees it (only on the visit's day).
+  function queueFor(a, now = Date.now()) {
+    if (a.status !== 'confirmed') return null;
+    const slot = db.get('SELECT starts_at FROM slots WHERE id = ?', a.slot_id);
+    if (!slot || tehranDay(slot.starts_at)[0] !== tehranDay(new Date(now).toISOString())[0]) return null;
+    const q = dayQueue(a.doctor_id, slot.starts_at, now);
+    const me = q.find((x) => x.appointment_id === a.id);
+    if (!me) return null;
+    const before = q.filter((x) => x.position < me.position);
+    return {
+      position: me.position, total: me.total, state: me.state, est_start: me.est_start ?? null, delay_min: me.delay_min ?? 0,
+      ahead_waiting: before.filter((x) => x.state === 'waiting').length,
+      ahead_in_visit: before.filter((x) => x.state === 'in_visit').length,
+      done: q.filter((x) => ['done', 'no_show', 'missed'].includes(x.state)).length,
+      states: q.map((x) => (x.appointment_id === a.id ? 'me' : x.state)),
+    };
+  }
+
   // Reminders before the visit (in-app notification for both sides; SMS too when a sender line is set).
   function remind() {
     const now = Date.now();
@@ -205,7 +262,38 @@ export function createAppointmentDomain({ db, platform, config = {}, patientDoma
       }
     }
   }
-  if (!config.disableSweeper) setInterval(() => { try { remind(); } catch (e) { console.error('[reminders]', e.message); } }, 60_000).unref();
+  // Queue notifications for today's waiting visits: "you are next" and "the doctor is running late".
+  function queueNotify(now = Date.now()) {
+    const [from, to] = tehranDay(new Date(now).toISOString());
+    const rows = db.all(
+      `SELECT a.* FROM appointments a JOIN slots s ON s.id = a.slot_id
+       WHERE a.status = 'confirmed' AND s.starts_at >= ? AND s.starts_at < ?`, from, to,
+    );
+    for (const a of rows) {
+      const q = queueFor(a, now);
+      if (!q || q.state !== 'waiting') continue;
+      const p = userOfPatient(a.patient_id);
+      const d = userOfDoctor(a.doctor_id);
+      if (!p) continue;
+      const ctx = { tenantId: a.tenant_id, user: null };
+      const at = formatFaDateTime(q.est_start).split(' ').slice(-1)[0];
+      const left = Math.round((Date.parse(q.est_start) - now) / 60000);
+      if (!a.queue_next_at && q.ahead_waiting === 0 && left <= 15) {
+        db.run('UPDATE appointments SET queue_next_at = ? WHERE id = ?', nowIso(), a.id);
+        platform.notify(ctx, { userId: p.id, channel: 'sms', target: p.phone, body: `نوبت شما بعدی است${q.ahead_in_visit ? ' (یک ویزیت در حال انجام است)' : ''}؛ زمان تخمینی شروع ویزیت با ${d?.full_name ?? 'پزشک'}: ${at}. در اپ آماده باشید.` });
+      }
+      if (q.delay_min >= 15 && q.delay_min >= (a.queue_delay_notified ?? 0) + 15) {
+        db.run('UPDATE appointments SET queue_delay_notified = ? WHERE id = ?', q.delay_min, a.id);
+        platform.notify(ctx, { userId: p.id, channel: 'sms', target: p.phone, body: `ویزیت‌های ${d?.full_name ?? 'پزشک'} حدود ${q.delay_min} دقیقه تأخیر دارد؛ زمان تخمینی شروع ویزیت شما: ${at}.` });
+      }
+    }
+  }
+  if (!config.disableSweeper) {
+    setInterval(() => {
+      try { remind(); } catch (e) { console.error('[reminders]', e.message); }
+      try { queueNotify(); } catch (e) { console.error('[queue]', e.message); }
+    }, 60_000).unref();
+  }
 
   // Notification module: subscribes to appointment events.
   const userOfPatient = (pid) => db.get('SELECT u.id, u.phone, u.full_name FROM patients p JOIN users u ON u.id = p.user_id WHERE p.id = ?', pid);
@@ -229,11 +317,11 @@ export function createAppointmentDomain({ db, platform, config = {}, patientDoma
     if (d) platform.notify(ctx, { userId: d.id, channel: 'push', target: d.phone, body: `نوبت ${when} (${p?.full_name ?? 'بیمار'}) لغو شد${e.cancelled_by === 'patient' ? ' (توسط بیمار)' : ''}.` });
   });
 
-  return { checkAvailability, book, cancel, appointmentView, remind, joinWindow };
+  return { checkAvailability, book, cancel, appointmentView, remind, joinWindow, dayQueue, queueFor, queueNotify, tehranDay };
 }
 
 export function register(router, { db, platform, domain }) {
-  const { checkAvailability, book, cancel, appointmentView } = domain.appointment;
+  const { checkAvailability, book, cancel, appointmentView, dayQueue } = domain.appointment;
 
   const loadForActor = (ctx, id) => {
     requireUuid(id, 'id');
@@ -359,6 +447,32 @@ export function register(router, { db, platform, domain }) {
     const a = loadForActor(ctx, ctx.params.id);
     cancel(ctx, a, ctx.body.reason ?? null);
     return { body: appointmentView(db.get('SELECT * FROM appointments WHERE id = ?', a.id), { forRole: ctx.user.role }) };
+  });
+
+  // The doctor's queue for a day (default today): order, state and expected start of every visit.
+  router.get('/v1/doctors/me/queue', async (ctx) => {
+    requireUser(ctx, 'doctor');
+    const day = /^\d{4}-\d{2}-\d{2}$/.test(String(ctx.query.date ?? '')) ? new Date(`${ctx.query.date}T12:00:00+03:30`).toISOString() : new Date().toISOString();
+    const items = dayQueue(ctx.user.did, day).map((x) => {
+      const pu = db.get('SELECT u.full_name FROM patients p JOIN users u ON u.id = p.user_id WHERE p.id = ?', x.patient_id);
+      return { ...x, patient_name: pu?.full_name ?? null };
+    });
+    return { body: { items } };
+  });
+
+  // The patient did not come: the doctor closes the visit so the queue moves on.
+  router.post('/v1/appointments/:id/no-show', async (ctx) => {
+    requireUser(ctx, 'doctor');
+    const a = loadForActor(ctx, ctx.params.id);
+    if (a.status !== 'confirmed') throw conflict('این نوبت فعال نیست', 'invalid_status');
+    const slot = db.get('SELECT starts_at FROM slots WHERE id = ?', a.slot_id);
+    if (Date.parse(slot.starts_at) > Date.now()) throw conflict('عدم حضور فقط بعد از شروع زمان نوبت ثبت می‌شود', 'too_early');
+    db.run(`UPDATE appointments SET status = 'no_show', updated_at = ? WHERE id = ?`, nowIso(), a.id);
+    db.run('UPDATE consultations SET ended_at = COALESCE(ended_at, ?) WHERE appointment_id = ?', nowIso(), a.id);
+    platform.audit(ctx, 'appointment.no_show', `appointment:${a.id}`);
+    const p = db.get('SELECT u.id, u.phone FROM patients p JOIN users u ON u.id = p.user_id WHERE p.id = ?', a.patient_id);
+    if (p) platform.notify(ctx, { userId: p.id, channel: 'sms', target: p.phone, body: `برای نوبت ${formatFaDateTime(slot.starts_at)} عدم حضور ثبت شد. در صورت نیاز نوبت جدید بگیرید.` });
+    return { body: appointmentView(db.get('SELECT * FROM appointments WHERE id = ?', a.id), { forRole: 'doctor' }) };
   });
 
   router.post('/v1/appointments/:id/reschedule', async (ctx) => {

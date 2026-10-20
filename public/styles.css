@@ -449,3 +449,14 @@ body.has-bottomnav .chat { height: calc(100vh - 260px); }
 .next-visit { border-inline-start: 4px solid var(--primary); }
 @media print { .tabs.nav-bottom, .tabs.nav-side, .icon-btn { display: none !important; } }
 .site-link { text-decoration: none; direction: ltr; }
+
+/* Live visit queue */
+.queue-box { border: 1px solid var(--border); background: var(--surface-2); border-radius: 12px; padding: 10px 12px; margin-bottom: 10px; display: grid; gap: 8px; font-size: 14px; }
+.q-dots { display: flex; flex-wrap: wrap; gap: 6px; }
+.q-dot { display: inline-grid; place-items: center; min-width: 28px; height: 28px; border-radius: 50%; font-size: 12px; font-weight: 700; flex: none; }
+.q-done { background: var(--surface); color: var(--muted); border: 1px dashed var(--border); }
+.q-wait { background: var(--primary-soft); color: var(--primary); }
+.q-live { background: var(--ok-soft); color: var(--ok); box-shadow: 0 0 0 3px var(--ok-soft); animation: q-pulse 1.6s ease-in-out infinite; }
+.q-me { background: var(--primary); color: var(--primary-ink); box-shadow: 0 0 0 3px var(--primary-soft); }
+@keyframes q-pulse { 50% { box-shadow: 0 0 0 6px transparent; } }
+@media (prefers-reduced-motion: reduce) { .q-live { animation: none; } }

@@ -346,8 +346,9 @@ async function patientHome(me) {
   const now = new Date(Date.now() - 60 * 60 * 1000).toISOString();
   const a = r.items.filter((x) => x.status === 'confirmed' && x.starts_at > now).sort((x, y) => x.starts_at.localeCompare(y.starts_at))[0]
     ?? r.items.find((x) => x.status === 'pending');
+  if (a?.queue) every(30_000, () => { if (current.view === 'home') route('home'); });
   if (a) {
-    next.replaceChildren(h('div', { class: 'card next-visit' },
+    next.replaceChildren(h('div', { class: 'card next-visit' }, queueBox(a),
       h('div', { class: 'row' }, h('span', { class: 'svc-ic tone-blue' }, icon('calendar', 26)),
         h('div', { class: 'grow' }, h('div', { class: 'muted' }, a.status === 'pending' ? 'نوبت در انتظار پرداخت' : 'نوبت بعدی شما'),
           h('b', {}, a.doctor?.full_name ?? ''), ' ', h('span', { class: 'muted' }, a.doctor?.specialty_label ?? ''), h('br'),
@@ -763,6 +764,29 @@ function joinButton(a, cls = 'btn primary small') {
   return btn;
 }
 
+// Live queue of the visit's day, as the patient sees it: place, people ahead, expected start.
+function queueBox(a) {
+  const q = a.queue;
+  if (!q) return null;
+  const DOT = { done: 'q-done', no_show: 'q-done', missed: 'q-done', in_visit: 'q-live', waiting: 'q-wait', me: 'q-me' };
+  const dots = h('div', { class: 'q-dots', 'aria-hidden': 'true' }, q.states.map((st, i) => h('span', { class: `q-dot ${DOT[st]}` }, fa(i + 1))));
+  let line;
+  if (q.state === 'in_visit') line = h('b', {}, 'ویزیت شما در حال انجام است');
+  else if (q.ahead_waiting === 0 && q.ahead_in_visit === 0) line = h('b', {}, 'نوبت شماست — وارد اتاق ویزیت شوید');
+  else {
+    const parts = [];
+    if (q.ahead_in_visit) parts.push(`${fa(q.ahead_in_visit)} نفر در حال ویزیت`);
+    if (q.ahead_waiting) parts.push(`${fa(q.ahead_waiting)} نفر در انتظار`);
+    line = h('span', {}, `قبل از شما: ${parts.join(' و ')}`);
+  }
+  return h('div', { class: 'queue-box' },
+    h('div', { class: 'row', style: 'justify-content:space-between' },
+      h('b', {}, `صف ویزیت امروز — نوبت ${fa(q.position)} از ${fa(q.total)}`),
+      q.est_start && q.state === 'waiting' ? h('span', { class: `pill ${q.delay_min >= 10 ? 'warn' : 'info'}` }, `شروع تخمینی ${fmt.time(q.est_start)}`) : null),
+    dots,
+    h('div', {}, line, q.delay_min >= 5 && q.state === 'waiting' ? h('span', { class: 'muted' }, ` (حدود ${fa(q.delay_min)} دقیقه تأخیر)`) : null));
+}
+
 // Cancel a visit. A doctor must give a reason, which is sent to the patient.
 function cancelAppointment(a, role, after = () => route(current.view)) {
   const reason = h('textarea', { rows: 3, maxlength: 300, placeholder: role === 'doctor' ? 'مثلاً: شرایط اضطراری؛ لطفاً نوبت دیگری بگیرید' : 'اختیاری' });
@@ -793,7 +817,7 @@ function appointmentItem(a, role) {
   if (a.status === 'completed' && role === 'doctor') actions.push(h('button', { class: 'btn small', onclick: () => route('room', a.consultation.id) }, a.summary_ready ? 'پرونده ویزیت' : '📝 خلاصه ویزیت (پیش‌نویس)'));
   if (a.status === 'completed' && role === 'patient' && a.summary_ready) actions.push(h('button', { class: 'btn primary small', onclick: () => route('summary', a.consultation.id) }, '📝 خلاصه ویزیت'));
   if (role === 'patient' && ['pending', 'confirmed'].includes(a.status)) actions.push(h('button', { class: 'btn small', onclick: () => route('records') }, '📎 ارسال مدرک'));
-  return h('li', {}, role === 'patient' ? V2.paymentBanner(a, () => route('appointments')) : null, h('div', { class: 'row' },
+  return h('li', {}, role === 'patient' ? V2.paymentBanner(a, () => route('appointments')) : null, role === 'patient' ? queueBox(a) : null, h('div', { class: 'row' },
     h('div', { class: 'grow' },
       h('b', {}, role === 'doctor' ? (a.patient?.full_name ?? 'بیمار') : a.doctor?.full_name), ' ',
       h('span', { class: 'muted' }, role === 'doctor' ? '' : a.doctor?.specialty_label), h('br'),
@@ -807,17 +831,46 @@ function appointmentItem(a, role) {
 
 VIEWS.appointments = async () => {
   const r = await api('GET', '/v1/appointments?limit=50');
+  // Keep today's queue fresh while the page is open.
+  if (r.items.some((a) => a.queue)) every(30_000, () => { if (current.view === 'appointments' && !document.querySelector('.wizard-overlay')) route('appointments'); });
   $app.append(h('div', { class: 'card' }, h('h2', {}, 'نوبت‌های من'),
     r.items.length ? h('ul', { class: 'list' }, r.items.map((a) => appointmentItem(a, 'patient')))
       : h('div', { class: 'empty' }, 'هنوز نوبتی ندارید. ', h('a', { href: '#book', onclick: (e) => { e.preventDefault(); route('book'); } }, 'رزرو نوبت'))));
 };
 
+// The doctor's queue for today: order, state and expected start of every visit.
+async function doctorQueueCard() {
+  const q = (await api('GET', '/v1/doctors/me/queue')).items;
+  if (!q.length) return null;
+  const ST = { done: ['انجام شد', ''], no_show: ['عدم حضور', 'danger'], missed: ['از دست رفته', 'danger'], in_visit: ['در حال ویزیت', 'ok'], waiting: ['در انتظار', 'info'] };
+  const live = q.find((x) => x.state === 'in_visit');
+  const nextUp = q.find((x) => x.state === 'waiting');
+  const delay = (live ?? nextUp)?.delay_min ?? 0;
+  return h('div', { class: 'card' },
+    h('div', { class: 'row', style: 'justify-content:space-between' }, h('h2', { style: 'margin:0' }, 'صف امروز'),
+      h('span', { class: `pill ${delay >= 10 ? 'warn' : 'info'}` }, delay >= 5 ? `حدود ${fa(delay)} دقیقه عقب‌تر از برنامه` : 'طبق برنامه')),
+    h('ul', { class: 'list' }, q.map((x) => h('li', { class: 'row' },
+      h('span', { class: `q-dot ${x.state === 'in_visit' ? 'q-live' : x.state === 'waiting' ? 'q-wait' : 'q-done'}` }, fa(x.position)),
+      h('div', { class: 'grow' }, h('b', {}, x.patient_name ?? 'بیمار'), h('br'),
+        h('span', { class: 'muted' }, `ساعت نوبت ${fmt.time(x.starts_at)}`, x.state === 'waiting' && x.delay_min >= 5 ? ` · شروع تخمینی ${fmt.time(x.est_start)}` : '')),
+      h('span', { class: `pill ${ST[x.state][1]}` }, ST[x.state][0]),
+      ['waiting', 'in_visit'].includes(x.state) ? h('button', { class: `btn small ${x.state === 'in_visit' || x === nextUp ? 'primary' : ''}`, onclick: () => route('room', x.consultation_id) }, 'اتاق ویزیت') : null,
+      x.state === 'waiting' && Date.parse(x.starts_at) <= Date.now() ? h('button', { class: 'btn small danger', onclick: guard(async () => {
+        if (!confirm('عدم حضور بیمار ثبت شود؟')) return;
+        await api('POST', `/v1/appointments/${x.appointment_id}/no-show`, {});
+        toast('عدم حضور ثبت شد'); route(current.view);
+      }) }, 'عدم حضور') : null))));
+}
+
 VIEWS['doctor-appointments'] = async () => {
   const r = await api('GET', '/v1/appointments?limit=100');
+  const todayQueue = await doctorQueueCard().catch(() => null);
+  if (todayQueue) every(30_000, () => { if (current.view === 'doctor-appointments' && !document.querySelector('.wizard-overlay')) route('doctor-appointments'); });
   const upcoming = r.items.filter((a) => a.status === 'confirmed').sort((a, b) => a.starts_at.localeCompare(b.starts_at));
   const past = r.items.filter((a) => a.status !== 'confirmed');
   $app.append(
     notifyPermissionCard(),
+    todayQueue,
     h('div', { class: 'card' }, h('h2', {}, 'نوبت‌های پیش رو'),
       upcoming.length ? h('ul', { class: 'list' }, upcoming.map((a) => appointmentItem(a, 'doctor'))) : h('div', { class: 'empty' }, 'نوبت فعالی ندارید.')),
     h('div', { class: 'card' }, h('h2', {}, 'سابقه'),
