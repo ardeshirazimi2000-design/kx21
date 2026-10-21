@@ -1,16 +1,16 @@
 import bcrypt from 'bcryptjs';
-import { DEFAULT_COMMISSION_SETTINGS, isValidNationalCode, normalizeNationalCode, positionHasVote } from '@kx/shared';
+import { DEFAULT_COMMISSION_SETTINGS, isValidNationalCode, normalizeNationalCode, positionHasVote, roleCapabilities, type Capability } from '@kx/shared';
 import rateLimit from 'express-rate-limit';
 import { Router } from 'express';
 import { z } from 'zod';
 import { currentUser, type AuthUser } from '../auth/middleware.js';
 import { config } from '../config.js';
-import { one, query, tx } from '../db/pool.js';
+import { one, query, tx, type Db } from '../db/pool.js';
 import { audit } from '../lib/audit.js';
 import { badRequest, conflict, forbidden, notFound } from '../lib/errors.js';
 import { body, dateStr, paged, pageParams, param, uuid } from '../lib/validate.js';
 import { identityEnabled, inquireIdentity } from '../services/identity.js';
-import { assertRole } from '../services/roles.js';
+import { assertRole, loadRoleMatrix } from '../services/roles.js';
 import { commissionAccess, isChamberAdmin, requireChamberAdmin, requireSuperAdmin, visibleChamberIds } from '../services/access.js';
 
 export const structureRouter = Router();
@@ -362,6 +362,26 @@ const MEMBER_HISTORY = (commission: string, user: string) => `(
              AND mt.status NOT IN ('draft','scheduled','invitation_sent','checkin_open','cancelled'))
 )`;
 
+const OFFICER_POSITIONS = ['chair', 'vice_chair', 'secretary'];
+/** Capabilities that make a position an officer's (custom roles included). */
+const OFFICER_CAPABILITIES: readonly Capability[] = ['meeting.manage', 'meeting.control', 'minutes.approve', 'resolution.manage', 'issue.manage', 'members.manage'];
+
+/**
+ * Chamber admins manage every membership. Officers with `members.manage` (by default the chair and the
+ * secretary) add and manage the commission's other members; appointing its chair, vice chair or secretary,
+ * and giving a new person a login, stays with the chamber admin.
+ */
+async function requireMembersManager(u: AuthUser, commission: { id: string; chamber_id: string }, positions: string[], c: Db) {
+  if (isChamberAdmin(u, commission.chamber_id)) return;
+  const a = await commissionAccess(u, commission.id, c).catch(() => null);
+  if (!a?.can('members.manage')) throw forbidden();
+  const matrix = await loadRoleMatrix(commission.chamber_id, c);
+  const officer = (p: string) => OFFICER_POSITIONS.includes(p) || roleCapabilities(p, matrix).some((x) => OFFICER_CAPABILITIES.includes(x));
+  if (positions.some(officer)) {
+    throw forbidden('تعیین یا تغییر رئیس، نایب‌رئیس و دبیر کمیسیون با مدیر اتاق است');
+  }
+}
+
 /** Meetings not held yet: a deleted member's invitations to them are withdrawn. */
 const NOT_HELD = `('draft','scheduled','invitation_sent','checkin_open')`;
 
@@ -502,7 +522,8 @@ structureRouter.post('/commissions/:id/members', async (req, res) => {
   const row = await tx(async (c) => {
     const commission = await one('SELECT * FROM commissions WHERE id = $1 FOR UPDATE', [commissionId], c);
     if (!commission) throw notFound('کمیسیون یافت نشد');
-    requireChamberAdmin(u, commission.chamber_id);
+    await requireMembersManager(u, commission, [b.position], c);
+    if (b.person?.password && !isChamberAdmin(u, commission.chamber_id)) throw forbidden('تعریف رمز عبور با مدیر اتاق است');
     const userId = b.userId ?? (await createPerson(c, req, commission.chamber_id, b.person!)).id;
     if (b.userId) {
       const person = await one('SELECT chamber_id FROM users WHERE id = $1', [b.userId], c);
@@ -546,7 +567,7 @@ structureRouter.patch('/memberships/:id', async (req, res) => {
   const row = await tx(async (c) => {
     const before = await one('SELECT * FROM commission_memberships WHERE id = $1 FOR UPDATE', [id], c);
     if (!before) throw notFound();
-    requireChamberAdmin(currentUser(req), before.chamber_id);
+    await requireMembersManager(currentUser(req), { id: before.commission_id, chamber_id: before.chamber_id }, [before.position, b.position ?? before.position], c);
     if (before.status !== 'active') throw conflict('عضویت پایان‌یافته قابل ویرایش نیست');
     const position: string = b.position ?? before.position;
     const custom = await assertRole(before.chamber_id, position, 'position', c);
@@ -577,7 +598,7 @@ structureRouter.post('/memberships/:id/end', async (req, res) => {
   const row = await tx(async (c) => {
     const before = await one('SELECT * FROM commission_memberships WHERE id = $1 FOR UPDATE', [id], c);
     if (!before) throw notFound();
-    requireChamberAdmin(currentUser(req), before.chamber_id);
+    await requireMembersManager(currentUser(req), { id: before.commission_id, chamber_id: before.chamber_id }, [before.position], c);
     const r = await one(
       `UPDATE commission_memberships SET status = 'ended', end_date = COALESCE($2::date, current_date), note = $3 WHERE id = $1 RETURNING *`,
       [id, b.endDate ?? null, b.reason ?? null],
@@ -598,7 +619,7 @@ structureRouter.delete('/memberships/:id', async (req, res) => {
   await tx(async (c) => {
     const before = await one('SELECT * FROM commission_memberships WHERE id = $1 FOR UPDATE', [id], c);
     if (!before) throw notFound();
-    requireChamberAdmin(currentUser(req), before.chamber_id);
+    await requireMembersManager(currentUser(req), { id: before.commission_id, chamber_id: before.chamber_id }, [before.position], c);
     const h = await one<{ used: boolean }>(`SELECT ${MEMBER_HISTORY('$1::uuid', '$2::uuid')} AS used`, [before.commission_id, before.user_id], c);
     if (h?.used) {
       throw conflict('این عضو در جلسات یا مصوبات کمیسیون سابقه دارد و قابل حذف نیست؛ از «پایان عضویت» استفاده کنید', 'membership_has_history');
@@ -692,6 +713,51 @@ structureRouter.get('/people/:id', async (req, res) => {
     [id],
   );
   res.json({ ...p, memberships });
+});
+
+/**
+ * Delete a person registered by mistake (e.g. entered twice). Only for people whose identity was not verified
+ * by the registry inquiry and who have left no trace in any commission; memberships without history and
+ * invitations to meetings not held yet are removed with them. Others can only be deactivated.
+ */
+structureRouter.delete('/people/:id', async (req, res) => {
+  const u = currentUser(req);
+  const id = param(req, 'id');
+  await tx(async (c) => {
+    const p = await one('SELECT * FROM users WHERE id = $1 FOR UPDATE', [id], c);
+    if (!p || !p.chamber_id || !isChamberAdmin(u, p.chamber_id)) throw notFound();
+    if (p.id === u.id) throw badRequest('حساب خودتان را نمی‌توانید حذف کنید');
+    if (p.identity_verified_at) {
+      throw conflict('هویت این شخص با استعلام ثبت احوال تأیید شده و قابل حذف نیست؛ در صورت نیاز آن را غیرفعال کنید', 'person_verified');
+    }
+    if (await one('SELECT 1 FROM chamber_admins WHERE user_id = $1', [id], c)) {
+      throw conflict('این شخص مدیر اتاق است؛ ابتدا او را از مدیران اتاق حذف کنید', 'person_is_admin');
+    }
+    const h = await one<{ used: boolean }>(
+      `SELECT EXISTS (SELECT 1 FROM commission_memberships m WHERE m.user_id = $1 AND ${MEMBER_HISTORY('m.commission_id', '$1::uuid')}) AS used`,
+      [id],
+      c,
+    );
+    if (h?.used) {
+      throw conflict('این شخص در جلسات یا مصوبات سابقه دارد و قابل حذف نیست؛ عضویت او را پایان دهید یا او را غیرفعال کنید', 'person_has_history');
+    }
+    await c.query(`DELETE FROM attendance a USING meetings mt WHERE mt.id = a.meeting_id AND a.user_id = $1 AND mt.status IN ${NOT_HELD}`, [id]);
+    await c.query(`DELETE FROM meeting_invitees i USING meetings mt WHERE mt.id = i.meeting_id AND i.user_id = $1 AND mt.status IN ${NOT_HELD}`, [id]);
+    const memberships = (await c.query('DELETE FROM commission_memberships WHERE user_id = $1 RETURNING *', [id])).rows;
+    // Anything else still pointing at the person (a held meeting, a document, a log entry…) keeps them.
+    await c.query('DELETE FROM users WHERE id = $1', [id]).catch((e) => {
+      if (e.code === '23503') throw conflict('برای این شخص سوابقی در سامانه ثبت شده و قابل حذف نیست؛ او را غیرفعال کنید', 'person_has_history');
+      throw e;
+    });
+    await audit(c, req, {
+      chamberId: p.chamber_id,
+      action: 'person.deleted',
+      entity: 'user',
+      entityId: id,
+      before: { fullName: p.full_name, nationalId: p.national_id, mobile: p.mobile, email: p.email, memberships: memberships.length },
+    });
+  });
+  res.status(204).end();
 });
 
 structureRouter.patch('/people/:id', async (req, res) => {

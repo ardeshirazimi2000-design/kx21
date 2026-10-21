@@ -510,7 +510,7 @@ describe('structure', () => {
     const withHistory = list.find((m: any) => m.user_id === ids.m1);
     expect(withHistory.can_delete).toBe(false);
     expect((await as('admin').del(`/api/memberships/${withHistory.id}`)).body.error.code).toBe('membership_has_history');
-    expect((await as('secretary').del(`/api/memberships/${added.body.id}`)).status).toBe(403);
+    expect((await as('m1').del(`/api/memberships/${added.body.id}`)).status).toBe(403);
 
     expect((await as('admin').del(`/api/memberships/${added.body.id}`)).status).toBe(204);
     const after = (await as('admin').get(`/api/commissions/${exp.id}/members?includeEnded=true`)).body;

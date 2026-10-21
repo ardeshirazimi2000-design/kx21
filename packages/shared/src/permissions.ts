@@ -28,6 +28,7 @@ export const CAPABILITIES = [
   'minutes.approve',
   'resolution.manage', // create resolutions, review progress
   'issue.manage', // issues and expert referrals
+  'members.manage', // add, change, end or delete the commission's members (not its chair, vice chair or secretary)
   'report.commission',
   'report.chamber',
   'audit.view',
@@ -50,6 +51,7 @@ export const CONFIGURABLE_CAPABILITIES = [
   'minutes.approve',
   'resolution.manage',
   'issue.manage',
+  'members.manage',
 ] as const satisfies readonly Capability[];
 export type ConfigurableCapability = (typeof CONFIGURABLE_CAPABILITIES)[number];
 
@@ -70,6 +72,7 @@ export const CAPABILITY_LABELS: Record<ConfigurableCapability, { title: string; 
   'minutes.approve': { title: 'تأیید یا برگشت صورتجلسه', group: 'اجرای کمیسیون' },
   'resolution.manage': { title: 'ثبت مصوبه و بررسی گزارش اجرا', group: 'اجرای کمیسیون' },
   'issue.manage': { title: 'مدیریت مسائل و ارجاع کارشناسی', group: 'اجرای کمیسیون' },
+  'members.manage': { title: 'افزودن و مدیریت اعضای کمیسیون (به‌جز رئیس، نایب‌رئیس و دبیر)', group: 'اجرای کمیسیون' },
 };
 
 /** Built-in roles. `chamber_admin` is a chamber-level role; the others are commission/meeting roles. */
@@ -86,9 +89,9 @@ const EXECUTE: ConfigurableCapability[] = ['attendance.view_all', 'meeting.manag
 export const DEFAULT_ROLE_CAPABILITIES: Record<BuiltinRole, ConfigurableCapability[]> = {
   // Structure + oversight only: commission work belongs to its secretary.
   chamber_admin: ['commission.browse', 'minutes.view', 'report.commission', 'vote.results.view', 'attendance.view_all'],
-  chair: [...VIEW, ...PARTICIPATE, ...EXECUTE, 'minutes.approve'],
+  chair: [...VIEW, ...PARTICIPATE, ...EXECUTE, 'minutes.approve', 'members.manage'],
   vice_chair: [...VIEW, ...PARTICIPATE, ...EXECUTE, 'minutes.approve'],
-  secretary: [...VIEW, ...PARTICIPATE, ...EXECUTE],
+  secretary: [...VIEW, ...PARTICIPATE, ...EXECUTE, 'members.manage'],
   member: [...VIEW, ...PARTICIPATE],
   expert: ['minutes.view', 'attendance.self', 'comment.create', 'vote.results.view'],
   observer: [...VIEW, 'attendance.self', 'vote.results.view'],

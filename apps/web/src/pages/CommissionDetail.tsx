@@ -57,8 +57,14 @@ export function CommissionDetailPage() {
   );
 }
 
+const OFFICER_POSITIONS = ['chair', 'vice_chair', 'secretary'];
+
 function Members({ commission }: { commission: any }) {
-  const { isAdmin, chamberId } = useAuth();
+  const { me } = useAuth();
+  // Chamber admins manage every membership; the chair and secretary (members.manage) the other members.
+  const isAdmin = me!.is_super_admin || me!.adminChambers.includes(commission.chamber_id);
+  const canManage = isAdmin || commission.capabilities.includes('members.manage');
+  const manages = (m: any) => isAdmin || (canManage && !OFFICER_POSITIONS.includes(m.position));
   const [showEnded, setShowEnded] = useState(false);
   const { data, reload } = useApi<any[]>(`/commissions/${commission.id}/members?includeEnded=${showEnded}`);
   const [adding, setAdding] = useState(false);
@@ -88,7 +94,7 @@ function Members({ commission }: { commission: any }) {
           <label className="check" style={{ margin: 0 }}>
             <input type="checkbox" checked={showEnded} onChange={(e) => setShowEnded(e.target.checked)} /> نمایش سوابق
           </label>
-          {isAdmin && <Button onClick={() => setAdding(true)}>افزودن عضو</Button>}
+          {canManage && <Button onClick={() => setAdding(true)}>افزودن عضو</Button>}
         </>
       }
     >
@@ -119,7 +125,7 @@ function Members({ commission }: { commission: any }) {
                 <td>{dateFa(m.start_date)}</td>
                 <td>{dateFa(m.end_date)}</td>
                 <td className="row gap-sm">
-                  {isAdmin && m.status === 'active' && (
+                  {manages(m) && m.status === 'active' && (
                     <>
                       <Button size="sm" variant="ghost" onClick={() => setChanging(m)}>
                         تغییر سمت
@@ -129,7 +135,7 @@ function Members({ commission }: { commission: any }) {
                       </Button>
                     </>
                   )}
-                  {isAdmin && m.can_delete && (
+                  {manages(m) && m.can_delete && (
                     <Button size="sm" variant="ghost" onClick={() => remove(m)} title="فقط برای عضوی که هنوز در جلسات و مصوبات سابقه‌ای ندارد">
                       <span style={{ color: 'var(--danger)' }}>حذف</span>
                     </Button>
@@ -140,13 +146,13 @@ function Members({ commission }: { commission: any }) {
           </tbody>
         </table>
       </div>
-      {adding && chamberId && <AddMemberModal commission={commission} chamberId={chamberId} onClose={() => setAdding(false)} onSaved={() => { setAdding(false); void reload(); }} />}
-      {changing && <ChangePositionModal m={changing} onClose={() => setChanging(null)} onSaved={() => { setChanging(null); void reload(); }} />}
+      {adding && <AddMemberModal commission={commission} chamberId={commission.chamber_id} isAdmin={isAdmin} onClose={() => setAdding(false)} onSaved={() => { setAdding(false); void reload(); }} />}
+      {changing && <ChangePositionModal m={changing} isAdmin={isAdmin} onClose={() => setChanging(null)} onSaved={() => { setChanging(null); void reload(); }} />}
     </Card>
   );
 }
 
-function AddMemberModal({ commission, chamberId, onClose, onSaved }: { commission: any; chamberId: string; onClose: () => void; onSaved: () => void }) {
+function AddMemberModal({ commission, chamberId, isAdmin, onClose, onSaved }: { commission: any; chamberId: string; isAdmin: boolean; onClose: () => void; onSaved: () => void }) {
   const [q, setQ] = useState('');
   const people = useApi(q.length >= 2 ? `/people?chamberId=${chamberId}&q=${encodeURIComponent(q)}&pageSize=8` : null);
   const [userId, setUserId] = useState<string | null>(null);
@@ -190,7 +196,7 @@ function AddMemberModal({ commission, chamberId, onClose, onSaved }: { commissio
       <div className="grid grid-2 mt">
         <Field label="سمت">
           <select className="input" value={position} onChange={(e) => setPosition(e.target.value)}>
-            {roles.positions.map((p) => (
+            {roles.positions.filter((p) => isAdmin || !OFFICER_POSITIONS.includes(p.key)).map((p) => (
               <option key={p.key} value={p.key}>
                 {p.title}
               </option>
@@ -205,7 +211,7 @@ function AddMemberModal({ commission, chamberId, onClose, onSaved }: { commissio
         <PersonModal
           person={{}}
           chamberId={chamberId}
-          canSetPassword
+          canSetPassword={isAdmin}
           onClose={() => setCreating(false)}
           onSaved={(p) => {
             setCreating(false);
@@ -218,7 +224,7 @@ function AddMemberModal({ commission, chamberId, onClose, onSaved }: { commissio
   );
 }
 
-function ChangePositionModal({ m, onClose, onSaved }: { m: any; onClose: () => void; onSaved: () => void }) {
+function ChangePositionModal({ m, isAdmin, onClose, onSaved }: { m: any; isAdmin: boolean; onClose: () => void; onSaved: () => void }) {
   const [position, setPosition] = useState<string>(m.position);
   const roles = useRoles(m.chamber_id);
   const [hasVote, setHasVote] = useState<boolean>(m.has_vote);
@@ -237,7 +243,7 @@ function ChangePositionModal({ m, onClose, onSaved }: { m: any; onClose: () => v
       <p className="muted small">سابقه سمت فعلی حفظ شده و سمت جدید از امروز ثبت می‌شود.</p>
       <Field label="سمت جدید">
         <select className="input" value={position} onChange={(e) => setPosition(e.target.value)}>
-          {roles.positions.map((p) => (
+          {roles.positions.filter((p) => isAdmin || !OFFICER_POSITIONS.includes(p.key)).map((p) => (
             <option key={p.key} value={p.key}>
               {p.title}
             </option>

@@ -316,6 +316,18 @@ export function PeoplePage() {
   const chambers = useApi<any[]>(isAdmin ? '/chambers' : null);
   const currentChamber = chambers.data?.find((c) => c.id === chamberId)?.name;
   const [edit, setEdit] = useState<any | null>(null);
+  const [err, setErr] = useState<Error | null>(null);
+  // Only people whose identity was not verified by the registry and who have no history can be deleted.
+  const removePerson = async (p: any) => {
+    if (!confirm(`«${p.full_name}» به‌طور کامل حذف شود؟\nاین کار برای شخصی است که اشتباهی یا تکراری ثبت شده؛ عضویت‌های بدون سابقه و دعوت‌های او به جلسات برگزارنشده هم حذف می‌شود.`)) return;
+    setErr(null);
+    try {
+      await del(`/people/${p.id}`);
+      void reload();
+    } catch (e) {
+      setErr(e as Error);
+    }
+  };
   return (
     <>
       <PageHeader
@@ -334,6 +346,7 @@ export function PeoplePage() {
             </Button>
           </div>
         )}
+        <ErrorBox error={err} />
         <input className="input mb" placeholder="جستجو بر اساس نام، کد ملی، سازمان، موبایل یا ایمیل" value={q} onChange={(e) => { setQ(e.target.value); setPage(1); }} />
         <div className="table-wrap">
           <table className="table">
@@ -362,10 +375,15 @@ export function PeoplePage() {
                     {p.identity_verified_at ? <Badge tone="success">هویت تأییدشده</Badge> : <Badge tone="warning">تأیید نشده</Badge>}
                     {p.can_login ? <Badge tone="info">ورود دارد</Badge> : <Badge>بدون حساب</Badge>}
                   </td>
-                  <td>
+                  <td className="row gap-sm">
                     {isAdmin && (
                       <Button size="sm" variant="ghost" onClick={() => setEdit(p)}>
                         ویرایش
+                      </Button>
+                    )}
+                    {isAdmin && !p.identity_verified_at && !p.is_chamber_admin && p.id !== me?.id && (
+                      <Button size="sm" variant="ghost" onClick={() => void removePerson(p)} title="برای شخصی که اشتباهی یا تکراری ثبت شده و سابقه‌ای ندارد">
+                        <span style={{ color: 'var(--danger)' }}>حذف</span>
                       </Button>
                     )}
                   </td>
