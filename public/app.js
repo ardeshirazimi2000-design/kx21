@@ -4,7 +4,7 @@
 import { openTriageWizard, triageResultCard } from './triage-wizard.js';
 import { mediaSupported, startCall } from './video-call.js';
 import { installV2 } from './views-v2.js';
-import { icon } from './icons.js';
+import { icon, illus } from './icons.js';
 import { jalaliPicker, formatJalaliDate, todayJalali, isoToJalali, MONTHS } from './jalali.js';
 
 // ---------------- utilities ----------------
@@ -382,9 +382,9 @@ VIEWS.login = () => {
     box.replaceChildren(
       h('div', { class: 'hero' }, h('img', { src: 'icon.svg', alt: '', width: 72, height: 72 }), h('h1', { class: 'wordmark', 'aria-label': 'درمان پلاس' }, h('b', {}, 'درمان'), ' ', h('i', {}, 'پلاس')), h('div', { class: 'wordmark-latin', 'aria-hidden': 'true' }, 'DARMAN PLUS'), h('p', { class: 'tagline' }, 'سلامت، همیشه در دسترس'), h('p', { class: 'muted' }, 'ویزیت آنلاین با پزشک و دستیار هوشمند')),
       h('button', { class: 'entry', onclick: () => { role = 'patient'; stepPhone(); } },
-        h('span', { class: 'entry-icon' }, '🧑'), h('span', {}, h('b', {}, 'ثبت‌نام و ورود بیماران'), h('br'), h('small', { class: 'muted' }, 'دریافت نوبت، ویزیت آنلاین، دستیار هوشمند'))),
+        h('span', { class: 'entry-icon' }, illus('patient', 60)), h('span', {}, h('b', {}, 'ثبت‌نام و ورود بیماران'), h('br'), h('small', { class: 'muted' }, 'دریافت نوبت، ویزیت آنلاین، دستیار هوشمند'))),
       h('button', { class: 'entry', onclick: () => { role = 'doctor'; stepPhone(); } },
-        h('span', { class: 'entry-icon' }, '👨‍⚕️'), h('span', {}, h('b', {}, 'ثبت‌نام و ورود پزشکان'), h('br'), h('small', { class: 'muted' }, 'پزشکان و کادر کلینیک'))),
+        h('span', { class: 'entry-icon' }, illus('doctor', 60)), h('span', {}, h('b', {}, 'ثبت‌نام و ورود پزشکان'), h('br'), h('small', { class: 'muted' }, 'پزشکان و کادر کلینیک'))),
       config.dev_mode ? h('div', { class: 'banner info small' },
         h('b', {}, 'حساب‌های نمونه (ورود پزشکان): '), 'پزشک ', h('bdi', {}, '09120000001'), ' · اپراتور ', h('bdi', {}, '09120000009'), ' · مدیر ', h('bdi', {}, '09120000010')) : null,
       footer(),
@@ -1297,7 +1297,7 @@ VIEWS.server = () => {
 };
 
 // Views from the second requirements document (doctor onboarding, admin review, tariffs, payments, records).
-const V2 = { VIEWS, h, api, toast, fa, fmt, route, guard, onCleanup, every, apiUrl, IS_NATIVE, formatJalaliDate, $app, getSession: () => session, setSession, renderChrome };
+const V2 = { illus, VIEWS, h, api, toast, fa, fmt, route, guard, onCleanup, every, apiUrl, IS_NATIVE, formatJalaliDate, $app, getSession: () => session, setSession, renderChrome };
 installV2(V2);
 // Login history moved off the bar: a link at the end of the profile pages.
 for (const name of ['profile', 'doctor-profile']) {

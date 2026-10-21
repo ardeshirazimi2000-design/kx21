@@ -35,3 +35,30 @@ export function icon(name, size = 24, strokeWidth = 1.8) {
   tpl.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="${size}" height="${size}" fill="none" stroke="currentColor" stroke-width="${strokeWidth}" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">${P[name] ?? P.plus}</svg>`;
   return tpl.content.firstChild;
 }
+
+// Small illustrations (patient / doctor) in the brand colours, for the start screen and for
+// doctors without a photo. Colours come from CSS variables so they also work in dark mode.
+const ILLUS = {
+  patient: `
+    <circle cx="32" cy="21" r="11" style="fill:var(--ill-main)"/>
+    <path d="M10 57c0-12.2 9.8-21 22-21s22 8.8 22 21z" style="fill:var(--ill-main)"/>
+    <path d="M24 36.8c2.4 2.2 5 3.2 8 3.2s5.6-1 8-3.2" fill="none" style="stroke:var(--ill-soft)" stroke-width="2.2" stroke-linecap="round"/>
+    <circle cx="48.5" cy="45.5" r="11" style="fill:var(--ill-green);stroke:var(--ill-bg)" stroke-width="3"/>
+    <path d="M48.5 51.5l-5.2-5.1a3.3 3.3 0 0 1 5.2-4.1 3.3 3.3 0 0 1 5.2 4.1z" fill="#fff"/>`,
+  doctor: `
+    <circle cx="32" cy="20" r="11" style="fill:var(--ill-dark)"/>
+    <path d="M9 58c0-12.6 10.2-22 23-22s23 9.4 23 22z" style="fill:var(--ill-coat);stroke:var(--ill-dark)" stroke-width="2" stroke-linejoin="round"/>
+    <path d="M26 36.6L32 47l6-10.4c-1.9-.4-3.9-.6-6-.6s-4.1.2-6 .6z" style="fill:var(--ill-main)"/>
+    <path d="M32 47L24 37.5M32 47l8-9.5M32 47v11" fill="none" style="stroke:var(--ill-dark)" stroke-width="2" stroke-linecap="round"/>
+    <path d="M23.5 38.5c-2.6 3.4-3.4 7.4-2.6 11.5" fill="none" style="stroke:var(--ill-dark)" stroke-width="2.2" stroke-linecap="round"/>
+    <circle cx="21.2" cy="52.3" r="3.2" style="fill:var(--ill-green);stroke:var(--ill-dark)" stroke-width="1.6"/>
+    <path d="M40.5 38.5c2 2.6 2.6 5.4 2.2 8.4" fill="none" style="stroke:var(--ill-dark)" stroke-width="2.2" stroke-linecap="round"/>
+    <rect x="41.5" y="49" width="8" height="8" rx="2" style="fill:var(--ill-green)"/>
+    <path d="M45.5 50.8v4.4M43.3 53h4.4" stroke="#fff" stroke-width="1.8" stroke-linecap="round"/>`,
+};
+
+/** An illustration (<svg>) — 'patient' or 'doctor'. */
+export function illus(name, size = 44) {
+  tpl.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="${size}" height="${size}" aria-hidden="true" focusable="false"><g transform="translate(0 6)">${ILLUS[name]}</g></svg>`;
+  return tpl.content.firstChild;
+}

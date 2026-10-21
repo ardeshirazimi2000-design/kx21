@@ -566,7 +566,7 @@ export function installV2(x) {
     const load = guard(async () => {
       const r = await api('GET', `/v1/doctors?${new URLSearchParams({ ...(sel.value ? { specialty: sel.value } : {}), ...(q.value ? { q: q.value } : {}) })}`);
       grid.replaceChildren(...(r.items.length ? r.items.map((d) => h('button', { class: 'doc-card', onclick: () => route('doctor', d.id) },
-        d.photo_url ? h('img', { class: 'avatar-lg', src: fileUrl(d.photo_url), alt: '' }) : h('span', { class: 'avatar-lg ph' }, '👨‍⚕️'),
+        d.photo_url ? h('img', { class: 'avatar-lg', src: fileUrl(d.photo_url), alt: '' }) : h('span', { class: 'avatar-lg ph' }, x.illus('doctor', 88)),
         h('b', {}, d.full_name), h('span', { class: 'muted' }, d.specialty_label),
         d.experience_years != null ? h('span', { class: 'pill' }, `${fa(d.experience_years)} سال سابقه`) : null)) : [h('div', { class: 'empty' }, 'پزشکی یافت نشد.')]));
     });
@@ -580,7 +580,7 @@ export function installV2(x) {
     x.$app.append(
       h('button', { class: 'btn small', style: 'margin-bottom:10px', onclick: () => route('doctors') }, '→ همه پزشکان'),
       h('div', { class: 'card doc-profile' },
-        d.photo_url ? h('img', { class: 'avatar-xl', src: fileUrl(d.photo_url), alt: '' }) : h('span', { class: 'avatar-xl ph' }, '👨‍⚕️'),
+        d.photo_url ? h('img', { class: 'avatar-xl', src: fileUrl(d.photo_url), alt: '' }) : h('span', { class: 'avatar-xl ph' }, x.illus('doctor', 128)),
         h('h2', {}, d.full_name), h('p', { class: 'muted' }, d.specialty_label, d.license_no ? ` · نظام پزشکی ${d.license_no}` : ''),
         d.experience_years != null ? h('span', { class: 'pill' }, `${fa(d.experience_years)} سال سابقه`) : null),
       h('div', { class: 'card' }, h('h3', {}, 'تحصیلات'), h('p', {}, d.education ?? '—'), h('h3', {}, 'رزومه و معرفی'), h('p', { style: 'white-space:pre-wrap' }, d.bio ?? '—')),
