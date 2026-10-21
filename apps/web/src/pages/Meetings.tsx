@@ -12,10 +12,15 @@ export function MeetingsPage() {
   const nav = useNavigate();
   const { me } = useAuth();
   const now = new Date();
-  const [[jy, jm], setMonth] = useState(() => {
-    const [y, m] = toJalali(now.getFullYear(), now.getMonth() + 1, now.getDate());
-    return [y, m] as [number, number];
-  });
+  const today = toJalali(now.getFullYear(), now.getMonth() + 1, now.getDate());
+  const [[jy, jm], setMonth] = useState<[number, number]>([today[0], today[1]]);
+  // Years offered in the picker: the archive of past terms and a few years ahead.
+  const years = useMemo(() => {
+    const from = Math.min(today[0] - 15, jy);
+    const to = Math.max(today[0] + 5, jy);
+    return Array.from({ length: to - from + 1 }, (_, i) => to - i);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [jy]);
   const [mine, setMine] = useState(false);
   const range = useMemo(() => {
     const [gy, gm, gd] = toGregorian(jy, jm, 1);
@@ -28,11 +33,8 @@ export function MeetingsPage() {
   // Meetings are created by each commission's secretary/chair (executive work), not by the chamber admin.
   const canCreate = me!.memberships.some((m) => ['chair', 'vice_chair', 'secretary'].includes(m.position));
   const shift = (d: number) => {
-    let m = jm + d;
-    let y = jy;
-    if (m < 1) [m, y] = [12, y - 1];
-    if (m > 12) [m, y] = [1, y + 1];
-    setMonth([y, m]);
+    const n = jy * 12 + (jm - 1) + d;
+    setMonth([Math.floor(n / 12), (n % 12) + 1]);
   };
 
   const byDay = useMemo(() => {
@@ -59,16 +61,44 @@ export function MeetingsPage() {
         }
       />
       <Card>
-        <div className="row between mb">
-          <Button variant="secondary" size="sm" onClick={() => shift(-1)}>
-            ماه قبل
-          </Button>
-          <h2>
-            {JALALI_MONTHS[jm - 1]} {fa(jy)}
-          </h2>
-          <Button variant="secondary" size="sm" onClick={() => shift(1)}>
-            ماه بعد
-          </Button>
+        <div className="row between wrap gap-sm mb cal-nav">
+          <span className="row gap-sm">
+            <Button variant="secondary" size="sm" onClick={() => shift(-12)} title="همین ماه در سال قبل">
+              سال قبل
+            </Button>
+            <Button variant="secondary" size="sm" onClick={() => shift(-1)}>
+              ماه قبل
+            </Button>
+          </span>
+          <span className="row gap-sm">
+            <select className="input cal-pick" value={jm} onChange={(e) => setMonth([jy, Number(e.target.value)])} aria-label="ماه">
+              {JALALI_MONTHS.map((name, i) => (
+                <option key={name} value={i + 1}>
+                  {name}
+                </option>
+              ))}
+            </select>
+            <select className="input cal-pick" value={jy} onChange={(e) => setMonth([Number(e.target.value), jm])} aria-label="سال">
+              {years.map((y) => (
+                <option key={y} value={y}>
+                  {fa(y)}
+                </option>
+              ))}
+            </select>
+            {(jy !== today[0] || jm !== today[1]) && (
+              <Button variant="ghost" size="sm" onClick={() => setMonth([today[0], today[1]])}>
+                امروز
+              </Button>
+            )}
+          </span>
+          <span className="row gap-sm">
+            <Button variant="secondary" size="sm" onClick={() => shift(1)}>
+              ماه بعد
+            </Button>
+            <Button variant="secondary" size="sm" onClick={() => shift(12)} title="همین ماه در سال بعد">
+              سال بعد
+            </Button>
+          </span>
         </div>
         <MonthCalendar
           year={jy}
