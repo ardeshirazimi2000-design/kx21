@@ -5,7 +5,7 @@ import { ApiError, badRequest, forbidden, notFound, conflict, requireFields, req
   encodeCursor, decodeCursor } from '../lib/http.js';
 import { uuid, nowIso, isUniqueViolation, parseJson } from '../lib/db.js';
 import { canonical, sha256 } from '../lib/crypto.js';
-import { formatFaDateTime } from '../lib/fa.js';
+import { formatFaDateTime, toFaDigits } from '../lib/fa.js';
 import { requireUser } from './auth.js';
 import { SPECIALTIES } from './patient.js';
 import { getVisitSettings, JOIN_LATE_MIN } from '../lib/visit-settings.js';
@@ -257,8 +257,8 @@ export function createAppointmentDomain({ db, platform, config = {}, patientDoma
         if (d) platform.notify(ctx, { userId: d.id, channel: 'push', target: d.phone, body: `اتاق ویزیت با ${p?.full_name ?? 'بیمار'} باز شد (${when}).` });
       } else if (!a.reminded_60_at && left > Math.max(early, 1)) {
         db.run('UPDATE appointments SET reminded_60_at = ? WHERE id = ?', nowIso(), a.id);
-        if (p) platform.notify(ctx, { userId: p.id, channel: 'sms', target: p.phone, body: `یادآوری: ویزیت شما با ${d?.full_name ?? 'پزشک'} حدود ${left} دقیقه دیگر (${when}).` });
-        if (d) platform.notify(ctx, { userId: d.id, channel: 'push', target: d.phone, body: `یادآوری: ویزیت ${p?.full_name ?? 'بیمار'} حدود ${left} دقیقه دیگر (${when}).` });
+        if (p) platform.notify(ctx, { userId: p.id, channel: 'sms', target: p.phone, body: `یادآوری: ویزیت شما با ${d?.full_name ?? 'پزشک'} حدود ${toFaDigits(left)} دقیقه دیگر (${when}).` });
+        if (d) platform.notify(ctx, { userId: d.id, channel: 'push', target: d.phone, body: `یادآوری: ویزیت ${p?.full_name ?? 'بیمار'} حدود ${toFaDigits(left)} دقیقه دیگر (${when}).` });
       }
     }
   }
@@ -284,7 +284,7 @@ export function createAppointmentDomain({ db, platform, config = {}, patientDoma
       }
       if (q.delay_min >= 15 && q.delay_min >= (a.queue_delay_notified ?? 0) + 15) {
         db.run('UPDATE appointments SET queue_delay_notified = ? WHERE id = ?', q.delay_min, a.id);
-        platform.notify(ctx, { userId: p.id, channel: 'sms', target: p.phone, body: `ویزیت‌های ${d?.full_name ?? 'پزشک'} حدود ${q.delay_min} دقیقه تأخیر دارد؛ زمان تخمینی شروع ویزیت شما: ${at}.` });
+        platform.notify(ctx, { userId: p.id, channel: 'sms', target: p.phone, body: `ویزیت‌های ${d?.full_name ?? 'پزشک'} حدود ${toFaDigits(q.delay_min)} دقیقه تأخیر دارد؛ زمان تخمینی شروع ویزیت شما: ${at}.` });
       }
     }
   }

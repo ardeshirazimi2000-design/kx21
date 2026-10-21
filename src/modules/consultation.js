@@ -6,7 +6,7 @@ import { uuid, nowIso, parseJson, isUniqueViolation } from '../lib/db.js';
 import crypto from 'node:crypto';
 import { signJwt, signPayload, verifyPayload, canonical, sha256 } from '../lib/crypto.js';
 import { requireUser } from './auth.js';
-import { formatFaDateTime } from '../lib/fa.js';
+import { formatFaDateTime, toFaDigits } from '../lib/fa.js';
 import { checkPrescription, unknownDrugs, DRUG_KB_VERSION } from './rx/drug-kb.js';
 import { icdByCode } from './rx/icd10.js';
 
@@ -41,7 +41,7 @@ export function register(router, { db, keys, platform, config, domain }) {
     if (config.enforceJoinWindow && win) {
       if (now < Date.parse(win.opens_at)) {
         const mins = Math.ceil((Date.parse(win.opens_at) - now) / 60000);
-        throw conflict(`اتاق ویزیت ${mins > 90 ? `در ${formatFaDateTime(win.opens_at)}` : `${mins} دقیقه دیگر`} باز می‌شود`, 'too_early');
+        throw conflict(`اتاق ویزیت ${mins > 90 ? `در ${formatFaDateTime(win.opens_at)}` : `${toFaDigits(mins)} دقیقه دیگر`} باز می‌شود`, 'too_early');
       }
       if (now > Date.parse(win.closes_at)) throw conflict('زمان این ویزیت گذشته است', 'too_late');
     }
