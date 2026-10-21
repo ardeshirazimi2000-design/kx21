@@ -82,6 +82,18 @@ describe('calendar holidays', () => {
   });
 });
 
+describe('fixed solar holidays', () => {
+  it('the Super Admin adds a year\'s fixed holidays once', async () => {
+    expect((await as('admin').post('/api/holidays/solar', { year: 1406 })).status).toBe(403);
+    const r = await as('root').post('/api/holidays/solar', { year: 1406 });
+    expect(r.body).toEqual({ year: 1406, added: 10, total: 10 });
+    expect((await as('root').post('/api/holidays/solar', { year: 1406 })).body.added).toBe(0);
+    const list = (await as('admin').get(`/api/holidays/defined?chamberId=${yazd}&from=${g(1406, 1, 1)}&to=${g(1406, 12, 29)}`)).body;
+    expect(list.map((h: any) => h.date)).toEqual(expect.arrayContaining([g(1406, 1, 1), g(1406, 3, 14), g(1406, 11, 22), g(1406, 12, 29)]));
+    expect(list.find((h: any) => h.date === g(1406, 1, 13)).title).toBe('روز طبیعت');
+  });
+});
+
 describe('meetings on holidays', () => {
   it('asks for confirmation instead of scheduling on a holiday', async () => {
     const date = g(1405, 11, 22);
@@ -129,12 +141,17 @@ describe('official calendar web service (s.api.ir IsHoliday)', () => {
     await pool.query('DELETE FROM holiday_lookups');
   });
   afterAll(async () => {
+    config.holidayApiDateVerified = false;
     await new Promise((r) => server.close(r));
   });
 
   it('asks with the Jalali date, reads the answer and caches it', async () => {
     reply = (b) => ({ isSuccess: true, data: { isHoliday: b.date === '1405/12/29', events: [{ description: 'روز ملی شدن صنعت نفت', isHoliday: true }] } });
     const d = g(1405, 12, 29);
+    // Not used for the calendar until it is known to answer about the day asked.
+    expect((await as('secretary').get(`/api/holidays?chamberId=${yazd}&from=${d}&to=${d}`)).body).toEqual([]);
+    expect(calls.length).toBe(0);
+    config.holidayApiDateVerified = true;
     const r = await as('secretary').get(`/api/holidays?chamberId=${yazd}&from=${d}&to=${d}`);
     expect(r.body).toEqual([expect.objectContaining({ date: d, title: 'روز ملی شدن صنعت نفت', source: 'official' })]);
     expect(calls[0]).toEqual({ body: { date: '1405/12/29', weekend: true }, auth: 'Bearer test-token' });
@@ -155,6 +172,7 @@ describe('official calendar web service (s.api.ir IsHoliday)', () => {
     const now = new Date();
     const [jy] = toJalali(now.getFullYear(), now.getMonth() + 1, now.getDate());
     reply = (b) => ({ data: b.persianDate === `${jy}/1/1`, success: true, code: 0, message: '' });
+    config.holidayApiDateVerified = false;
     calls.length = 0;
     const r = await as('root').post('/api/holidays/service/detect');
     expect(r.status).toBe(200);

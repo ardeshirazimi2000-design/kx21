@@ -100,12 +100,24 @@ export interface DateStyle {
 }
 const STYLE_KEY = 'holiday_api_date_style';
 let style: DateStyle | null = null;
+let verified = false;
 
 export async function dateStyle(): Promise<DateStyle> {
   if (style) return style;
   const row = await query<{ value: DateStyle }>('SELECT value FROM app_settings WHERE key = $1', [STYLE_KEY]).catch(() => []);
+  verified = !!row[0];
   style = row[0]?.value ?? { field: 'date', format: config.holidayApiDateFormat === 'gregorian' ? 'g' : 'j' };
   return style;
+}
+
+/**
+ * Whether the web service is known to answer about the day asked (found by detectDateStyle, or set with
+ * HOLIDAY_API_DATE_VERIFIED). A service that ignores the date answers about today, so asking it about a whole
+ * month on a Friday would mark every day as a holiday; until then it is not used for the calendar.
+ */
+export async function dateStyleVerified() {
+  await dateStyle();
+  return verified || config.holidayApiDateVerified;
 }
 
 function formatFor(date: string, format: DateStyle['format']) {
@@ -197,6 +209,7 @@ export async function detectDateStyle(userId: string) {
       [STYLE_KEY, JSON.stringify(c), userId],
     );
     style = c;
+    verified = true;
     // Earlier answers were asked with another format.
     await query('DELETE FROM holiday_lookups');
     return { found: true, style: c, tried };
@@ -239,6 +252,7 @@ const FRESH_DAYS = 30;
 async function official(dates: string[]): Promise<Map<string, OfficialAnswer>> {
   const out = new Map<string, OfficialAnswer>();
   if (!officialCalendarEnabled() || !dates.length) return out;
+  if (config.holidayProvider === 'sapi' && !(await dateStyleVerified())) return out;
   const cached = await query<{ date: string; is_holiday: boolean; title: string | null }>(
     `SELECT to_char(date, 'YYYY-MM-DD') AS date, is_holiday, title FROM holiday_lookups
       WHERE date = ANY($1::date[]) AND checked_at > now() - make_interval(days => $2)`,

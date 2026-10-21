@@ -44,6 +44,20 @@ export function HolidaysPage() {
       setBusy(false);
     }
   };
+  const [addingSolar, setAddingSolar] = useState(false);
+  const addSolar = async () => {
+    setAddingSolar(true);
+    setErr(null);
+    try {
+      const r = await post<{ added: number }>('/holidays/solar', { year });
+      if (!r.added) alert(`تعطیلات ثابت سال ${fa(year)} قبلاً ثبت شده است.`);
+      void reload();
+    } catch (e) {
+      setErr(e as Error);
+    } finally {
+      setAddingSolar(false);
+    }
+  };
   const remove = async (h: any) => {
     if (!confirm(`تعطیلی «${h.title}» (${dateFa(h.date)}) حذف شود؟`)) return;
     try {
@@ -94,6 +108,14 @@ export function HolidaysPage() {
           </select>
         }
       >
+        {superAdmin && (
+          <div className="row gap-sm wrap mb" style={{ alignItems: 'center' }}>
+            <Button variant="secondary" busy={addingSolar} onClick={() => void addSolar()}>
+              افزودن تعطیلات ثابت شمسی سال {fa(year)}
+            </Button>
+            <span className="muted small">نوروز، ۱۲ و ۱۳ فروردین، ۱۴ و ۱۵ خرداد، ۲۲ بهمن و ۲۹ اسفند. تعطیلات قمری (عیدها و سوگواری‌ها) را از تقویم رسمی همان سال دستی اضافه کنید.</span>
+          </div>
+        )}
         {data?.length === 0 && <Empty>برای سال {fa(year)} تعطیلی‌ای تعریف نشده است.</Empty>}
         {!!data?.length && (
           <div className="table-wrap">
@@ -141,7 +163,7 @@ const STYLE_SAMPLE: Record<string, string> = { j: '1405/01/03', jn: '1405/1/3', 
 
 /** Status of the official calendar web service; the Super Admin can test it with a day. */
 function OfficialCalendar({ superAdmin }: { superAdmin: boolean }) {
-  const { data, reload } = useApi<{ provider: string; enabled: boolean; url: string; dateStyle: { field: string; format: string } | null; cachedDays: number; lastCheckedAt: string | null }>(
+  const { data, reload } = useApi<{ provider: string; enabled: boolean; url: string; dateStyle: { field: string; format: string } | null; dateVerified: boolean; cachedDays: number; lastCheckedAt: string | null }>(
     '/holidays/service',
   );
   const [date, setDate] = useState('');
@@ -178,9 +200,15 @@ function OfficialCalendar({ superAdmin }: { superAdmin: boolean }) {
   };
   return (
     <Card title="سرویس تقویم رسمی">
+      {data.enabled && !data.dateVerified && (
+        <p className="small" style={{ marginTop: 0, color: 'var(--warning, #b45309)' }}>
+          این سرویس هنوز برای تقویم استفاده نمی‌شود: معلوم نیست تاریخِ پرسیده‌شده را می‌شناسد یا فقط دربارهٔ امروز جواب می‌دهد. با «تشخیص خودکار شکل تاریخ» بررسی کنید؛ تا آن موقع جمعه‌ها و تعطیلات
+          تعریف‌شده در این صفحه در تقویم می‌آیند.
+        </p>
+      )}
       {data.enabled ? (
         <p style={{ marginTop: 0 }}>
-          <Badge tone="success">فعال</Badge> <span className="muted small ltr">{data.url}</span>
+          {data.dateVerified ? <Badge tone="success">فعال</Badge> : <Badge tone="warning">تأیید نشده</Badge>} <span className="muted small ltr">{data.url}</span>
           <br />
           <span className="muted small">
             پاسخ {fa(data.cachedDays)} روز ذخیره شده است{data.lastCheckedAt ? ` — آخرین پرسش: ${dateTimeFa(data.lastCheckedAt)}` : ''}. هر روز یک بار از سرویس پرسیده و تا ۳۰ روز نگه داشته می‌شود.

@@ -49,6 +49,8 @@ export const config = {
   meetingHolidayCheck: process.env.MEETING_HOLIDAY_CHECK !== 'false',
   /** How the date is sent: jalali = 1404/07/29, gregorian = 2025-10-21. */
   holidayApiDateFormat: (process.env.HOLIDAY_API_DATE_FORMAT || 'jalali') as 'jalali' | 'gregorian',
+  /** The service is known to accept the date as configured above (otherwise the admin page's detection decides). */
+  holidayApiDateVerified: process.env.HOLIDAY_API_DATE_VERIFIED === 'true',
   /** Built web app (apps/web/dist) to serve from this process, for single-port installs. */
   webDistDir: process.env.WEB_DIST_DIR,
   /** Set to true once the site is served over HTTPS (enables HSTS and upgrade-insecure-requests). */

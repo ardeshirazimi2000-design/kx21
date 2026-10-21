@@ -1,3 +1,4 @@
+import { toGregorian } from '@kx/shared';
 import { Router } from 'express';
 import { z } from 'zod';
 import { currentUser, type AuthUser } from '../auth/middleware.js';
@@ -7,7 +8,7 @@ import { audit } from '../lib/audit.js';
 import { badRequest, conflict, forbidden, notFound } from '../lib/errors.js';
 import { body, param, uuid } from '../lib/validate.js';
 import { requireChamberAdmin, visibleChamberIds } from '../services/access.js';
-import { askOfficial, dateStyle, detectDateStyle, holidaysBetween, officialCalendarEnabled } from '../services/holidays.js';
+import { askOfficial, dateStyle, dateStyleVerified, detectDateStyle, holidaysBetween, officialCalendarEnabled } from '../services/holidays.js';
 
 /** Holidays of the meetings calendar (تعطیلات). */
 export const holidaysRouter = Router();
@@ -67,6 +68,41 @@ holidaysRouter.post('/holidays', async (req, res) => {
   res.status(201).json(row);
 });
 
+/** Official holidays fixed in the solar calendar (the same day every year). Lunar holidays move and are added by hand. */
+const SOLAR_HOLIDAYS: [number, number, string][] = [
+  [1, 1, 'عید نوروز'],
+  [1, 2, 'عید نوروز'],
+  [1, 3, 'عید نوروز'],
+  [1, 4, 'عید نوروز'],
+  [1, 12, 'روز جمهوری اسلامی'],
+  [1, 13, 'روز طبیعت'],
+  [3, 14, 'رحلت امام خمینی'],
+  [3, 15, 'قیام ۱۵ خرداد'],
+  [11, 22, 'پیروزی انقلاب اسلامی'],
+  [12, 29, 'ملی شدن صنعت نفت'],
+];
+
+/** Adds a year's fixed solar holidays as nationwide holidays (days already defined are left as they are). */
+holidaysRouter.post('/holidays/solar', async (req, res) => {
+  const u = currentUser(req);
+  if (!u.isSuperAdmin) throw forbidden('تعطیلات سراسری را مدیر سامانه تعریف می‌کند');
+  const b = body(req, z.object({ year: z.number().int().min(1390).max(1500) }));
+  const added = await tx(async (c) => {
+    let n = 0;
+    for (const [m, d, title] of SOLAR_HOLIDAYS) {
+      const [gy, gm, gd] = toGregorian(b.year, m, d);
+      const r = await c.query(
+        `INSERT INTO holidays (chamber_id, date, title, created_by) VALUES (NULL, $1, $2, $3) ON CONFLICT DO NOTHING`,
+        [`${gy}-${String(gm).padStart(2, '0')}-${String(gd).padStart(2, '0')}`, title, u.id],
+      );
+      n += r.rowCount ?? 0;
+    }
+    await audit(c, req, { chamberId: null, action: 'holiday.solar_added', entity: 'holiday', entityId: String(b.year), after: { year: b.year, added: n } });
+    return n;
+  });
+  res.status(201).json({ year: b.year, added, total: SOLAR_HOLIDAYS.length });
+});
+
 holidaysRouter.delete('/holidays/:id', async (req, res) => {
   const u = currentUser(req);
   const h = await one('SELECT * FROM holidays WHERE id = $1', [param(req, 'id')]);
@@ -89,6 +125,8 @@ holidaysRouter.get('/holidays/service', async (req, res) => {
     enabled: officialCalendarEnabled(),
     url: config.holidayApiUrl,
     dateStyle: config.holidayProvider === 'sapi' ? await dateStyle() : null,
+    // Not used for the calendar until it is known to answer about the day asked.
+    dateVerified: config.holidayProvider === 'sapi' ? await dateStyleVerified() : true,
     cachedDays: last?.n ?? 0,
     lastCheckedAt: last?.last ?? null,
   });
