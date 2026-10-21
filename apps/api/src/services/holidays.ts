@@ -35,15 +35,31 @@ export const jalaliText = (date: string) => {
 
 // ─────────────────────────── official calendar web service ───────────────────────────
 
-/** The first boolean whose key mentions a holiday, searching nested objects (response shapes vary). */
+/** true/false written in any of the usual ways ("true", 1, "بله"…), or null. */
+function asBool(v: unknown): boolean | null {
+  if (typeof v === 'boolean') return v;
+  if (v === 1 || v === 0) return v === 1;
+  if (typeof v === 'string') {
+    const t = v.trim().toLowerCase();
+    if (['true', '1', 'yes', 'بله', 'تعطیل'].includes(t)) return true;
+    if (['false', '0', 'no', 'خیر', 'کاری'].includes(t)) return false;
+  }
+  return null;
+}
+
+/** The first yes/no value whose key mentions a holiday, searching nested objects (response shapes vary). */
 function findFlag(obj: unknown, depth = 0): boolean | null {
   if (!obj || typeof obj !== 'object' || depth > 4) return null;
   const o = obj as Record<string, unknown>;
-  for (const [k, v] of Object.entries(o)) if (typeof v === 'boolean' && /holiday|tatil|off$/i.test(k)) return v;
+  for (const [k, v] of Object.entries(o)) {
+    if (/holiday|tatil|off$/i.test(k) && asBool(v) !== null) return asBool(v);
+  }
   for (const v of Object.values(o)) {
     const r = findFlag(v, depth + 1);
     if (r !== null) return r;
   }
+  // A bare answer: {"data": true} or {"result": "true"}.
+  if (depth === 0) for (const k of ['data', 'result', 'value', 'response']) if (k in o && asBool(o[k]) !== null) return asBool(o[k]);
   return null;
 }
 
@@ -88,7 +104,14 @@ async function sapi(date: string): Promise<OfficialAnswer> {
   } catch (e) {
     throw new HttpError(502, 'holiday_unavailable', `سرویس تقویم رسمی در دسترس نیست (${(e as Error).message})`);
   }
-  const body: any = await res.json().catch(() => null);
+  const text = await res.text().catch(() => '');
+  let body: any;
+  try {
+    body = JSON.parse(text);
+  } catch {
+    // Not JSON: keep the beginning of the text so the admin's test can show what came back.
+    body = { httpStatus: res.status, text: text.slice(0, 2000) };
+  }
   if (res.status === 401 || res.status === 403) throw new HttpError(502, 'holiday_auth_failed', 'دسترسی به سرویس تقویم رسمی رد شد (توکن نامعتبر یا منقضی)');
   if (!res.ok) throw new HttpError(502, 'holiday_failed', `پاسخ نامعتبر از سرویس تقویم رسمی (کد ${res.status})`);
   const flag = findFlag(body);
