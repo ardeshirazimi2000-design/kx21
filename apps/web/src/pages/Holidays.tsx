@@ -1,6 +1,6 @@
 import { toGregorian, toJalali } from '@kx/shared';
 import { useState } from 'react';
-import { Badge, Button, Card, dateFa, dateTimeFa, Empty, ErrorBox, Field, fa, JalaliDateInput, PageHeader } from '../components/ui';
+import { Badge, Button, Card, dateFa, dateTimeFa, Empty, ErrorBox, Field, fa, JalaliDateInput, Modal, PageHeader } from '../components/ui';
 import { del, post } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { useApi } from '../lib/hooks';
@@ -44,20 +44,7 @@ export function HolidaysPage() {
       setBusy(false);
     }
   };
-  const [addingSolar, setAddingSolar] = useState(false);
-  const addSolar = async () => {
-    setAddingSolar(true);
-    setErr(null);
-    try {
-      const r = await post<{ added: number }>('/holidays/solar', { year });
-      if (!r.added) alert(`تعطیلات ثابت سال ${fa(year)} قبلاً ثبت شده است.`);
-      void reload();
-    } catch (e) {
-      setErr(e as Error);
-    } finally {
-      setAddingSolar(false);
-    }
-  };
+  const [reviewing, setReviewing] = useState(false);
   const remove = async (h: any) => {
     if (!confirm(`تعطیلی «${h.title}» (${dateFa(h.date)}) حذف شود؟`)) return;
     try {
@@ -110,10 +97,10 @@ export function HolidaysPage() {
       >
         {superAdmin && (
           <div className="row gap-sm wrap mb" style={{ alignItems: 'center' }}>
-            <Button variant="secondary" busy={addingSolar} onClick={() => void addSolar()}>
-              افزودن تعطیلات ثابت شمسی سال {fa(year)}
+            <Button variant="secondary" onClick={() => setReviewing(true)}>
+              تعطیلات رسمی سال {fa(year)}…
             </Button>
-            <span className="muted small">نوروز، ۱۲ و ۱۳ فروردین، ۱۴ و ۱۵ خرداد، ۲۲ بهمن و ۲۹ اسفند. تعطیلات قمری (عیدها و سوگواری‌ها) را از تقویم رسمی همان سال دستی اضافه کنید.</span>
+            <span className="muted small">فهرست تعطیلات رسمی سال را می‌بینید، بررسی می‌کنید و یک‌جا ثبت می‌کنید.</span>
           </div>
         )}
         {data?.length === 0 && <Empty>برای سال {fa(year)} تعطیلی‌ای تعریف نشده است.</Empty>}
@@ -153,8 +140,117 @@ export function HolidaysPage() {
         )}
       </Card>
 
+      {reviewing && (
+        <OfficialHolidaysModal
+          year={year}
+          onClose={() => setReviewing(false)}
+          onSaved={() => {
+            setReviewing(false);
+            void reload();
+          }}
+        />
+      )}
       <OfficialCalendar superAdmin={superAdmin} />
     </>
+  );
+}
+
+/**
+ * A year's official holidays (from the bundled dataset, or the fixed solar ones for other years) for the
+ * Super Admin to review before adding them as nationwide holidays.
+ */
+function OfficialHolidaysModal({ year, onClose, onSaved }: { year: number; onClose: () => void; onSaved: () => void }) {
+  const { data } = useApi<{ source: 'dataset' | 'solar'; missing: string[]; items: { date: string; jalali: string; title: string; exists: boolean }[] }>(
+    `/holidays/official?year=${year}`,
+  );
+  const [skip, setSkip] = useState<Set<string>>(new Set());
+  const [err, setErr] = useState<Error | null>(null);
+  const [busy, setBusy] = useState(false);
+  const fresh = (data?.items ?? []).filter((i) => !i.exists);
+  const chosen = fresh.filter((i) => !skip.has(i.date));
+  const save = async () => {
+    setBusy(true);
+    setErr(null);
+    try {
+      await post('/holidays/official', { year, dates: chosen.map((i) => i.date) });
+      onSaved();
+    } catch (e) {
+      setErr(e as Error);
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <Modal
+      title={`تعطیلات رسمی سال ${fa(year)}`}
+      wide
+      onClose={onClose}
+      footer={
+        <Button busy={busy} disabled={!chosen.length} onClick={() => void save()}>
+          ثبت {fa(chosen.length)} روز به‌عنوان تعطیلی سراسری
+        </Button>
+      }
+    >
+      <ErrorBox error={err} />
+      {!data ? (
+        <p className="muted">در حال بارگذاری…</p>
+      ) : (
+        <>
+          {data.source === 'dataset' ? (
+            <p className="small muted" style={{ marginTop: 0 }}>
+              از مجموعه دادهٔ تعطیلات رسمی ایران. پیش از ثبت با تقویم رسمی همان سال مقایسه کنید و هر روزی را که نمی‌خواهید از انتخاب خارج کنید.
+            </p>
+          ) : (
+            <p className="small muted" style={{ marginTop: 0 }}>
+              برای این سال فقط تعطیلات ثابت شمسی در دسترس است؛ تعطیلات قمری را از تقویم رسمی دستی اضافه کنید.
+            </p>
+          )}
+          {data.missing.length > 0 && (
+            <div className="small mb" style={{ color: 'var(--danger)' }}>
+              این مناسبت‌ها در منبع نیامده‌اند؛ تاریخشان را از تقویم رسمی پیدا کنید و با «افزودن تعطیلی» ثبت کنید: {data.missing.join('، ')}
+            </div>
+          )}
+          <div className="table-wrap">
+            <table className="table">
+              <thead>
+                <tr>
+                  <th />
+                  <th>تاریخ</th>
+                  <th>روز</th>
+                  <th>مناسبت</th>
+                </tr>
+              </thead>
+              <tbody>
+                {data.items.map((i) => (
+                  <tr key={i.date} style={{ opacity: i.exists ? 0.55 : 1 }}>
+                    <td>
+                      <input
+                        type="checkbox"
+                        aria-label={i.title}
+                        disabled={i.exists}
+                        checked={i.exists || !skip.has(i.date)}
+                        onChange={(e) => {
+                          const next = new Set(skip);
+                          if (e.target.checked) next.delete(i.date);
+                          else next.add(i.date);
+                          setSkip(next);
+                        }}
+                      />
+                    </td>
+                    <td>{dateFa(i.date)}</td>
+                    <td className="small">{weekday(i.date)}</td>
+                    <td>
+                      {i.title}
+                      {i.exists && <span className="muted small"> (قبلاً ثبت شده)</span>}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </>
+      )}
+    </Modal>
   );
 }
 

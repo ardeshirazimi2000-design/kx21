@@ -8,6 +8,7 @@ import { audit } from '../lib/audit.js';
 import { badRequest, conflict, forbidden, notFound } from '../lib/errors.js';
 import { body, param, uuid } from '../lib/validate.js';
 import { requireChamberAdmin, visibleChamberIds } from '../services/access.js';
+import { IRAN_HOLIDAYS } from '../services/iranHolidays.js';
 import { askOfficial, dateStyle, dateStyleVerified, detectDateStyle, holidaysBetween, officialCalendarEnabled } from '../services/holidays.js';
 
 /** Holidays of the meetings calendar (تعطیلات). */
@@ -68,39 +69,68 @@ holidaysRouter.post('/holidays', async (req, res) => {
   res.status(201).json(row);
 });
 
-/** Official holidays fixed in the solar calendar (the same day every year). Lunar holidays move and are added by hand. */
-const SOLAR_HOLIDAYS: [number, number, string][] = [
-  [1, 1, 'عید نوروز'],
-  [1, 2, 'عید نوروز'],
-  [1, 3, 'عید نوروز'],
-  [1, 4, 'عید نوروز'],
-  [1, 12, 'روز جمهوری اسلامی'],
-  [1, 13, 'روز طبیعت'],
-  [3, 14, 'رحلت امام خمینی'],
-  [3, 15, 'قیام ۱۵ خرداد'],
-  [11, 22, 'پیروزی انقلاب اسلامی'],
-  [12, 29, 'ملی شدن صنعت نفت'],
+/** Official holidays fixed in the solar calendar (the same day every year), for years outside the dataset. */
+const SOLAR_HOLIDAYS: [string, string][] = [
+  ['01/01', 'عید نوروز'],
+  ['01/02', 'عید نوروز'],
+  ['01/03', 'عید نوروز'],
+  ['01/04', 'عید نوروز'],
+  ['01/12', 'روز جمهوری اسلامی'],
+  ['01/13', 'روز طبیعت'],
+  ['03/14', 'رحلت امام خمینی'],
+  ['03/15', 'قیام ۱۵ خرداد'],
+  ['11/22', 'پیروزی انقلاب اسلامی'],
+  ['12/29', 'ملی شدن صنعت نفت'],
 ];
 
-/** Adds a year's fixed solar holidays as nationwide holidays (days already defined are left as they are). */
-holidaysRouter.post('/holidays/solar', async (req, res) => {
+/** A year's official holidays: the dataset when it has the year, otherwise the fixed solar ones only. */
+function officialList(year: number) {
+  const known = IRAN_HOLIDAYS[year];
+  const days = known?.days ?? SOLAR_HOLIDAYS;
+  return {
+    source: known ? ('dataset' as const) : ('solar' as const),
+    missing: known?.missing ?? [],
+    items: days.map(([md, title]) => {
+      const [m, d] = md.split('/').map(Number);
+      const [gy, gm, gd] = toGregorian(year, m, d);
+      return { date: `${gy}-${String(gm).padStart(2, '0')}-${String(gd).padStart(2, '0')}`, jalali: `${year}/${md}`, title };
+    }),
+  };
+}
+
+const yearParam = z.coerce.number().int().min(1390).max(1500);
+
+/** Preview of a year's official holidays, with the days already defined marked. */
+holidaysRouter.get('/holidays/official', async (req, res) => {
+  const u = currentUser(req);
+  if (!u.isSuperAdmin) throw forbidden();
+  const year = yearParam.parse(req.query.year);
+  const list = officialList(year);
+  const existing = new Set(
+    (await query<{ date: string }>(`SELECT to_char(date, 'YYYY-MM-DD') AS date FROM holidays WHERE chamber_id IS NULL AND date = ANY($1::date[])`, [list.items.map((i) => i.date)])).map(
+      (r) => r.date,
+    ),
+  );
+  res.json({ year, ...list, items: list.items.map((i) => ({ ...i, exists: existing.has(i.date) })) });
+});
+
+/** Adds the reviewed official holidays (all, or the chosen days) as nationwide holidays; days already defined stay. */
+holidaysRouter.post('/holidays/official', async (req, res) => {
   const u = currentUser(req);
   if (!u.isSuperAdmin) throw forbidden('تعطیلات سراسری را مدیر سامانه تعریف می‌کند');
-  const b = body(req, z.object({ year: z.number().int().min(1390).max(1500) }));
+  const b = body(req, z.object({ year: yearParam, dates: z.array(day).optional() }));
+  const list = officialList(b.year);
+  const chosen = b.dates ? list.items.filter((i) => b.dates!.includes(i.date)) : list.items;
   const added = await tx(async (c) => {
     let n = 0;
-    for (const [m, d, title] of SOLAR_HOLIDAYS) {
-      const [gy, gm, gd] = toGregorian(b.year, m, d);
-      const r = await c.query(
-        `INSERT INTO holidays (chamber_id, date, title, created_by) VALUES (NULL, $1, $2, $3) ON CONFLICT DO NOTHING`,
-        [`${gy}-${String(gm).padStart(2, '0')}-${String(gd).padStart(2, '0')}`, title, u.id],
-      );
+    for (const i of chosen) {
+      const r = await c.query(`INSERT INTO holidays (chamber_id, date, title, created_by) VALUES (NULL, $1, $2, $3) ON CONFLICT DO NOTHING`, [i.date, i.title, u.id]);
       n += r.rowCount ?? 0;
     }
-    await audit(c, req, { chamberId: null, action: 'holiday.solar_added', entity: 'holiday', entityId: String(b.year), after: { year: b.year, added: n } });
+    await audit(c, req, { chamberId: null, action: 'holiday.official_added', entity: 'holiday', entityId: String(b.year), after: { year: b.year, source: list.source, added: n } });
     return n;
   });
-  res.status(201).json({ year: b.year, added, total: SOLAR_HOLIDAYS.length });
+  res.status(201).json({ year: b.year, source: list.source, added, total: chosen.length });
 });
 
 holidaysRouter.delete('/holidays/:id', async (req, res) => {

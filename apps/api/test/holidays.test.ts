@@ -82,15 +82,29 @@ describe('calendar holidays', () => {
   });
 });
 
-describe('fixed solar holidays', () => {
-  it('the Super Admin adds a year\'s fixed holidays once', async () => {
-    expect((await as('admin').post('/api/holidays/solar', { year: 1406 })).status).toBe(403);
-    const r = await as('root').post('/api/holidays/solar', { year: 1406 });
-    expect(r.body).toEqual({ year: 1406, added: 10, total: 10 });
-    expect((await as('root').post('/api/holidays/solar', { year: 1406 })).body.added).toBe(0);
-    const list = (await as('admin').get(`/api/holidays/defined?chamberId=${yazd}&from=${g(1406, 1, 1)}&to=${g(1406, 12, 29)}`)).body;
-    expect(list.map((h: any) => h.date)).toEqual(expect.arrayContaining([g(1406, 1, 1), g(1406, 3, 14), g(1406, 11, 22), g(1406, 12, 29)]));
-    expect(list.find((h: any) => h.date === g(1406, 1, 13)).title).toBe('روز طبیعت');
+describe('official holidays list', () => {
+  it('shows a year of the dataset for review, then adds it once', async () => {
+    expect((await as('admin').get('/api/holidays/official?year=1405')).status).toBe(403);
+    const p = (await as('root').get('/api/holidays/official?year=1405')).body;
+    expect(p.source).toBe('dataset');
+    expect(p.items).toEqual(expect.arrayContaining([expect.objectContaining({ jalali: '1405/03/07', title: 'عید سعید قربان', date: g(1405, 3, 7), exists: false })]));
+    expect(p.missing).toContain('اربعین حسینی');
+    // Only the chosen days.
+    const one = await as('root').post('/api/holidays/official', { year: 1405, dates: [g(1405, 12, 19)] });
+    expect(one.body).toMatchObject({ added: 1, total: 1 });
+    const all = await as('root').post('/api/holidays/official', { year: 1405 });
+    expect(all.body.added).toBe(p.items.length - 1);
+    expect((await as('root').get('/api/holidays/official?year=1405')).body.items.every((i: any) => i.exists)).toBe(true);
+    const list = (await as('admin').get(`/api/holidays/defined?chamberId=${yazd}&from=${g(1405, 1, 1)}&to=${g(1405, 12, 29)}`)).body;
+    expect(list.find((h: any) => h.date === g(1405, 4, 5)).title).toBe('عاشورای حسینی');
+  });
+
+  it('leaves out the dataset\'s 30 Esfand 1408 and falls back to the fixed solar days elsewhere', async () => {
+    const y1408 = (await as('root').get('/api/holidays/official?year=1408')).body;
+    expect(y1408.items.find((i: any) => i.jalali === '1408/12/30')).toBeUndefined();
+    const y1420 = (await as('root').get('/api/holidays/official?year=1420')).body;
+    expect(y1420).toMatchObject({ source: 'solar', missing: [] });
+    expect(y1420.items).toHaveLength(10);
   });
 });
 
@@ -139,6 +153,8 @@ describe('official calendar web service (s.api.ir IsHoliday)', () => {
     config.holidayApiUrl = `http://127.0.0.1:${(server.address() as AddressInfo).port}/api/sw1/IsHoliday`;
     config.holidayApiToken = 'Bearer test-token';
     await pool.query('DELETE FROM holiday_lookups');
+    // Only the web service's answers in these tests.
+    await pool.query('DELETE FROM holidays');
   });
   afterAll(async () => {
     config.holidayApiDateVerified = false;
