@@ -13,8 +13,10 @@ import { z } from 'zod';
 import { currentUser, type AuthUser } from '../auth/middleware.js';
 import { one, pool, query, tx } from '../db/pool.js';
 import { audit } from '../lib/audit.js';
-import { badRequest, conflict, forbidden, notFound } from '../lib/errors.js';
+import { badRequest, conflict, forbidden, HttpError, notFound } from '../lib/errors.js';
 import { body, listParam, paged, pageParams, param, uuid } from '../lib/validate.js';
+import { config } from '../config.js';
+import { holidayOn, jalaliLabel, tehranDate } from '../services/holidays.js';
 import { commissionAccess, meetingAccess, type MeetingAccess } from '../services/access.js';
 import {
   broadcastAttendance,
@@ -99,7 +101,18 @@ const meetingSchema = z.object({
   invitees: z.array(z.object({ userId: uuid, role: z.string().default('guest'), hasVote: z.boolean().optional() })).default([]),
   agenda: z.array(agendaInput).default([]),
   schedule: z.boolean().default(false),
+  /** Confirms a meeting on a holiday (otherwise refused with code `holiday`, to catch a wrong date). */
+  allowHoliday: z.boolean().default(false),
 });
+
+/** Refuses a date that is a holiday unless the secretary has confirmed it. */
+async function guardHoliday(chamberId: string, at: string, allow: boolean) {
+  if (allow || !config.meetingHolidayCheck) return;
+  const h = await holidayOn(chamberId, new Date(at));
+  if (h) {
+    throw new HttpError(409, 'holiday', `روز ${jalaliLabel(h.date)} تعطیل است (${h.title}). اگر جلسه واقعاً در این روز برگزار می‌شود، آن را تأیید کنید.`, { holiday: h });
+  }
+}
 
 meetingsRouter.post('/meetings', async (req, res) => {
   const u = currentUser(req);
@@ -107,6 +120,7 @@ meetingsRouter.post('/meetings', async (req, res) => {
   const ca = await commissionAccess(u, b.commissionId);
   ca.require('meeting.manage');
   if (ca.commission.status !== 'active') throw conflict('کمیسیون فعال نیست');
+  await guardHoliday(ca.commission.chamber_id, b.scheduledAt, b.allowHoliday);
   const row = await tx(async (c) => {
     await c.query('SELECT 1 FROM commissions WHERE id = $1 FOR UPDATE', [b.commissionId]);
     const number =
@@ -217,7 +231,12 @@ meetingsRouter.get('/meetings/:id', async (req, res) => {
 meetingsRouter.patch('/meetings/:id', async (req, res) => {
   const u = currentUser(req);
   const id = param(req, 'id');
-  const b = body(req, meetingSchema.pick({ title: true, scheduledAt: true, durationMinutes: true, location: true, onlineLink: true, type: true }).partial());
+  const b = body(req, meetingSchema.pick({ title: true, scheduledAt: true, durationMinutes: true, location: true, onlineLink: true, type: true, allowHoliday: true }).partial());
+  if (b.scheduledAt) {
+    const m = await one<{ chamber_id: string; scheduled_at: Date }>('SELECT chamber_id, scheduled_at FROM meetings WHERE id = $1', [id]);
+    // Only a move to another day is checked again.
+    if (m && tehranDate(new Date(m.scheduled_at)) !== tehranDate(new Date(b.scheduledAt))) await guardHoliday(m.chamber_id, b.scheduledAt, !!b.allowHoliday);
+  }
   const { after, changed, notifyChange } = await tx(async (c) => {
     const a = await meetingAccess(u, id, c, { forUpdate: true });
     a.require('meeting.manage');

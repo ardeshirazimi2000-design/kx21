@@ -6,11 +6,12 @@ import { dateOfJalali, firstColumn, jalaliOf, WEEK_HEADER } from '../components/
 import { Badge, Button, Card, dateTimeFa, Empty, ErrorBox, Field, fa, JalaliDateTimeInput, Loading, Modal, PageHeader } from '../components/ui';
 import { post } from '../lib/api';
 import { useAuth } from '../lib/auth';
+import { confirmHoliday } from '../lib/holidays';
 import { useApi } from '../lib/hooks';
 
 export function MeetingsPage() {
   const nav = useNavigate();
-  const { me } = useAuth();
+  const { me, chamberId } = useAuth();
   const now = new Date();
   const today = toJalali(now.getFullYear(), now.getMonth() + 1, now.getDate());
   const [[jy, jm], setMonth] = useState<[number, number]>([today[0], today[1]]);
@@ -29,6 +30,7 @@ export function MeetingsPage() {
     return { from: new Date(gy, gm - 1, gd).toISOString(), to: new Date(gy2, gm2 - 1, gd2).toISOString() };
   }, [jy, jm]);
   const { data, loading, reload } = useApi(`/meetings?from=${range.from}&to=${range.to}&pageSize=100&mine=${mine}`);
+  const holidays = useApi<Holiday[]>(`/holidays?${chamberId ? `chamberId=${chamberId}&` : ''}from=${gDay(jy, jm, 1)}&to=${gDay(jy, jm, jalaliMonthLength(jy, jm))}`);
   const [open, setOpen] = useState<false | { date?: string }>(false);
   // Meetings are created by each commission's secretary/chair (executive work), not by the chamber admin.
   const canCreate = me!.memberships.some((m) => ['chair', 'vice_chair', 'secretary'].includes(m.position));
@@ -104,6 +106,7 @@ export function MeetingsPage() {
           year={jy}
           month={jm}
           meetings={data?.items ?? []}
+          holidays={holidays.data ?? []}
           onOpen={(id) => nav(`/meetings/${id}`)}
           onPickDay={canCreate ? (date) => setOpen({ date }) : undefined}
         />
@@ -172,15 +175,18 @@ export function NewMeetingModal({ commissionId, initialDate, onClose, onSaved }:
   const save = async () => {
     setBusy(true);
     try {
-      const r = await post('/meetings', {
-        ...form,
-        commissionId: form.commissionId || options[0]?.id,
-        location: form.location || null,
-        onlineLink: form.onlineLink || null,
-        agenda: agenda.filter((a) => a.trim().length >= 2).map((title) => ({ title })),
-        schedule: true,
-      });
-      onSaved(r.id);
+      const r = await confirmHoliday((allowHoliday) =>
+        post('/meetings', {
+          ...form,
+          commissionId: form.commissionId || options[0]?.id,
+          location: form.location || null,
+          onlineLink: form.onlineLink || null,
+          agenda: agenda.filter((a) => a.trim().length >= 2).map((title) => ({ title })),
+          schedule: true,
+          allowHoliday,
+        }),
+      );
+      if (r) onSaved(r.id);
     } catch (e) {
       setErr(e as Error);
     } finally {
@@ -257,7 +263,30 @@ export function NewMeetingModal({ commissionId, initialDate, onClose, onSaved }:
 const LIVE = ['checkin_open', 'in_progress', 'agenda_processing'];
 
 /** Month grid (Saturday-first) with the meetings of each day; clicking a day can start a new meeting. */
-function MonthCalendar({ year, month, meetings, onOpen, onPickDay }: { year: number; month: number; meetings: any[]; onOpen: (id: string) => void; onPickDay?: (iso: string) => void }) {
+type Holiday = { date: string; title: string; source: string };
+const pad2 = (n: number) => String(n).padStart(2, '0');
+/** Gregorian YYYY-MM-DD of a Jalali day. */
+const gDay = (jy: number, jm: number, jd: number) => {
+  const [y, m, d] = toGregorian(jy, jm, jd);
+  return `${y}-${pad2(m)}-${pad2(d)}`;
+};
+
+function MonthCalendar({
+  year,
+  month,
+  meetings,
+  holidays,
+  onOpen,
+  onPickDay,
+}: {
+  year: number;
+  month: number;
+  meetings: any[];
+  holidays: Holiday[];
+  onOpen: (id: string) => void;
+  onPickDay?: (iso: string) => void;
+}) {
+  const holidayOf = new Map(holidays.map((h) => [h.date, h]));
   const today = jalaliOf(new Date());
   const lead = firstColumn(year, month);
   const days = jalaliMonthLength(year, month);
@@ -280,17 +309,21 @@ function MonthCalendar({ year, month, meetings, onOpen, onPickDay }: { year: num
         if (d === null) return <div key={`e${i}`} className="cal-cell cal-out" />;
         const isToday = today[0] === year && today[1] === month && today[2] === d;
         const items = byDay.get(d) ?? [];
+        const holiday = holidayOf.get(gDay(year, month, d));
+        // Fridays are already shown in red; other holidays get their occasion written in the cell.
+        const occasion = holiday && holiday.source !== 'friday' ? holiday.title.replace(/،? ?جمعه$/, '') : null;
         return (
           <div
             key={d}
-            className={`cal-cell ${isToday ? 'cal-today' : ''} ${onPickDay ? 'cal-pickable' : ''}`}
+            className={`cal-cell ${isToday ? 'cal-today' : ''} ${onPickDay ? 'cal-pickable' : ''} ${holiday ? 'cal-holiday' : ''}`}
             onClick={() => onPickDay?.(dateOfJalali([year, month, d], 10, 0).toISOString())}
-            title={onPickDay ? 'تعریف جلسه در این روز' : undefined}
+            title={holiday ? `تعطیل: ${holiday.title}` : onPickDay ? 'تعریف جلسه در این روز' : undefined}
           >
-            <div className={`cal-num ${i % 7 === 6 ? 'jp-fri' : ''}`}>
+            <div className={`cal-num ${i % 7 === 6 || holiday ? 'jp-fri' : ''}`}>
               <span>{fa(d)}</span>
               {onPickDay && <span className="cal-add">+ جلسه</span>}
             </div>
+            {occasion && <div className="cal-occasion">{occasion}</div>}
             {items.map((m) => (
               <button
                 key={m.id}

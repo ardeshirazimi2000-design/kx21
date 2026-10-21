@@ -22,6 +22,7 @@ import { ReportsPage } from './pages/Reports';
 import { ResolutionDetailPage } from './pages/ResolutionDetail';
 import { ResolutionsPage } from './pages/Resolutions';
 import { RolesPage } from './pages/Roles';
+import { HolidaysPage } from './pages/Holidays';
 import { SearchPage } from './pages/Search';
 import { TermsPage } from './pages/Terms';
 
@@ -45,6 +46,7 @@ export function App() {
         <Route path="/commissions/:id" element={<CommissionDetailPage />} />
         <Route path="/people" element={<PeoplePage />} />
         <Route path="/roles" element={<RolesPage />} />
+        <Route path="/holidays" element={<HolidaysPage />} />
         <Route path="/notification-settings" element={<NotificationSettingsPage />} />
         <Route path="/integrations" element={<IntegrationsPage />} />
         <Route path="/meetings" element={<MeetingsPage />} />
@@ -134,11 +136,12 @@ function Shell({ children }: { children: ReactNode }) {
             {(isExpert || isOfficer) && item('/referrals', 'ارجاعات کارشناسی')}
             {item('/notifications', 'اعلان‌ها', unread.data?.total ? <span className="count">{fa(unread.data.total)}</span> : null)}
           </NavGroup>
-          <NavGroup id="structure" title="ساختار" paths={['/commissions', '/terms', '/people', '/roles', '/notification-settings', '/integrations', '/chambers']}>
+          <NavGroup id="structure" title="ساختار" paths={['/commissions', '/terms', '/people', '/roles', '/holidays', '/notification-settings', '/integrations', '/chambers']}>
             {item('/commissions', 'کمیسیون‌ها')}
             {isAdmin && item('/terms', 'دوره‌ها')}
             {(isAdmin || isOfficer) && item('/people', 'اشخاص و کاربران')}
             {isAdmin && item('/roles', 'نقش‌ها و دسترسی‌ها')}
+            {isAdmin && item('/holidays', 'تعطیلات')}
             {isAdmin && item('/notification-settings', 'تنظیمات اطلاع‌رسانی')}
             {isAdmin && item('/integrations', 'یکپارچه‌سازی')}
             {me!.is_super_admin && item('/chambers', 'اتاق‌ها')}

@@ -390,3 +390,7 @@ table.table { width: 100%; border-collapse: collapse; }
 @media (max-width: 640px) {
   .cal-nav { justify-content: center; }
 }
+
+/* Holidays in the meetings calendar */
+.cal-holiday { background: color-mix(in srgb, var(--danger) 6%, transparent); }
+.cal-occasion { font-size: 0.72rem; color: var(--danger); line-height: 1.4; margin-bottom: 2px; overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }

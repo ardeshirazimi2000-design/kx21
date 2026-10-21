@@ -21,6 +21,7 @@ import { AgendaBadge, AttendanceBadge, MeetingStatusBadge, MinutesBadge, Resolut
 import { Badge, Button, Card, dateFa, dateTimeFa, Empty, ErrorBox, Field, fa, JalaliDateInput, JalaliDateTimeInput, Loading, Modal, PageHeader, Tabs } from '../components/ui';
 import { ApiError, del, download, get, patch, post, upload } from '../lib/api';
 import { useAuth } from '../lib/auth';
+import { confirmHoliday } from '../lib/holidays';
 import { useApi, useRoles, useSocket } from '../lib/hooks';
 
 type Tab = 'agenda' | 'attendance' | 'invitees' | 'documents' | 'minutes' | 'resolutions';
@@ -1366,15 +1367,18 @@ function EditMeetingModal({ m, onClose, onSaved }: { m: any; onClose: () => void
     setBusy(true);
     setErr(null);
     try {
-      await patch(`/meetings/${m.id}`, {
-        title: form.title,
-        scheduledAt: form.scheduledAt,
-        durationMinutes: Number(form.durationMinutes),
-        type: form.type,
-        location: form.location || null,
-        onlineLink: form.onlineLink || null,
-      });
-      onSaved();
+      const r = await confirmHoliday((allowHoliday) =>
+        patch(`/meetings/${m.id}`, {
+          title: form.title,
+          scheduledAt: form.scheduledAt,
+          durationMinutes: Number(form.durationMinutes),
+          type: form.type,
+          location: form.location || null,
+          onlineLink: form.onlineLink || null,
+          allowHoliday,
+        }),
+      );
+      if (r) onSaved();
     } catch (e) {
       setErr(e as Error);
     } finally {

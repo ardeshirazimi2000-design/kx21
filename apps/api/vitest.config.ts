@@ -9,6 +9,8 @@ export default defineConfig({
       TZ: 'Asia/Tehran',
       WEBINAR_URL: 'https://webinar.test',
       WEBINAR_APP_SECRET: 'test-webinar-secret',
+      // Tests scheduling meetings "in 3 days" would fail on the days that fall on a Friday; holidays.test enables it.
+      MEETING_HOLIDAY_CHECK: 'false',
     },
     fileParallelism: false,
     testTimeout: 30000,
