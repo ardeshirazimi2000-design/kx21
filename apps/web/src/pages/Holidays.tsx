@@ -136,13 +136,32 @@ export function HolidaysPage() {
   );
 }
 
+/** Example of each date format, for 3 Farvardin 1405. */
+const STYLE_SAMPLE: Record<string, string> = { j: '1405/01/03', jn: '1405/1/3', jd: '1405-01-03', g: '2026-03-23', giso: '2026-03-23T00:00:00' };
+
 /** Status of the official calendar web service; the Super Admin can test it with a day. */
 function OfficialCalendar({ superAdmin }: { superAdmin: boolean }) {
-  const { data, reload } = useApi<{ provider: string; enabled: boolean; url: string; cachedDays: number; lastCheckedAt: string | null }>('/holidays/service');
+  const { data, reload } = useApi<{ provider: string; enabled: boolean; url: string; dateStyle: { field: string; format: string } | null; cachedDays: number; lastCheckedAt: string | null }>(
+    '/holidays/service',
+  );
   const [date, setDate] = useState('');
   const [result, setResult] = useState<any>(null);
   const [busy, setBusy] = useState(false);
+  const [detected, setDetected] = useState<any>(null);
+  const [detecting, setDetecting] = useState(false);
   if (!data) return null;
+  const detect = async () => {
+    setDetecting(true);
+    setDetected(null);
+    try {
+      setDetected(await post('/holidays/service/detect'));
+      void reload();
+    } catch (e) {
+      setDetected({ error: (e as Error).message });
+    } finally {
+      setDetecting(false);
+    }
+  };
   const test = async () => {
     setBusy(true);
     try {
@@ -166,11 +185,55 @@ function OfficialCalendar({ superAdmin }: { superAdmin: boolean }) {
           <span className="muted small">
             پاسخ {fa(data.cachedDays)} روز ذخیره شده است{data.lastCheckedAt ? ` — آخرین پرسش: ${dateTimeFa(data.lastCheckedAt)}` : ''}. هر روز یک بار از سرویس پرسیده و تا ۳۰ روز نگه داشته می‌شود.
           </span>
+          {data.dateStyle && (
+            <>
+              <br />
+              <span className="muted small">
+                شکل ارسال تاریخ: <span className="ltr">{`"${data.dateStyle.field}": "${STYLE_SAMPLE[data.dateStyle.format] ?? data.dateStyle.format}"`}</span>
+              </span>
+            </>
+          )}
         </p>
       ) : (
         <p className="muted" style={{ marginTop: 0 }}>
           <Badge>غیرفعال</Badge> فقط جمعه‌ها و تعطیلات تعریف‌شده در این صفحه در نظر گرفته می‌شوند. برای فعال‌سازی، توکن سرویس (همان توکن استعلام هویت) باید در تنظیمات سرور باشد.
         </p>
+      )}
+      {superAdmin && data.provider === 'sapi' && (
+        <div className="mb">
+          <p className="small" style={{ marginTop: 0 }}>
+            اگر روزهای تعطیل رسمی (مثل نوروز) «کاری» گزارش می‌شوند، سرویس تاریخ ارسالی را نمی‌شناسد. با «تشخیص خودکار»، سامانه نوروز و یک روز کاری را با چند شکل رایج از سرویس می‌پرسد و
+            شکلی را که درست جواب دهد ذخیره می‌کند (حداکثر حدود ۳۰ پرسش).
+          </p>
+          <Button variant="secondary" busy={detecting} onClick={() => void detect()}>
+            تشخیص خودکار شکل تاریخ
+          </Button>
+          {detected?.error && <p style={{ color: 'var(--danger)' }}>{detected.error}</p>}
+          {detected?.found === true && (
+            <p>
+              <Badge tone="success">پیدا شد</Badge> سرویس تاریخ را به شکل <span className="ltr">{`"${detected.style.field}": "${STYLE_SAMPLE[detected.style.format]}"`}</span> می‌خواهد؛ تعطیلات رسمی از این پس درست در تقویم
+              می‌آیند.
+            </p>
+          )}
+          {detected?.found === false && (
+            <p style={{ color: 'var(--danger)' }}>
+              هیچ‌کدام از {fa(detected.tried.length)} شکل رایج جواب درست نداد. احتمالاً سرویس فقط وضعیت امروز را برمی‌گرداند یا نام فیلد تاریخ متفاوت است؛ راهنمای سرویس در پنل s.api.ir را بررسی کنید.
+            </p>
+          )}
+          {detected?.tried && (
+            <details>
+              <summary className="small muted">جزئیات پرسش‌ها</summary>
+              <ul className="small ltr">
+                {detected.tried.map((t: any, i: number) => (
+                  <li key={i}>
+                    {t.field}: "{t.sent}" → {String(t.holiday)}
+                    {t.workday !== undefined ? ` / workday → ${String(t.workday)}` : ''}
+                  </li>
+                ))}
+              </ul>
+            </details>
+          )}
+        </div>
       )}
       {superAdmin && data.enabled && (
         <>

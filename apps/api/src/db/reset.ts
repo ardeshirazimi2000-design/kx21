@@ -44,9 +44,10 @@ export async function resetToRoot(env: NodeJS.ProcessEnv = process.env) {
     await c.query('CREATE TEMP TABLE keep_users ON COMMIT DROP AS SELECT * FROM users WHERE is_super_admin');
     const tables = (
       await c.query<{ t: string }>(
-        `SELECT quote_ident(tablename) AS t FROM pg_tables WHERE schemaname = 'public' AND tablename <> 'schema_migrations'`,
+        `SELECT quote_ident(tablename) AS t FROM pg_tables WHERE schemaname = 'public' AND tablename NOT IN ('schema_migrations', 'app_settings')`,
       )
     ).rows.map((r) => r.t);
+    // System settings (app_settings) are kept.
     await c.query(`TRUNCATE ${tables.join(', ')} RESTART IDENTITY CASCADE`);
     await c.query('INSERT INTO users SELECT * FROM keep_users');
     await c.query('UPDATE users SET chamber_id = NULL, last_login_at = NULL, updated_at = now()');

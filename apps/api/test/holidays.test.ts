@@ -1,6 +1,6 @@
 import http from 'node:http';
 import type { AddressInfo } from 'node:net';
-import { toGregorian } from '@kx/shared';
+import { toGregorian, toJalali } from '@kx/shared';
 import request from 'supertest';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createApp } from '../src/app.js';
@@ -145,9 +145,36 @@ describe('official calendar web service (s.api.ir IsHoliday)', () => {
   it('lets the Super Admin test the connection and see the raw answer', async () => {
     reply = () => ({ status: 'ok', something: 1 });
     const t = await as('root').post('/api/holidays/service/test', { date: g(1405, 12, 20) });
-    expect(t.body).toMatchObject({ ok: false, code: 'holiday_unrecognized', raw: { status: 'ok', something: 1 } });
+    expect(t.body).toMatchObject({ ok: false, code: 'holiday_unrecognized', raw: { sent: { date: '1405/12/20', weekend: true }, received: { status: 'ok', something: 1 } } });
     expect((await as('admin').post('/api/holidays/service/test', { date: g(1405, 12, 20) })).status).toBe(403);
     expect((await as('admin').get('/api/holidays/service')).body).toMatchObject({ provider: 'sapi', enabled: true });
+  });
+
+  it('detects the field and date format the service expects', async () => {
+    // Like s.api.ir: a bare answer, and an unknown field is ignored (it then answers about today, a working day).
+    const now = new Date();
+    const [jy] = toJalali(now.getFullYear(), now.getMonth() + 1, now.getDate());
+    reply = (b) => ({ data: b.persianDate === `${jy}/1/1`, success: true, code: 0, message: '' });
+    calls.length = 0;
+    const r = await as('root').post('/api/holidays/service/detect');
+    expect(r.status).toBe(200);
+    expect(r.body).toMatchObject({ found: true, style: { field: 'persianDate', format: 'jn' } });
+    expect(r.body.tried.length).toBeGreaterThan(5);
+    expect((await as('admin').post('/api/holidays/service/detect')).status).toBe(403);
+    // From now on days are asked that way.
+    calls.length = 0;
+    const d = g(jy, 1, 1);
+    const h = await as('secretary').get(`/api/holidays?chamberId=${yazd}&from=${d}&to=${d}`);
+    expect(calls[0].body).toEqual({ persianDate: `${jy}/1/1`, weekend: true });
+    expect(h.body).toEqual([expect.objectContaining({ date: d, title: 'تعطیل رسمی', source: 'official' })]);
+    expect((await as('root').get('/api/holidays/service')).body.dateStyle).toEqual({ field: 'persianDate', format: 'jn' });
+  });
+
+  it('reports when no format works', async () => {
+    reply = () => ({ data: false, success: true, code: 0, message: '' });
+    const r = await as('root').post('/api/holidays/service/detect');
+    expect(r.body).toMatchObject({ found: false, style: { field: 'persianDate', format: 'jn' } });
+    await pool.query(`DELETE FROM app_settings`);
   });
 
   it('does not block scheduling when the service cannot answer', async () => {

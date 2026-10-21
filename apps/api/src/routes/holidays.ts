@@ -2,12 +2,12 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { currentUser, type AuthUser } from '../auth/middleware.js';
 import { config } from '../config.js';
-import { one, query, tx } from '../db/pool.js';
+import { one, pool, query, tx } from '../db/pool.js';
 import { audit } from '../lib/audit.js';
 import { badRequest, conflict, forbidden, notFound } from '../lib/errors.js';
 import { body, param, uuid } from '../lib/validate.js';
 import { requireChamberAdmin, visibleChamberIds } from '../services/access.js';
-import { askOfficial, holidaysBetween, officialCalendarEnabled } from '../services/holidays.js';
+import { askOfficial, dateStyle, detectDateStyle, holidaysBetween, officialCalendarEnabled } from '../services/holidays.js';
 
 /** Holidays of the meetings calendar (تعطیلات). */
 export const holidaysRouter = Router();
@@ -84,7 +84,14 @@ holidaysRouter.get('/holidays/service', async (req, res) => {
   const u = currentUser(req);
   if (!u.isSuperAdmin && !u.adminChambers.length) throw forbidden();
   const last = await one<{ n: number; last: string | null }>('SELECT count(*)::int AS n, max(checked_at) AS last FROM holiday_lookups');
-  res.json({ provider: config.holidayProvider, enabled: officialCalendarEnabled(), url: config.holidayApiUrl, cachedDays: last?.n ?? 0, lastCheckedAt: last?.last ?? null });
+  res.json({
+    provider: config.holidayProvider,
+    enabled: officialCalendarEnabled(),
+    url: config.holidayApiUrl,
+    dateStyle: config.holidayProvider === 'sapi' ? await dateStyle() : null,
+    cachedDays: last?.n ?? 0,
+    lastCheckedAt: last?.last ?? null,
+  });
 });
 
 /** Asks the web service about one day and shows its answer as received (to check the connection). */
@@ -97,6 +104,15 @@ holidaysRouter.post('/holidays/service/test', async (req, res) => {
   } catch (e: any) {
     res.json({ ok: false, error: e.message, code: e.code, raw: e.raw });
   }
+});
+
+/** Finds the field name and date format the web service expects, by asking about Nowruz and a working day. */
+holidaysRouter.post('/holidays/service/detect', async (req, res) => {
+  const u = currentUser(req);
+  if (!u.isSuperAdmin) throw forbidden();
+  const r = await detectDateStyle(u.id);
+  await audit(pool, req, { chamberId: null, action: 'holiday.service_detected', entity: 'setting', entityId: 'holiday_api_date_style', after: { found: r.found, style: r.style } });
+  res.json(r);
 });
 
 /** Forgets cached answers (e.g. after the official calendar changed), so they are asked again. */

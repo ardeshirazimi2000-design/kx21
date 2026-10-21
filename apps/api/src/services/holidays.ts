@@ -1,4 +1,4 @@
-import { JALALI_MONTHS, toJalali, toPersianDigits } from '@kx/shared';
+import { JALALI_MONTHS, toGregorian as toGregorianDay, toJalali, toPersianDigits } from '@kx/shared';
 import { config } from '../config.js';
 import { query } from '../db/pool.js';
 import { HttpError } from '../lib/errors.js';
@@ -89,16 +89,52 @@ export interface OfficialAnswer {
   raw?: unknown;
 }
 
-async function sapi(date: string): Promise<OfficialAnswer> {
+/**
+ * How the day is sent to the web service: the field name and the date format. Its documentation is not public,
+ * so the Super Admin can detect it (detectDateStyle); the default comes from HOLIDAY_API_DATE_FORMAT.
+ */
+export interface DateStyle {
+  field: string;
+  /** j = 1405/01/03, jn = 1405/1/3, jd = 1405-01-03, g = 2026-03-23, giso = 2026-03-23T00:00:00 */
+  format: 'j' | 'jn' | 'jd' | 'g' | 'giso';
+}
+const STYLE_KEY = 'holiday_api_date_style';
+let style: DateStyle | null = null;
+
+export async function dateStyle(): Promise<DateStyle> {
+  if (style) return style;
+  const row = await query<{ value: DateStyle }>('SELECT value FROM app_settings WHERE key = $1', [STYLE_KEY]).catch(() => []);
+  style = row[0]?.value ?? { field: 'date', format: config.holidayApiDateFormat === 'gregorian' ? 'g' : 'j' };
+  return style;
+}
+
+function formatFor(date: string, format: DateStyle['format']) {
+  const [jy, jm, jd] = toJalali(...parts(date));
+  switch (format) {
+    case 'jn':
+      return `${jy}/${jm}/${jd}`;
+    case 'jd':
+      return `${jy}-${pad(jm)}-${pad(jd)}`;
+    case 'g':
+      return date;
+    case 'giso':
+      return `${date}T00:00:00`;
+    default:
+      return `${jy}/${pad(jm)}/${pad(jd)}`;
+  }
+}
+
+async function sapi(date: string, using?: DateStyle): Promise<OfficialAnswer> {
   const token = (config.holidayApiToken ?? '').trim().replace(/^["']|["']$/g, '').replace(/^Bearer\s+/i, '').trim();
   if (!token) throw new HttpError(503, 'holiday_not_configured', 'توکن سرویس تقویم رسمی تنظیم نشده است');
-  const sent = config.holidayApiDateFormat === 'gregorian' ? date : jalaliText(date);
+  const st = using ?? (await dateStyle());
+  const sent = { [st.field]: formatFor(date, st.format), weekend: true };
   let res: Response;
   try {
     res = await fetch(config.holidayApiUrl, {
       method: 'POST',
       headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
-      body: JSON.stringify({ date: sent, weekend: true }),
+      body: JSON.stringify(sent),
       signal: AbortSignal.timeout(10000),
     });
   } catch (e) {
@@ -113,13 +149,59 @@ async function sapi(date: string): Promise<OfficialAnswer> {
     body = { httpStatus: res.status, text: text.slice(0, 2000) };
   }
   if (res.status === 401 || res.status === 403) throw new HttpError(502, 'holiday_auth_failed', 'دسترسی به سرویس تقویم رسمی رد شد (توکن نامعتبر یا منقضی)');
-  if (!res.ok) throw new HttpError(502, 'holiday_failed', `پاسخ نامعتبر از سرویس تقویم رسمی (کد ${res.status})`);
+  if (!res.ok) throw Object.assign(new HttpError(502, 'holiday_failed', `پاسخ نامعتبر از سرویس تقویم رسمی (کد ${res.status})`), { raw: { sent, received: body } });
   const flag = findFlag(body);
   if (flag === null) {
     logger.warn({ keys: body && typeof body === 'object' ? Object.keys(body) : typeof body }, 'holiday response without a holiday flag');
-    throw Object.assign(new HttpError(502, 'holiday_unrecognized', 'پاسخ سرویس تقویم رسمی قابل تشخیص نبود'), { raw: body });
+    throw Object.assign(new HttpError(502, 'holiday_unrecognized', 'پاسخ سرویس تقویم رسمی قابل تشخیص نبود'), { raw: { sent, received: body } });
   }
-  return { isHoliday: flag, title: flag ? findTitle(body) : null, raw: body };
+  return { isHoliday: flag, title: flag ? findTitle(body) : null, raw: { sent, received: body } };
+}
+
+/** Field names and formats tried, most likely first. */
+const CANDIDATES: DateStyle[] = [
+  ...(['date', 'Date'] as const).flatMap((field) => (['j', 'jn', 'jd', 'g', 'giso'] as const).map((format) => ({ field, format }))),
+  ...(['persianDate', 'jalaliDate', 'shamsiDate', 'PersianDate', 'dateFa'] as const).flatMap((field) => (['j', 'jn', 'jd'] as const).map((format) => ({ field, format }))),
+  ...(['dateTime', 'gregorianDate', 'day'] as const).flatMap((field) => (['g', 'giso'] as const).map((format) => ({ field, format }))),
+];
+
+/**
+ * Finds how the web service expects the day: the first style for which 1 Farvardin is a holiday and an
+ * ordinary working day is not (a service that ignores the date answers both the same). The result is stored.
+ */
+export async function detectDateStyle(userId: string) {
+  if (config.holidayProvider !== 'sapi') throw new HttpError(503, 'holiday_disabled', 'سرویس تقویم رسمی فعال نشده است');
+  const now = new Date();
+  const [jy] = toJalali(now.getFullYear(), now.getMonth() + 1, now.getDate());
+  const g = (m: number, d: number) => {
+    const [y, mo, da] = toGregorianDay(jy, m, d);
+    return `${y}-${pad(mo)}-${pad(da)}`;
+  };
+  const holiday = g(1, 1); // نوروز
+  // Ordinary working days (two, in case a lunar holiday falls on one of them in some year).
+  const workdays = [g(1, 17), g(2, 10)];
+  const tried: { field: string; format: string; sent: string; holiday: boolean | null; workday?: boolean | null }[] = [];
+  for (const c of CANDIDATES) {
+    const h = await sapi(holiday, c).then((a) => a.isHoliday, () => null);
+    const t = { field: c.field, format: c.format, sent: formatFor(holiday, c.format), holiday: h } as (typeof tried)[number];
+    tried.push(t);
+    if (h !== true) continue;
+    for (const w of workdays) {
+      t.workday = await sapi(w, c).then((a) => a.isHoliday, () => null);
+      if (t.workday === false) break;
+    }
+    if (t.workday !== false) continue;
+    await query(
+      `INSERT INTO app_settings (key, value, updated_by) VALUES ($1, $2, $3)
+       ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_by = EXCLUDED.updated_by, updated_at = now()`,
+      [STYLE_KEY, JSON.stringify(c), userId],
+    );
+    style = c;
+    // Earlier answers were asked with another format.
+    await query('DELETE FROM holiday_lookups');
+    return { found: true, style: c, tried };
+  }
+  return { found: false, style: await dateStyle(), tried };
 }
 
 /** Fixed official holidays for development and tests (Jalali month/day). */
