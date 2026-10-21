@@ -1,6 +1,6 @@
 import crypto from 'node:crypto';
 import { createReadStream } from 'node:fs';
-import { mkdir, open, readFile, rename, rm, writeFile } from 'node:fs/promises';
+import { mkdir, open, readdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { Router, type Response } from 'express';
 import jwt from 'jsonwebtoken';
@@ -9,9 +9,11 @@ import { z } from 'zod';
 import { currentUser, loadAuthUser, type AuthUser } from '../auth/middleware.js';
 import { config } from '../config.js';
 import { one, query, tx } from '../db/pool.js';
+import { emitToMeeting } from '../realtime.js';
 import { audit } from '../lib/audit.js';
-import { badRequest, forbidden, notFound } from '../lib/errors.js';
+import { badRequest, conflict, forbidden, notFound } from '../lib/errors.js';
 import { paged, pageParams, parse, param, uuid } from '../lib/validate.js';
+import { SOCKET_EVENTS } from '@kx/shared';
 import { commissionAccess, meetingAccess, meetingIdOfAgendaItem } from '../services/access.js';
 
 export const documentsRouter = Router();
@@ -214,7 +216,7 @@ documentsRouter.get('/documents', async (req, res) => {
   const t = parse(targetSchema, req.query);
   await resolveTarget(u, t, false);
   const rows = await query(
-    `SELECT d.id, d.kind, d.title, d.file_name, d.mime_type, d.size_bytes, d.created_at, d.meeting_id, d.agenda_item_id, d.resolution_id, d.issue_id,
+    `SELECT d.id, d.kind, d.title, d.file_name, d.mime_type, d.size_bytes, d.created_at, d.meeting_id, d.agenda_item_id, d.resolution_id, d.issue_id, d.owner_id,
             u.full_name AS owner_name
        FROM documents d LEFT JOIN users u ON u.id = d.owner_id
       WHERE ($1::uuid IS NULL OR d.meeting_id = $1 OR d.agenda_item_id IN (SELECT id FROM agenda_items WHERE meeting_id = $1))
@@ -265,6 +267,83 @@ documentsRouter.get('/documents/:id/download', async (req, res) => {
  * Short-lived (2 min) signed link, so mobile clients can open a document in the system viewer
  * without putting the access token in a URL.
  */
+/**
+ * A document that the user may correct or remove: its uploader, or whoever may upload to its place
+ * (meeting secretary, resolution manager…). Documents of a meeting whose minutes are approved stay as recorded.
+ */
+async function editableDocument(u: AuthUser, id: string) {
+  const d = await authorizedDocument(u, id);
+  if (d.owner_id !== u.id) {
+    await resolveTarget(
+      u,
+      { meetingId: d.meeting_id, agendaItemId: d.agenda_item_id, resolutionId: d.resolution_id, issueId: d.issue_id, commissionId: d.commission_id },
+      true,
+      d.kind,
+    ).catch(() => {
+      throw forbidden('فقط بارگذاری‌کننده سند یا دبیر می‌تواند آن را اصلاح یا حذف کند');
+    });
+  }
+  const meetingId = d.meeting_id ?? (d.agenda_item_id ? await meetingIdOfAgendaItem(d.agenda_item_id) : null);
+  if (meetingId) {
+    const m = await one<{ status: string }>('SELECT status FROM meetings WHERE id = $1', [meetingId]);
+    if (m && ['approved', 'archived'].includes(m.status)) {
+      throw conflict('صورتجلسه این جلسه تأیید شده است؛ مستندات آن قابل اصلاح یا حذف نیست', 'meeting_locked');
+    }
+  }
+  return { d, meetingId };
+}
+
+const DOC_KINDS = ['attachment', 'presentation', 'photo', 'letter', 'report', 'evidence'] as const;
+
+/** Corrects the title or type of an uploaded document. */
+documentsRouter.patch('/documents/:id', async (req, res) => {
+  const u = currentUser(req);
+  const { d } = await editableDocument(u, param(req, 'id'));
+  const b = parse(z.object({ title: z.string().trim().max(200).nullish(), kind: z.enum(DOC_KINDS).optional() }), req.body);
+  if (b.kind && d.kind === 'recording') throw badRequest('نوع فیلم جلسه قابل تغییر نیست');
+  const row = await tx(async (c) => {
+    const r = await one(
+      `UPDATE documents SET title = CASE WHEN $2 THEN $3 ELSE title END, kind = COALESCE($4, kind) WHERE id = $1
+       RETURNING id, kind, title, file_name, mime_type, size_bytes, created_at`,
+      [d.id, b.title !== undefined, b.title || null, b.kind ?? null],
+      c,
+    );
+    await audit(c, req, { chamberId: d.chamber_id, action: 'document.updated', entity: 'document', entityId: d.id, before: { title: d.title, kind: d.kind }, after: { title: r.title, kind: r.kind } });
+    return r;
+  });
+  res.json(row);
+});
+
+/** Removes a document uploaded by mistake, with its stored file and rendered pages. */
+documentsRouter.delete('/documents/:id', async (req, res) => {
+  const u = currentUser(req);
+  const { d, meetingId } = await editableDocument(u, param(req, 'id'));
+  if (await one('SELECT 1 FROM meeting_delegates WHERE letter_document_id = $1', [d.id])) {
+    throw conflict('این فایل معرفی‌نامه یک نماینده است؛ ابتدا نمایندگی را لغو کنید', 'document_in_use');
+  }
+  const stopped = await tx(async (c) => {
+    // A document being presented right now stops being shown.
+    const p = await c.query(`UPDATE meetings SET presentation = NULL WHERE presentation->>'documentId' = $1 RETURNING id`, [d.id]);
+    await c.query('DELETE FROM documents WHERE id = $1', [d.id]);
+    await audit(c, req, {
+      chamberId: d.chamber_id,
+      action: 'document.deleted',
+      entity: 'document',
+      entityId: d.id,
+      before: { title: d.title, kind: d.kind, fileName: d.file_name, sha256: d.sha256, meetingId, resolutionId: d.resolution_id },
+    });
+    return p.rows.map((r) => r.id as string);
+  });
+  for (const id of stopped) emitToMeeting(id, SOCKET_EVENTS.presentationUpdated, { meetingId: id, presentation: null });
+  // The file, its converted PDF and page images all start with the document's storage key.
+  const dir = path.resolve(config.uploadDir, path.dirname(d.storage_key));
+  const base = path.basename(d.storage_key);
+  for (const f of await readdir(dir).catch(() => [] as string[])) {
+    if (f === base || f.startsWith(`${base}.`)) await rm(path.join(dir, f), { force: true });
+  }
+  res.status(204).end();
+});
+
 documentsRouter.post('/documents/:id/link', async (req, res) => {
   const u = currentUser(req);
   const d = await authorizedDocument(u, param(req, 'id'));

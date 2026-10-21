@@ -14,7 +14,7 @@ import {
 } from '@kx/shared';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
-import { DocKind, UploadFiles, ViewButton } from '../components/docs';
+import { DocActions, DocKind, UploadFiles, ViewButton } from '../components/docs';
 import { PresentationCard } from '../components/Presentation';
 import { KPI_HINT, KPI_LABEL } from './Resolutions';
 import { AgendaBadge, AttendanceBadge, MeetingStatusBadge, MinutesBadge, ResolutionBadge } from '../components/status';
@@ -780,7 +780,10 @@ function InvitationLettersModal({ m, onClose, onDone }: { m: any; onClose: () =>
 
 function Documents({ m }: { m: any }) {
   const { data, reload } = useApi<any[]>(`/documents?meetingId=${m.id}`);
+  const { me } = useAuth();
   const canUpload = m.capabilities.includes('meeting.manage');
+  // Once the minutes are approved the meeting's documents stay as recorded.
+  const editable = !['approved', 'archived'].includes(m.status);
   const [target, setTarget] = useState('');
   const photos = data?.filter((d) => d.kind === 'photo').length ?? 0;
   const slides = data?.filter((d) => d.kind === 'presentation').length ?? 0;
@@ -815,6 +818,7 @@ function Documents({ m }: { m: any }) {
             <span className="row gap-sm muted small" style={{ alignItems: 'center' }}>
               {fa(Math.ceil(d.size_bytes / 1024))} KB — {d.owner_name} — {dateFa(d.created_at)}
               <ViewButton d={d} />
+              {editable && (canUpload || d.owner_id === me!.id) && <DocActions d={d} onDone={() => void reload()} />}
             </span>
           </li>
         ))}

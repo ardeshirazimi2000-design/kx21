@@ -1,1 +1,1 @@
-export { NotificationsPage } from './Misc';
+export { NOTIFICATIONS_CHANGED, NotificationsPage } from './Misc';

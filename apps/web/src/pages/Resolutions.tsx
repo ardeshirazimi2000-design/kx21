@@ -6,6 +6,8 @@ import { PriorityBadge, ResolutionBadge } from '../components/status';
 import { Badge, Button, Card, dateFa, dateTimeFa, Empty, ErrorBox, Field, fa, Loading, PageHeader, Pager, Progress } from '../components/ui';
 import { download, patch, post, upload } from '../lib/api';
 import { useApi } from '../lib/hooks';
+import { useAuth } from '../lib/auth';
+import { DocActions } from '../components/docs';
 
 export function ResolutionsPage() {
   const nav = useNavigate();
@@ -145,6 +147,7 @@ function KpiLine({ r, canEdit, onSaved }: { r: any; canEdit: boolean; onSaved: (
 
 export function ResolutionDetailPage() {
   const { id } = useParams();
+  const { me } = useAuth();
   const { data: r, error, reload } = useApi(`/resolutions/${id}`);
   const [progress, setProgress] = useState<number | null>(null);
   const [note, setNote] = useState('');
@@ -270,9 +273,10 @@ export function ResolutionDetailPage() {
             {r.documents.map((d: any) => (
               <li key={d.id}>
                 <a href="#" onClick={(e) => { e.preventDefault(); void download(`/documents/${d.id}/download`, d.file_name); }}>
-                  {d.file_name}
+                  {d.title || d.file_name}
                 </a>{' '}
                 <span className="muted small">{dateFa(d.created_at)}</span>
+                {(r.canManage || d.owner_id === me!.id) && <DocActions d={d} onDone={() => void reload()} />}
               </li>
             ))}
           </ul>

@@ -48,13 +48,17 @@ export function ReferralsPage() {
 const EVENT_LINK = (n: any) =>
   n.data?.networkId ? `/networks/${n.data.networkId}` : n.data?.meetingId ? `/meetings/${n.data.meetingId}` : n.data?.resolutionId ? `/resolutions/${n.data.resolutionId}` : n.data?.referralId ? '/referrals' : null;
 
+/** Tells the menu badge to recount unread notifications. */
+export const NOTIFICATIONS_CHANGED = 'kx:notifications-changed';
+const changed = () => void window.dispatchEvent(new Event(NOTIFICATIONS_CHANGED));
+
 export function NotificationsPage() {
   const nav = useNavigate();
   const [page, setPage] = useState(1);
   const { data, reload } = useApi(`/notifications?page=${page}`);
   return (
     <>
-      <PageHeader title="اعلان‌ها" actions={<Button variant="secondary" onClick={() => post('/notifications/read-all').then(reload)}>علامت‌گذاری همه به‌عنوان خوانده‌شده</Button>} />
+      <PageHeader title="اعلان‌ها" actions={<Button variant="secondary" onClick={() => post('/notifications/read-all').then(changed).then(reload)}>علامت‌گذاری همه به‌عنوان خوانده‌شده</Button>} />
       <Card>
         {data?.items.length === 0 && <Empty>اعلانی ندارید.</Empty>}
         <ul className="list">
@@ -63,7 +67,7 @@ export function NotificationsPage() {
               key={n.id}
               style={{ cursor: 'pointer', fontWeight: n.read_at ? 400 : 600 }}
               onClick={async () => {
-                if (!n.read_at) await post(`/notifications/${n.id}/read`);
+                if (!n.read_at) await post(`/notifications/${n.id}/read`).then(changed);
                 const to = EVENT_LINK(n);
                 if (to) nav(to);
                 else void reload();

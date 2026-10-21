@@ -143,7 +143,7 @@ resolutionsRouter.get('/resolutions/:id', async (req, res) => {
       [r.id],
     ),
     query('SELECT t.*, u.full_name AS assignee_name FROM tasks t LEFT JOIN users u ON u.id = t.assignee_id WHERE t.resolution_id = $1', [r.id]),
-    query('SELECT id, title, file_name, mime_type, size_bytes, created_at FROM documents WHERE resolution_id = $1 ORDER BY created_at', [r.id]),
+    query('SELECT id, kind, title, file_name, mime_type, size_bytes, owner_id, created_at FROM documents WHERE resolution_id = $1 ORDER BY created_at', [r.id]),
     one(
       `SELECT c.name AS commission_name, o.full_name AS owner_name, m.title AS meeting_title, m.number AS meeting_number, ai.title AS agenda_title
          FROM resolutions r JOIN commissions c ON c.id = r.commission_id LEFT JOIN users o ON o.id = r.owner_id

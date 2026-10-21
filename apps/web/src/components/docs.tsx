@@ -1,6 +1,6 @@
 import { useState } from 'react';
-import { download, post, upload } from '../lib/api';
-import { Badge, Button, ErrorBox, fa, type Tone } from './ui';
+import { del, download, patch, post, upload } from '../lib/api';
+import { Badge, Button, ErrorBox, fa, Field, Modal, type Tone } from './ui';
 
 export const DOC_KINDS: Record<string, { label: string; tone: Tone; icon: string }> = {
   presentation: { label: 'ارائه', tone: 'accent', icon: '📊' },
@@ -118,6 +118,82 @@ export function ViewButton({ d }: { d: { id: string; file_name: string; mime_typ
         </Button>
       )}
       {err && <span className="small" style={{ color: "var(--danger)" }}>{err.message}</span>}
+    </>
+  );
+}
+
+/**
+ * Correcting a document uploaded by mistake: change its title or type, or delete it (to upload the right file).
+ * The server decides who may (the uploader or the secretary) and refuses once the minutes are approved.
+ */
+export function DocActions({ d, onDone }: { d: { id: string; kind: string; title?: string | null; file_name: string }; onDone: () => void }) {
+  const [edit, setEdit] = useState(false);
+  const [title, setTitle] = useState(d.title ?? '');
+  const [kind, setKind] = useState(d.kind);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<Error | null>(null);
+  const save = async () => {
+    setBusy(true);
+    setErr(null);
+    try {
+      await patch(`/documents/${d.id}`, { title: title.trim() || null, ...(d.kind === 'recording' ? {} : { kind }) });
+      setEdit(false);
+      onDone();
+    } catch (e) {
+      setErr(e as Error);
+    } finally {
+      setBusy(false);
+    }
+  };
+  const remove = async () => {
+    if (!confirm(`فایل «${d.title || d.file_name}» حذف شود؟\nاین کار قابل برگشت نیست.`)) return;
+    setErr(null);
+    try {
+      await del(`/documents/${d.id}`);
+      onDone();
+    } catch (e) {
+      setErr(e as Error);
+    }
+  };
+  return (
+    <>
+      <Button size="sm" variant="ghost" onClick={() => setEdit(true)} aria-label={`اصلاح ${d.title || d.file_name}`}>
+        اصلاح
+      </Button>
+      <Button size="sm" variant="ghost" onClick={() => void remove()} aria-label={`حذف ${d.title || d.file_name}`}>
+        <span style={{ color: 'var(--danger)' }}>حذف</span>
+      </Button>
+      {err && !edit && <span className="small" style={{ color: 'var(--danger)' }}>{err.message}</span>}
+      {edit && (
+        <Modal
+          title="اصلاح مشخصات سند"
+          onClose={() => setEdit(false)}
+          footer={
+            <Button busy={busy} onClick={() => void save()}>
+              ذخیره
+            </Button>
+          }
+        >
+          <ErrorBox error={err} />
+          <p className="muted small" style={{ marginTop: 0 }}>
+            فایل: <span className="ltr">{d.file_name}</span> — برای جایگزینی خود فایل، این سند را حذف و فایل درست را دوباره بارگذاری کنید.
+          </p>
+          <Field label="عنوان" hint="خالی بگذارید تا نام فایل نمایش داده شود">
+            <input className="input" value={title} maxLength={200} onChange={(e) => setTitle(e.target.value)} />
+          </Field>
+          {d.kind !== 'recording' && (
+            <Field label="نوع سند">
+              <select className="input" value={kind} onChange={(e) => setKind(e.target.value)}>
+                {['presentation', 'photo', 'attachment', 'report', 'letter', 'evidence'].map((k) => (
+                  <option key={k} value={k}>
+                    {DOC_KINDS[k].label}
+                  </option>
+                ))}
+              </select>
+            </Field>
+          )}
+        </Modal>
+      )}
     </>
   );
 }

@@ -14,7 +14,7 @@ import { MeetingRoomPage } from './pages/MeetingRoom';
 import { MeetingsPage } from './pages/Meetings';
 import { NetworkDetailPage, NetworksPage } from './pages/Networks';
 import { NotificationSettingsPage } from './pages/NotificationSettings';
-import { NotificationsPage } from './pages/Notifications';
+import { NOTIFICATIONS_CHANGED, NotificationsPage } from './pages/Notifications';
 import { PeoplePage } from './pages/People';
 import { ProfilePage } from './pages/Profile';
 import { ReferralsPage } from './pages/Referrals';
@@ -97,6 +97,13 @@ function Shell({ children }: { children: ReactNode }) {
   const nav = useNavigate();
   const unread = useApi<{ total: number }>('/notifications?unread=true&pageSize=1');
   useSocket({ notification: () => void unread.reload() });
+  // Reading notifications (here or on another page) updates the unread count.
+  useEffect(() => {
+    const refresh = () => void unread.reload();
+    window.addEventListener(NOTIFICATIONS_CHANGED, refresh);
+    return () => window.removeEventListener(NOTIFICATIONS_CHANGED, refresh);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   useEffect(() => setOpen(false), [loc.pathname]);
   const isOfficer = me!.memberships.some((m) => ['chair', 'vice_chair', 'secretary'].includes(m.position));
   const isExpert = me!.memberships.some((m) => m.position === 'expert');
