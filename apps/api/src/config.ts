@@ -37,20 +37,8 @@ export const config = {
   identityApiToken: process.env.IDENTITY_API_TOKEN,
   /** Require a verified identity (national code + birth date) for every new person. */
   identityRequired: process.env.IDENTITY_REQUIRED === 'true',
-  /**
-   * Official holidays web service (تقویم رسمی): sapi = s.api.ir IsHoliday (uses IDENTITY_API_TOKEN unless
-   * HOLIDAY_API_TOKEN is set), mock = fixed holidays for tests, none = only Fridays and holidays defined here.
-   */
-  holidayProvider: (process.env.HOLIDAY_PROVIDER ||
-    (process.env.NODE_ENV === 'test' || process.env.VITEST ? 'mock' : process.env.HOLIDAY_API_TOKEN || process.env.IDENTITY_API_TOKEN ? 'sapi' : 'none')) as 'sapi' | 'mock' | 'none',
-  holidayApiUrl: process.env.HOLIDAY_API_URL || 'https://s.api.ir/api/sw1/IsHoliday',
-  holidayApiToken: process.env.HOLIDAY_API_TOKEN || process.env.IDENTITY_API_TOKEN,
   /** Ask for confirmation before a meeting is scheduled on a holiday. */
   meetingHolidayCheck: process.env.MEETING_HOLIDAY_CHECK !== 'false',
-  /** How the date is sent: jalali = 1404/07/29, gregorian = 2025-10-21. */
-  holidayApiDateFormat: (process.env.HOLIDAY_API_DATE_FORMAT || 'jalali') as 'jalali' | 'gregorian',
-  /** The service is known to accept the date as configured above (otherwise the admin page's detection decides). */
-  holidayApiDateVerified: process.env.HOLIDAY_API_DATE_VERIFIED === 'true',
   /** Built web app (apps/web/dist) to serve from this process, for single-port installs. */
   webDistDir: process.env.WEB_DIST_DIR,
   /** Set to true once the site is served over HTTPS (enables HSTS and upgrade-insecure-requests). */

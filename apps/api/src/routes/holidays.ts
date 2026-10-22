@@ -2,14 +2,13 @@ import { toGregorian } from '@kx/shared';
 import { Router } from 'express';
 import { z } from 'zod';
 import { currentUser, type AuthUser } from '../auth/middleware.js';
-import { config } from '../config.js';
-import { one, pool, query, tx } from '../db/pool.js';
+import { one, query, tx } from '../db/pool.js';
 import { audit } from '../lib/audit.js';
 import { badRequest, conflict, forbidden, notFound } from '../lib/errors.js';
 import { body, param, uuid } from '../lib/validate.js';
 import { requireChamberAdmin, visibleChamberIds } from '../services/access.js';
 import { IRAN_HOLIDAYS } from '../services/iranHolidays.js';
-import { askOfficial, dateStyle, dateStyleVerified, detectDateStyle, holidaysBetween, officialCalendarEnabled } from '../services/holidays.js';
+import { holidaysBetween } from '../services/holidays.js';
 
 /** Holidays of the meetings calendar (تعطیلات). */
 export const holidaysRouter = Router();
@@ -22,7 +21,7 @@ async function requireVisibleChamber(u: AuthUser, chamberId: string | null) {
   if (ids && !ids.includes(chamberId)) throw notFound();
 }
 
-/** Holidays shown in the calendar: Fridays, official holidays and those defined for the country or the chamber. */
+/** Holidays shown in the calendar: Fridays and those defined for the country or the chamber. */
 holidaysRouter.get('/holidays', async (req, res) => {
   const q = z.object({ chamberId: uuid.nullish(), from: day, to: day }).parse(req.query);
   await requireVisibleChamber(currentUser(req), q.chamberId ?? null);
@@ -142,51 +141,5 @@ holidaysRouter.delete('/holidays/:id', async (req, res) => {
     await c.query('DELETE FROM holidays WHERE id = $1', [h.id]);
     await audit(c, req, { chamberId: h.chamber_id, action: 'holiday.deleted', entity: 'holiday', entityId: h.id, before: h });
   });
-  res.status(204).end();
-});
-
-/** Connection status of the official calendar web service. */
-holidaysRouter.get('/holidays/service', async (req, res) => {
-  const u = currentUser(req);
-  if (!u.isSuperAdmin && !u.adminChambers.length) throw forbidden();
-  const last = await one<{ n: number; last: string | null }>('SELECT count(*)::int AS n, max(checked_at) AS last FROM holiday_lookups');
-  res.json({
-    provider: config.holidayProvider,
-    enabled: officialCalendarEnabled(),
-    url: config.holidayApiUrl,
-    dateStyle: config.holidayProvider === 'sapi' ? await dateStyle() : null,
-    // Not used for the calendar until it is known to answer about the day asked.
-    dateVerified: config.holidayProvider === 'sapi' ? await dateStyleVerified() : true,
-    cachedDays: last?.n ?? 0,
-    lastCheckedAt: last?.last ?? null,
-  });
-});
-
-/** Asks the web service about one day and shows its answer as received (to check the connection). */
-holidaysRouter.post('/holidays/service/test', async (req, res) => {
-  const u = currentUser(req);
-  if (!u.isSuperAdmin) throw forbidden();
-  const b = body(req, z.object({ date: day }));
-  try {
-    res.json({ ok: true, ...(await askOfficial(b.date)) });
-  } catch (e: any) {
-    res.json({ ok: false, error: e.message, code: e.code, raw: e.raw });
-  }
-});
-
-/** Finds the field name and date format the web service expects, by asking about Nowruz and a working day. */
-holidaysRouter.post('/holidays/service/detect', async (req, res) => {
-  const u = currentUser(req);
-  if (!u.isSuperAdmin) throw forbidden();
-  const r = await detectDateStyle(u.id);
-  await audit(pool, req, { chamberId: null, action: 'holiday.service_detected', entity: 'setting', entityId: 'holiday_api_date_style', after: { found: r.found, style: r.style } });
-  res.json(r);
-});
-
-/** Forgets cached answers (e.g. after the official calendar changed), so they are asked again. */
-holidaysRouter.delete('/holidays/service/cache', async (req, res) => {
-  const u = currentUser(req);
-  if (!u.isSuperAdmin) throw forbidden();
-  await query('DELETE FROM holiday_lookups');
   res.status(204).end();
 });

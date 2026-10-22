@@ -30,14 +30,12 @@ describe('reset to root', () => {
   it('deletes everything but the super admin, with the new password and details', async () => {
     await mkdir(config.uploadDir, { recursive: true });
     await writeFile(path.join(config.uploadDir, 'old-file'), 'x');
-    await pool.query(`INSERT INTO app_settings (key, value) VALUES ('holiday_api_date_style', '{"field":"date","format":"j"}')`);
     const left = await resetToRoot({ CONFIRM_RESET: 'DELETE-ALL-DATA', ROOT_PASSWORD: 'N3w-Strong-Pass', ROOT_EMAIL: 'IT@Chamber.ir', ROOT_MOBILE: '09121234567' });
     expect(left).toEqual([{ full_name: 'مدیر سامانه', email: 'it@chamber.ir', mobile: '09121234567' }]);
     for (const t of ['chambers', 'commissions', 'meetings', 'resolutions', 'documents', 'notifications', 'audit_logs', 'networks']) {
       expect(await count(t), t).toBe(0);
     }
     expect(await count('schema_migrations')).toBeGreaterThan(0);
-    expect(await count('app_settings')).toBe(1);
     expect(await readdir(config.uploadDir)).toEqual([]);
 
     const old = await request(app).post('/api/auth/login').send({ identifier: 'it@chamber.ir', password: 'Passw0rd!' });

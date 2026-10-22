@@ -1,13 +1,13 @@
 import { toGregorian, toJalali } from '@kx/shared';
 import { useState } from 'react';
-import { Badge, Button, Card, dateFa, dateTimeFa, Empty, ErrorBox, Field, fa, JalaliDateInput, Modal, PageHeader } from '../components/ui';
+import { Badge, Button, Card, dateFa, Empty, ErrorBox, Field, fa, JalaliDateInput, Modal, PageHeader } from '../components/ui';
 import { del, post } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { useApi } from '../lib/hooks';
 
 /**
- * Holidays of the meetings calendar: Fridays and the official calendar (web service) are automatic; here the
- * Super Admin adds nationwide holidays and a chamber admin its province's own (e.g. a local occasion).
+ * Holidays of the meetings calendar: Fridays are automatic; here the Super Admin adds a year's official holidays
+ * (reviewed from the bundled list) and other nationwide holidays, and a chamber admin its province's own.
  */
 
 const pad = (n: number) => String(n).padStart(2, '0');
@@ -61,7 +61,7 @@ export function HolidaysPage() {
       <Card title="افزودن تعطیلی" className="mb">
         <ErrorBox error={err} />
         <p className="muted small" style={{ marginTop: 0 }}>
-          جمعه‌ها و تعطیلات رسمی تقویم (از سرویس تقویم رسمی) خودکار در تقویم می‌آیند. اینجا روزهایی را اضافه کنید که در تقویم رسمی نیستند؛ مثل تعطیلی‌های اعلام‌شده یا مناسبت‌های استانی.
+          جمعه‌ها خودکار در تقویم می‌آیند. تعطیلات رسمی هر سال را با دکمهٔ «تعطیلات رسمی سال…» در پایین یک‌جا ثبت کنید؛ اینجا روزهای دیگر را اضافه کنید، مثل تعطیلی‌های اعلام‌شده یا مناسبت‌های استانی.
         </p>
         <div className="grid grid-3">
           <Field label="تاریخ">
@@ -150,7 +150,6 @@ export function HolidaysPage() {
           }}
         />
       )}
-      <OfficialCalendar superAdmin={superAdmin} />
     </>
   );
 }
@@ -251,146 +250,5 @@ function OfficialHolidaysModal({ year, onClose, onSaved }: { year: number; onClo
         </>
       )}
     </Modal>
-  );
-}
-
-/** Example of each date format, for 3 Farvardin 1405. */
-const STYLE_SAMPLE: Record<string, string> = { j: '1405/01/03', jn: '1405/1/3', jd: '1405-01-03', g: '2026-03-23', giso: '2026-03-23T00:00:00' };
-
-/** Status of the official calendar web service; the Super Admin can test it with a day. */
-function OfficialCalendar({ superAdmin }: { superAdmin: boolean }) {
-  const { data, reload } = useApi<{ provider: string; enabled: boolean; url: string; dateStyle: { field: string; format: string } | null; dateVerified: boolean; cachedDays: number; lastCheckedAt: string | null }>(
-    '/holidays/service',
-  );
-  const [date, setDate] = useState('');
-  const [result, setResult] = useState<any>(null);
-  const [busy, setBusy] = useState(false);
-  const [detected, setDetected] = useState<any>(null);
-  const [detecting, setDetecting] = useState(false);
-  if (!data) return null;
-  const detect = async () => {
-    setDetecting(true);
-    setDetected(null);
-    try {
-      setDetected(await post('/holidays/service/detect'));
-      void reload();
-    } catch (e) {
-      setDetected({ error: (e as Error).message });
-    } finally {
-      setDetecting(false);
-    }
-  };
-  const test = async () => {
-    setBusy(true);
-    try {
-      setResult(await post('/holidays/service/test', { date }));
-      void reload();
-    } finally {
-      setBusy(false);
-    }
-  };
-  const clear = async () => {
-    if (!confirm('پاسخ‌های ذخیره‌شده سرویس پاک شود؟ روزها دوباره از سرویس پرسیده می‌شوند.')) return;
-    await del('/holidays/service/cache');
-    void reload();
-  };
-  return (
-    <Card title="سرویس تقویم رسمی">
-      {data.enabled && !data.dateVerified && (
-        <p className="small" style={{ marginTop: 0, color: 'var(--warning, #b45309)' }}>
-          این سرویس هنوز برای تقویم استفاده نمی‌شود: معلوم نیست تاریخِ پرسیده‌شده را می‌شناسد یا فقط دربارهٔ امروز جواب می‌دهد. با «تشخیص خودکار شکل تاریخ» بررسی کنید؛ تا آن موقع جمعه‌ها و تعطیلات
-          تعریف‌شده در این صفحه در تقویم می‌آیند.
-        </p>
-      )}
-      {data.enabled ? (
-        <p style={{ marginTop: 0 }}>
-          {data.dateVerified ? <Badge tone="success">فعال</Badge> : <Badge tone="warning">تأیید نشده</Badge>} <span className="muted small ltr">{data.url}</span>
-          <br />
-          <span className="muted small">
-            پاسخ {fa(data.cachedDays)} روز ذخیره شده است{data.lastCheckedAt ? ` — آخرین پرسش: ${dateTimeFa(data.lastCheckedAt)}` : ''}. هر روز یک بار از سرویس پرسیده و تا ۳۰ روز نگه داشته می‌شود.
-          </span>
-          {data.dateStyle && (
-            <>
-              <br />
-              <span className="muted small">
-                شکل ارسال تاریخ: <span className="ltr">{`"${data.dateStyle.field}": "${STYLE_SAMPLE[data.dateStyle.format] ?? data.dateStyle.format}"`}</span>
-              </span>
-            </>
-          )}
-        </p>
-      ) : (
-        <p className="muted" style={{ marginTop: 0 }}>
-          <Badge>غیرفعال</Badge> فقط جمعه‌ها و تعطیلات تعریف‌شده در این صفحه در نظر گرفته می‌شوند. برای فعال‌سازی، توکن سرویس (همان توکن استعلام هویت) باید در تنظیمات سرور باشد.
-        </p>
-      )}
-      {superAdmin && data.provider === 'sapi' && (
-        <div className="mb">
-          <p className="small" style={{ marginTop: 0 }}>
-            اگر روزهای تعطیل رسمی (مثل نوروز) «کاری» گزارش می‌شوند، سرویس تاریخ ارسالی را نمی‌شناسد. با «تشخیص خودکار»، سامانه نوروز و یک روز کاری را با چند شکل رایج از سرویس می‌پرسد و
-            شکلی را که درست جواب دهد ذخیره می‌کند (حداکثر حدود ۳۰ پرسش).
-          </p>
-          <Button variant="secondary" busy={detecting} onClick={() => void detect()}>
-            تشخیص خودکار شکل تاریخ
-          </Button>
-          {detected?.error && <p style={{ color: 'var(--danger)' }}>{detected.error}</p>}
-          {detected?.found === true && (
-            <p>
-              <Badge tone="success">پیدا شد</Badge> سرویس تاریخ را به شکل <span className="ltr">{`"${detected.style.field}": "${STYLE_SAMPLE[detected.style.format]}"`}</span> می‌خواهد؛ تعطیلات رسمی از این پس درست در تقویم
-              می‌آیند.
-            </p>
-          )}
-          {detected?.found === false && (
-            <p style={{ color: 'var(--danger)' }}>
-              هیچ‌کدام از {fa(detected.tried.length)} شکل رایج جواب درست نداد. احتمالاً سرویس فقط وضعیت امروز را برمی‌گرداند یا نام فیلد تاریخ متفاوت است؛ راهنمای سرویس در پنل s.api.ir را بررسی کنید.
-            </p>
-          )}
-          {detected?.tried && (
-            <details>
-              <summary className="small muted">جزئیات پرسش‌ها</summary>
-              <ul className="small ltr">
-                {detected.tried.map((t: any, i: number) => (
-                  <li key={i}>
-                    {t.field}: "{t.sent}" → {String(t.holiday)}
-                    {t.workday !== undefined ? ` / workday → ${String(t.workday)}` : ''}
-                  </li>
-                ))}
-              </ul>
-            </details>
-          )}
-        </div>
-      )}
-      {superAdmin && data.enabled && (
-        <>
-          <div className="row gap-sm wrap" style={{ alignItems: 'end' }}>
-            <Field label="آزمایش با یک روز">
-              <JalaliDateInput value={date} onChange={setDate} />
-            </Field>
-            <Button variant="secondary" busy={busy} disabled={!date} onClick={() => void test()}>
-              پرسش از سرویس
-            </Button>
-            <Button variant="ghost" onClick={() => void clear()}>
-              پاک کردن پاسخ‌های ذخیره‌شده
-            </Button>
-          </div>
-          {result && (
-            <div className="mt">
-              {result.ok ? (
-                <p>
-                  {result.isHoliday ? <Badge tone="danger">تعطیل</Badge> : <Badge tone="success">کاری</Badge>} {result.title}
-                </p>
-              ) : (
-                <p style={{ color: 'var(--danger)' }}>{result.error}</p>
-              )}
-              <details>
-                <summary className="small muted">پاسخ خام سرویس</summary>
-                <pre className="ltr small" style={{ whiteSpace: 'pre-wrap' }}>
-                  {JSON.stringify(result.raw ?? null, null, 2)}
-                </pre>
-              </details>
-            </div>
-          )}
-        </>
-      )}
-    </Card>
   );
 }

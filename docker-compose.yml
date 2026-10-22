@@ -32,11 +32,6 @@ services:
       IDENTITY_API_URL: ${IDENTITY_API_URL:-https://s.api.ir/api/sw1/PersonInfo}
       IDENTITY_API_TOKEN: ${IDENTITY_API_TOKEN:-}
       IDENTITY_REQUIRED: ${IDENTITY_REQUIRED:-false}
-      # Official holidays (s.api.ir IsHoliday); uses IDENTITY_API_TOKEN unless HOLIDAY_API_TOKEN is set.
-      HOLIDAY_PROVIDER: ${HOLIDAY_PROVIDER:-}
-      HOLIDAY_API_URL: ${HOLIDAY_API_URL:-https://s.api.ir/api/sw1/IsHoliday}
-      HOLIDAY_API_TOKEN: ${HOLIDAY_API_TOKEN:-}
-      HOLIDAY_API_DATE_FORMAT: ${HOLIDAY_API_DATE_FORMAT:-jalali}
       WEBINAR_URL: ${WEBINAR_URL:-}
       WEBINAR_APP_ID: ${WEBINAR_APP_ID:-kx-commissions}
       WEBINAR_APP_SECRET: ${WEBINAR_APP_SECRET:-}
