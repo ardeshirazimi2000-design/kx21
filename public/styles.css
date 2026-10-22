@@ -501,3 +501,13 @@ body.has-bottomnav .chat { height: calc(100vh - 260px); }
 /* Firefox draws the open list of a <select> itself; give its options the page's font and
    direction so right-to-left labels are not cut. */
 select option { font-family: Vazirmatn, Tahoma, sans-serif; direction: rtl; text-align: right; }
+
+/* In-app document viewer (back button + phone back key) */
+.viewer { position: fixed; inset: 0; z-index: 1000; background: #0e1218; display: flex; flex-direction: column; }
+.viewer-bar { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 10px 12px; padding-top: max(10px, env(safe-area-inset-top)); background: var(--surface); color: var(--text); }
+.viewer-bar b { flex: 1; text-align: center; font-size: 15px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.viewer-body { flex: 1; overflow: auto; display: flex; align-items: center; justify-content: center; padding: 8px; touch-action: pan-x pan-y pinch-zoom; }
+.viewer-body img { max-width: 100%; max-height: 100%; object-fit: contain; border-radius: 6px; background: #fff; cursor: zoom-in; }
+.viewer.zoomed .viewer-body { align-items: flex-start; justify-content: flex-start; }
+.viewer.zoomed .viewer-body img { max-width: none; max-height: none; width: 200%; cursor: zoom-out; }
+body.viewer-open { overflow: hidden; }

@@ -24,9 +24,44 @@ export function installV2(x) {
     return j;
   }
   const fileUrl = (u) => (u ? apiUrl(u) : null);
+  // Documents open inside the app with a back button (in the Android app a plain link replaced the
+  // whole app with the picture and left no way back). The phone's back key closes the viewer too.
+  // PDFs: system browser in the app (the WebView cannot show them), new tab on the web.
+  function openFile(url, mime = '', title = 'مشاهده مدرک') {
+    if (mime === 'application/pdf' || /\.pdf($|\?)/i.test(url)) {
+      if (IS_NATIVE) location.href = url; else window.open(url, '_blank', 'noopener');
+      return;
+    }
+    let closed = false;
+    const img = h('img', { src: url, alt: title });
+    const close = () => {
+      if (closed) return;
+      closed = true;
+      window.removeEventListener('popstate', onPop);
+      box.remove();
+      document.body.classList.remove('viewer-open');
+    };
+    const onPop = () => close();
+    const back = () => { if (history.state?.viewer) history.back(); else close(); };
+    const box = h('div', { class: 'viewer', role: 'dialog', 'aria-modal': 'true', 'aria-label': title },
+      h('div', { class: 'viewer-bar' },
+        h('button', { class: 'btn small', type: 'button', onclick: back }, '→ بازگشت'),
+        h('b', {}, title),
+        h('button', { class: 'btn small', type: 'button', onclick: () => box.classList.toggle('zoomed') }, 'بزرگ‌نمایی')),
+      h('div', { class: 'viewer-body', onclick: (e) => { if (e.target === e.currentTarget) back(); } }, img));
+    img.onclick = () => box.classList.toggle('zoomed');
+    window.addEventListener('popstate', onPop);
+    history.pushState({ ...(history.state ?? {}), viewer: true }, '');
+    document.body.classList.add('viewer-open');
+    document.body.append(box);
+  }
+  x.openFile = openFile;
+  const fileLink = (url, mime, title, ...children) => h('a', {
+    href: url, target: '_blank', onclick: (e) => { e.preventDefault(); openFile(url, mime, title); },
+  }, ...children);
   const thumb = (f) => (f.mime === 'application/pdf'
-    ? h('a', { class: 'thumb pdf', href: fileUrl(f.url), target: '_blank' }, '📄 PDF')
-    : h('a', { href: fileUrl(f.url), target: '_blank' }, h('img', { class: 'thumb', src: fileUrl(f.url), alt: '' })));
+    ? h('a', { class: 'thumb pdf', href: fileUrl(f.url), target: '_blank', onclick: (e) => { e.preventDefault(); openFile(fileUrl(f.url), f.mime); } }, '📄 PDF')
+    : fileLink(fileUrl(f.url), f.mime, 'مشاهده مدرک', h('img', { class: 'thumb', src: fileUrl(f.url), alt: '' })));
 
   // ---------------------------------------------------------------- payments
   // Opens the gateway (system browser in the app, new tab on the web) and polls the result.
@@ -113,7 +148,7 @@ export function installV2(x) {
     let photoId = d.photo_file_id;
     let cardId = d.license_card_file_id;
     const photoPrev = h('div', { class: 'upload-prev' }, d.photo_url ? h('img', { src: fileUrl(d.photo_url), class: 'avatar-lg', alt: '' }) : 'عکسی انتخاب نشده');
-    const cardPrev = h('div', { class: 'upload-prev' }, d.license_card_url ? h('a', { href: fileUrl(d.license_card_url), target: '_blank' }, '✓ کارت نظام پزشکی بارگذاری شده — مشاهده') : 'فایلی انتخاب نشده');
+    const cardPrev = h('div', { class: 'upload-prev' }, d.license_card_url ? fileLink(fileUrl(d.license_card_url), '', 'کارت نظام پزشکی', '✓ کارت نظام پزشکی بارگذاری شده — مشاهده') : 'فایلی انتخاب نشده');
     const picker = (accept, purpose, onDone, prev) => h('input', {
       type: 'file', accept, disabled: locked || (purpose === 'license_card' && approved),
       onchange: guard(async (e) => {
@@ -192,7 +227,7 @@ export function installV2(x) {
         h('h3', { style: 'margin-top:12px' }, 'تحصیلات'), h('p', {}, d.education ?? '—'),
         h('h3', {}, 'رزومه'), h('p', { style: 'white-space:pre-wrap' }, d.bio ?? '—'),
         h('h3', {}, 'کارت نظام پزشکی'),
-        d.license_card_url ? h('a', { href: fileUrl(d.license_card_url), target: '_blank' }, h('img', { class: 'card-img', src: fileUrl(d.license_card_url), alt: 'کارت نظام پزشکی', onerror: (e) => { e.target.replaceWith('📄 مشاهده فایل PDF'); } })) : h('p', {}, '—'),
+        d.license_card_url ? fileLink(fileUrl(d.license_card_url), '', 'کارت نظام پزشکی', h('img', { class: 'card-img', src: fileUrl(d.license_card_url), alt: 'کارت نظام پزشکی', onerror: (e) => { e.target.replaceWith('📄 مشاهده فایل PDF'); } })) : h('p', {}, '—'),
         h('p', { class: 'muted' }, 'شماره نظام پزشکی را با سامانه سازمان نظام پزشکی تطبیق دهید.')),
       d.status === 'pending_review' || d.status === 'approved' ? h('div', { class: 'card stack' },
         d.status === 'pending_review' ? h('button', { class: 'btn primary', onclick: guard(async () => { await api('POST', `/v1/admin/doctors/${id}/approve`, {}); toast('پزشک تأیید شد'); route('admin-doctors'); }) }, '✅ تأیید و افزودن به فهرست پزشکان') : null,
