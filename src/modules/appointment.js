@@ -30,7 +30,7 @@ export function createAppointmentDomain({ db, platform, config = {}, patientDoma
   // by the assistant's check_availability tool.
   function checkAvailability(tenantId, { doctorId, specialty, from, limit = 20 } = {}) {
     const fromIso = from && !isNaN(Date.parse(from)) ? new Date(from).toISOString() : nowIso();
-    const where = ['s.tenant_id = ?', 's.starts_at > ?', 'd.deleted_at IS NULL', "d.status = 'approved'",
+    const where = ['s.tenant_id = ?', 's.starts_at > ?', 's.blocked_at IS NULL', 'd.deleted_at IS NULL', "d.status = 'approved'",
       `NOT EXISTS (SELECT 1 FROM appointments a WHERE a.slot_id = s.id AND a.status IN ('pending','confirmed'))`];
     const params = [tenantId, fromIso];
     if (doctorId) { where.push('s.doctor_id = ?'); params.push(doctorId); }
@@ -106,6 +106,7 @@ export function createAppointmentDomain({ db, platform, config = {}, patientDoma
     }
     const slot = db.get('SELECT * FROM slots WHERE id = ? AND tenant_id = ?', slotId, ctx.tenantId);
     if (!slot || slot.doctor_id !== doctorId) throw notFound('زمان انتخاب‌شده');
+    if (slot.blocked_at) throw conflict('این زمان توسط پزشک غیرفعال شده است', 'slot_blocked');
     if (db.get('SELECT status FROM doctors WHERE id = ?', doctorId)?.status !== 'approved') throw conflict('این پزشک فعلاً نوبت نمی‌پذیرد', 'doctor_not_available');
     if (slot.starts_at <= nowIso()) throw conflict('زمان این نوبت گذشته است', 'slot_in_past');
     if (triageResultId) {
@@ -350,10 +351,10 @@ export function register(router, { db, platform, domain }) {
     requireUser(ctx, 'doctor');
     const rows = db.all(
       `SELECT s.*, (SELECT a.id FROM appointments a WHERE a.slot_id = s.id AND a.status IN ('pending','confirmed')) AS appointment_id
-       FROM slots s WHERE s.doctor_id = ? AND s.ends_at > ? ORDER BY s.starts_at LIMIT 300`,
+       FROM slots s WHERE s.doctor_id = ? AND s.ends_at > ? AND s.removed_at IS NULL ORDER BY s.starts_at LIMIT 300`,
       ctx.user.did, nowIso(),
     );
-    return { body: { items: rows.map((s) => ({ id: s.id, starts_at: s.starts_at, ends_at: s.ends_at, booked: !!s.appointment_id, appointment_id: s.appointment_id ?? null })), visit: getVisitSettings(db, ctx.tenantId) } };
+    return { body: { items: rows.map((s) => ({ id: s.id, starts_at: s.starts_at, ends_at: s.ends_at, booked: !!s.appointment_id, appointment_id: s.appointment_id ?? null, blocked: !!s.blocked_at })), visit: getVisitSettings(db, ctx.tenantId) } };
   });
 
   const requireApprovedDoctor = (ctx) => {
@@ -380,8 +381,16 @@ export function register(router, { db, platform, domain }) {
       for (let i = 0; i < count; i++) {
         const s = new Date(start + i * dur * 60000).toISOString();
         const e = new Date(start + (i + 1) * dur * 60000).toISOString();
-        const overlap = db.get('SELECT 1 FROM slots WHERE doctor_id = ? AND starts_at < ? AND ends_at > ?', ctx.user.did, e, s);
+        const overlap = db.get('SELECT 1 FROM slots WHERE doctor_id = ? AND starts_at < ? AND ends_at > ? AND removed_at IS NULL', ctx.user.did, e, s);
         if (overlap) continue;
+        // The same time was deleted earlier but kept for history: bring it back.
+        const old = db.get('SELECT id, ends_at FROM slots WHERE doctor_id = ? AND starts_at = ? AND removed_at IS NOT NULL', ctx.user.did, s);
+        if (old) {
+          if (old.ends_at !== e) continue;
+          db.run('UPDATE slots SET removed_at = NULL, blocked_at = NULL WHERE id = ?', old.id);
+          created.push({ id: old.id, starts_at: s, ends_at: e });
+          continue;
+        }
         const id = uuid();
         db.run('INSERT INTO slots (id, tenant_id, doctor_id, starts_at, ends_at) VALUES (?,?,?,?,?)', id, ctx.tenantId, ctx.user.did, s, e);
         created.push({ id, starts_at: s, ends_at: e });
@@ -394,12 +403,38 @@ export function register(router, { db, platform, domain }) {
     return { status: 201, body: { created: created.length, skipped_overlapping: count - created.length, items: created } };
   });
 
+  // Several free slots at once: delete, switch off (not offered to patients) or switch back on.
+  // Booked slots are never touched; they are freed only by cancelling the visit.
+  router.post('/v1/doctors/me/slots/bulk', async (ctx) => {
+    requireUser(ctx, 'doctor');
+    const action = ctx.body.action;
+    if (!['delete', 'block', 'unblock'].includes(action)) throw badRequest('عملیات نامعتبر است (delete | block | unblock)');
+    const ids = Array.isArray(ctx.body.ids) ? [...new Set(ctx.body.ids)].slice(0, 500) : [];
+    if (!ids.length) throw badRequest('هیچ زمانی انتخاب نشده است');
+    let done = 0; let skipped = 0;
+    db.tx(() => {
+      for (const id of ids) {
+        const s = typeof id === 'string' && db.get('SELECT * FROM slots WHERE id = ? AND doctor_id = ?', id, ctx.user.did);
+        if (!s || db.get(`SELECT 1 FROM appointments WHERE slot_id = ? AND status IN ('pending','confirmed')`, s.id)) { skipped++; continue; }
+        if (action === 'delete') {
+          if (db.get('SELECT 1 FROM appointments WHERE slot_id = ?', s.id)) db.run('UPDATE slots SET blocked_at = COALESCE(blocked_at, ?), removed_at = ? WHERE id = ?', nowIso(), nowIso(), s.id); // keep history
+          else db.run('DELETE FROM slots WHERE id = ?', s.id);
+        } else db.run('UPDATE slots SET blocked_at = ? WHERE id = ?', action === 'block' ? nowIso() : null, s.id);
+        done++;
+      }
+    });
+    platform.audit(ctx, `slot.bulk_${action}`, `doctor:${ctx.user.did}`, { done, skipped });
+    return { body: { done, skipped } };
+  });
+
   router.delete('/v1/doctors/me/slots/:id', async (ctx) => {
     requireUser(ctx, 'doctor');
     const s = db.get('SELECT * FROM slots WHERE id = ? AND doctor_id = ?', requireUuid(ctx.params.id, 'id'), ctx.user.did);
     if (!s) throw notFound('زمان');
-    if (db.get('SELECT 1 FROM appointments WHERE slot_id = ?', s.id)) throw conflict('این زمان نوبت ثبت‌شده دارد', 'slot_has_appointment');
-    db.run('DELETE FROM slots WHERE id = ?', s.id);
+    if (db.get(`SELECT 1 FROM appointments WHERE slot_id = ? AND status IN ('pending','confirmed')`, s.id)) throw conflict('این زمان نوبت ثبت‌شده دارد؛ برای آزاد کردن آن نوبت را لغو کنید', 'slot_has_appointment');
+    // A slot with past (e.g. cancelled) visits is kept for their history, just no longer offered.
+    if (db.get('SELECT 1 FROM appointments WHERE slot_id = ?', s.id)) db.run('UPDATE slots SET blocked_at = COALESCE(blocked_at, ?), removed_at = ? WHERE id = ?', nowIso(), nowIso(), s.id);
+    else db.run('DELETE FROM slots WHERE id = ?', s.id);
     return { status: 204 };
   });
 

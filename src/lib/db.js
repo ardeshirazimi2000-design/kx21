@@ -467,7 +467,10 @@ const COLUMNS = {
   ],
   appointments: [['payment_due_at', 'TEXT'], ['cancel_reason', 'TEXT'], ['cancelled_by', 'TEXT'], ['reminded_60_at', 'TEXT'], ['reminded_room_at', 'TEXT'],
     ['queue_next_at', 'TEXT'], ['queue_delay_notified', 'INTEGER']], // live queue notifications
-  consultations: [['doctor_joined_at', 'TEXT']], // the visit is "in progress" once the doctor is in the room
+  consultations: [['doctor_joined_at', 'TEXT']],
+  // blocked_at: a free slot switched off by the doctor (not offered); removed_at: deleted by the
+  // doctor but kept because past (e.g. cancelled) visits refer to it.
+  slots: [['blocked_at', 'TEXT'], ['removed_at', 'TEXT']],
   otp_codes: [['payload', 'TEXT']], // pending registration (role, verified national id) until OTP is confirmed
   prescriptions: [['diagnoses', 'TEXT'], ['safety', 'TEXT']],
   // Split of each payment, fixed at creation: commission percent, platform share, doctor share.

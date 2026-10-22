@@ -186,12 +186,14 @@ export function createApp(overrides = {}) {
     const traceId = req.headers['x-trace-id']?.toString().slice(0, 64) || newTraceId();
     for (const [k, v] of Object.entries(SECURITY_HEADERS)) res.setHeader(k, v);
     res.setHeader('X-Trace-Id', traceId);
+    // The client times visit-room buttons by the server clock (a phone's clock may be off).
+    res.setHeader('X-Server-Time', String(Date.now()));
     const url = new URL(req.url, 'http://localhost');
     const origin = req.headers.origin;
     if (origin && config.corsOrigins.includes(origin)) {
       res.setHeader('Access-Control-Allow-Origin', origin);
       res.setHeader('Vary', 'Origin');
-      res.setHeader('Access-Control-Expose-Headers', 'X-Trace-Id, Idempotent-Replayed');
+      res.setHeader('Access-Control-Expose-Headers', 'X-Trace-Id, Idempotent-Replayed, X-Server-Time');
       if (req.method === 'OPTIONS') {
         res.writeHead(204, {
           'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',

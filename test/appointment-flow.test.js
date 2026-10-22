@@ -139,3 +139,50 @@ test('live queue: position, people ahead, expected start, "you are next" and no-
     t.close();
   }
 });
+
+test('doctor manages free slots in bulk: switch off / on and delete; booked slots are never touched', async () => {
+  const t = await startApp({ disableSweeper: true });
+  try {
+    const doctor = await t.login(DEMO_ACCOUNTS.doctors[0].phone, { role: 'doctor' });
+    t.app.db.run(`DELETE FROM slots WHERE doctor_id = (SELECT d.id FROM doctors d JOIN users u ON u.id = d.user_id WHERE u.phone = ?)
+      AND id NOT IN (SELECT slot_id FROM appointments)`, DEMO_ACCOUNTS.doctors[0].phone);
+    const start = new Date(Date.now() + 26 * 3600e3); start.setUTCMinutes(0, 0, 0);
+    const pub = await t.call('POST', '/v1/doctors/me/slots', { token: doctor, body: { starts_at: start.toISOString(), ends_at: new Date(start.getTime() + 2 * 3600e3).toISOString(), duration_min: 30 } });
+    assert.equal(pub.body.created, 4);
+    const [s1, s2, s3, s4] = pub.body.items;
+    const did = t.app.db.get('SELECT doctor_id FROM slots WHERE id = ?', s1.id).doctor_id;
+    const { token: patient } = await t.newPatient({ nationalId: randomNationalId() });
+    const booked = await t.call('POST', '/v1/appointments', { token: patient, body: { doctor_id: did, slot_id: s1.id, channel: 'video' }, headers: { 'Idempotency-Key': t.uuid() } });
+    assert.equal(booked.status, 201);
+    const offered = async () => (await t.call('GET', `/v1/doctors/${did}/slots`, { token: patient })).body.items.map((x) => x.id);
+
+    // Switch off two free slots (and try the booked one): not offered, not bookable.
+    const off = await t.call('POST', '/v1/doctors/me/slots/bulk', { token: doctor, body: { action: 'block', ids: [s1.id, s2.id, s3.id] } });
+    assert.deepEqual(off.body, { done: 2, skipped: 1 });
+    assert.deepEqual((await offered()).sort(), [s4.id].sort());
+    const no = await t.call('POST', '/v1/appointments', { token: patient, body: { doctor_id: did, slot_id: s2.id, channel: 'video' }, headers: { 'Idempotency-Key': t.uuid() } });
+    assert.equal(no.body.code, 'slot_blocked');
+    const mine = (await t.call('GET', '/v1/doctors/me/slots', { token: doctor })).body.items;
+    assert.deepEqual(mine.filter((x) => x.blocked).map((x) => x.id).sort(), [s2.id, s3.id].sort());
+
+    // Back on.
+    assert.equal((await t.call('POST', '/v1/doctors/me/slots/bulk', { token: doctor, body: { action: 'unblock', ids: [s2.id] } })).body.done, 1);
+    assert.ok((await offered()).includes(s2.id));
+
+    // Delete: the booked slot stays; a slot with only a cancelled visit is removed from the calendar but kept for history.
+    const { token: p2 } = await t.newPatient({ nationalId: randomNationalId() });
+    const c = await t.call('POST', '/v1/appointments', { token: p2, body: { doctor_id: did, slot_id: s4.id, channel: 'video' }, headers: { 'Idempotency-Key': t.uuid() } });
+    await t.call('POST', `/v1/appointments/${c.body.id}/cancel`, { token: p2, body: {} });
+    const del = await t.call('POST', '/v1/doctors/me/slots/bulk', { token: doctor, body: { action: 'delete', ids: [s1.id, s2.id, s3.id, s4.id] } });
+    assert.deepEqual(del.body, { done: 3, skipped: 1 });
+    const left = (await t.call('GET', '/v1/doctors/me/slots', { token: doctor })).body.items.map((x) => x.id);
+    assert.deepEqual(left, [s1.id]);
+    assert.ok(t.app.db.get('SELECT removed_at FROM slots WHERE id = ?', s4.id).removed_at); // history kept
+    // Publishing the same times again works (the removed slot comes back).
+    const again = await t.call('POST', '/v1/doctors/me/slots', { token: doctor, body: { starts_at: start.toISOString(), ends_at: new Date(start.getTime() + 2 * 3600e3).toISOString(), duration_min: 30 } });
+    assert.equal(again.body.created, 3);
+    assert.equal(again.body.skipped_overlapping, 1);
+  } finally {
+    t.close();
+  }
+});

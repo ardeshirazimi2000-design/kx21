@@ -469,3 +469,20 @@ body.has-bottomnav .chat { height: calc(100vh - 260px); }
 .entry-icon { width: 60px; height: 60px; border-radius: 18px; overflow: hidden; align-items: flex-end; }
 .entry-icon svg { display: block; }
 .avatar-lg.ph, .avatar-xl.ph { display: inline-grid; place-items: end center; background: var(--primary-soft); overflow: hidden; }
+
+/* Visit-room button before the room opens: still clickable (it says when it opens) */
+.btn[aria-disabled="true"] { opacity: .75; cursor: help; }
+
+/* Doctor's calendar: selecting free slots for bulk actions */
+.slot.selectable { display: grid; justify-items: center; gap: 2px; cursor: pointer; position: relative; user-select: none; }
+.slot.selectable input { position: absolute; top: 6px; inset-inline-start: 6px; margin: 0; }
+.slot.picked { border-color: var(--primary); background: var(--primary-soft); }
+.slot.blocked { background: repeating-linear-gradient(135deg, var(--surface-2) 0 6px, var(--surface) 6px 12px); color: var(--muted); }
+.slot.blocked small { color: var(--warn); font-weight: 700; }
+.slot.booked { border-color: var(--primary); }
+.day-title.row { display: flex; align-items: center; cursor: pointer; }
+.slot-bar { position: sticky; top: calc(var(--header-h, 61px) + 4px); z-index: 5; display: flex; flex-wrap: wrap; align-items: center; gap: 6px;
+  padding: 8px 10px; margin-bottom: 10px; border-radius: 12px; border: 1px dashed var(--border); background: var(--surface); font-size: 13px; }
+.slot-bar b { flex: 1 1 220px; font-weight: 500; color: var(--muted); }
+.slot-bar.active { border-style: solid; border-color: var(--primary); background: var(--primary-soft); }
+.slot-bar.active b { color: var(--primary); font-weight: 700; }

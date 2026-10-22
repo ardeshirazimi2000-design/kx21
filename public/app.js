@@ -101,7 +101,13 @@ class ApiErr extends Error {
   constructor(status, body) { super(body?.message || `HTTP ${status}`); this.status = status; this.code = body?.code; this.body = body; }
 }
 
+// Server clock: times such as "the visit room opens at 16:50" follow the server, not the device
+// clock (a phone's clock may be minutes off). Updated from every API response.
+let serverOffset = 0;
+const serverNow = () => Date.now() + serverOffset;
+
 async function api(method, path, body, headers = {}) {
+  const sent = Date.now();
   const res = await fetch(apiUrl(path), {
     method,
     headers: {
@@ -111,6 +117,8 @@ async function api(method, path, body, headers = {}) {
     },
     body: body ? JSON.stringify(body) : undefined,
   });
+  const st = Number(res.headers.get('X-Server-Time'));
+  if (st) serverOffset = st - Math.round((sent + Date.now()) / 2);
   if (res.status === 204) return null;
   const data = await res.json().catch(() => null);
   if (res.status === 401 && session) { logout(); throw new ApiErr(401, data); }
@@ -222,6 +230,8 @@ async function refreshBadge(force = false) {
 // (browser / installed web app; inside the Android app the on-screen message is shown).
 function announce(items) {
   const first = items[0].body;
+  if (items.some((n) => /اتاق ویزیت|نوبت شما بعدی است/.test(n.body)) && ['home', 'appointments', 'doctor-appointments'].includes(current.view)
+    && !document.querySelector('.wizard-overlay')) setTimeout(() => route(current.view), 1500);
   toast(items.length > 1 ? `${fa(items.length)} اعلان جدید — ${first}` : `🔔 ${first}`);
   if (typeof Notification !== 'undefined' && Notification.permission === 'granted' && document.visibilityState !== 'visible') {
     for (const n of items.slice(0, 3)) {
@@ -746,20 +756,36 @@ VIEWS.book = async () => {
 // "Enter the visit room": active only from the room's opening time (set by the admin) until
 // shortly after the visit; before that it shows when it opens and switches on by itself.
 function joinButton(a, cls = 'btn primary small') {
-  const btn = h('button', { class: cls, onclick: () => route('room', a.consultation.id) }, 'ورود به اتاق ویزیت');
+  const btn = h('button', { class: cls, type: 'button' }, 'ورود به اتاق ویزیت');
   const w = a.join;
-  if (!w?.enforced) return btn;
-  const now = Date.now();
-  if (now > Date.parse(w.closes_at)) return h('span', { class: 'muted small' }, 'زمان ویزیت گذشته است');
+  if (!w?.enforced) { btn.onclick = () => route('room', a.consultation.id); return btn; }
   const opens = Date.parse(w.opens_at);
-  if (now < opens) {
-    btn.disabled = true;
-    btn.className = cls.replace('primary', '');
-    btn.textContent = `اتاق ویزیت ${tehranDayKey(w.opens_at) === tehranDayKey(new Date()) ? `ساعت ${fmt.time(w.opens_at)}` : fmt.dt(w.opens_at)} باز می‌شود`;
-    if (opens - now < 6 * 3600e3) {
-      const id = setTimeout(() => { btn.disabled = false; btn.className = cls; btn.textContent = 'ورود به اتاق ویزیت'; toast('اتاق ویزیت باز شد'); }, opens - now + 500);
-      onCleanup(() => clearTimeout(id));
+  if (serverNow() > Date.parse(w.closes_at) && !a.queue) return h('span', { class: 'muted small' }, 'زمان ویزیت گذشته است');
+  // Re-checked every 15 seconds and whenever the page comes back to the front, by the server
+  // clock, so the button turns on even after the phone slept or the tab was in the background.
+  const paint = () => {
+    const early = serverNow() < opens;
+    btn.className = early ? cls.replace('primary', '').trim() : cls;
+    btn.setAttribute('aria-disabled', early ? 'true' : 'false');
+    btn.textContent = early
+      ? `اتاق ویزیت ${tehranDayKey(w.opens_at) === tehranDayKey(new Date(serverNow())) ? `ساعت ${fmt.time(w.opens_at)}` : fmt.dt(w.opens_at)} باز می‌شود`
+      : 'ورود به اتاق ویزیت';
+    return early;
+  };
+  let wasEarly = paint();
+  // Still clickable when early: it says how long is left instead of doing nothing.
+  btn.onclick = () => {
+    if (serverNow() < opens) {
+      const mins = Math.ceil((opens - serverNow()) / 60000);
+      return toast(mins > 90 ? `اتاق ویزیت ${fmt.dt(w.opens_at)} باز می‌شود` : `اتاق ویزیت ${fa(mins)} دقیقه دیگر باز می‌شود`);
     }
+    route('room', a.consultation.id);
+  };
+  if (wasEarly) {
+    const tick = () => { if (wasEarly && !paint()) { wasEarly = false; toast('اتاق ویزیت باز شد'); } };
+    const id = setInterval(tick, 15_000);
+    document.addEventListener('visibilitychange', tick);
+    onCleanup(() => { clearInterval(id); document.removeEventListener('visibilitychange', tick); });
   }
   return btn;
 }
@@ -880,7 +906,14 @@ VIEWS['doctor-appointments'] = async () => {
 // ---------- visit room ----------
 VIEWS.room = async (cid) => {
   const isDoctor = session.user.role === 'doctor';
-  const join = await api('POST', `/v1/consultations/${cid}/join`, {}).catch((e) => (e.code === 'appointment_not_active' ? null : Promise.reject(e)));
+  let join;
+  try {
+    join = await api('POST', `/v1/consultations/${cid}/join`, {});
+  } catch (e) {
+    if (e.code === 'too_early' || e.code === 'too_late') { toast(e.message, true); return route(isDoctor ? 'doctor-appointments' : 'appointments'); }
+    if (e.code !== 'appointment_not_active') throw e;
+    join = null;
+  }
   const info = await api('GET', `/v1/consultations/${cid}`);
   let ended = !!info.ended_at;
   let lastTs = '';
@@ -1106,14 +1139,59 @@ VIEWS.calendar = async () => {
       dur.replaceChildren(...r.visit.durations.map((m) => h('option', { value: m, selected: m === r.visit.default }, `${fa(m)} دقیقه`)));
       dur.dataset.ready = '1';
     }
+    // Free slots can be selected (one by one or a whole day) and then switched off, back on or
+    // deleted together. Booked slots are not selectable: they are freed by cancelling the visit.
+    selected.clear();
     const days = new Map();
     for (const s of r.items) { const k = tehranDayKey(s.starts_at); if (!days.has(k)) days.set(k, []); days.get(k).push(s); }
-    list.replaceChildren(...[...days.values()].map((slots) => h('div', {}, h('div', { class: 'day-title' }, fmt.day(slots[0].starts_at)),
-      h('div', { class: 'slots' }, slots.map((s) => h('div', { class: 'slot', style: s.booked ? 'border-color:var(--primary)' : '' },
-        fmt.time(s.starts_at), h('small', {}, s.booked
-          ? h('button', { class: 'btn small danger', title: 'لغو نوبت بیمار', onclick: () => cancelAppointment({ id: s.appointment_id }, 'doctor', load) }, 'رزروشده · لغو')
-          : h('button', { class: 'btn small', onclick: guard(async () => { await api('DELETE', `/v1/doctors/me/slots/${s.id}`); load(); }) }, 'حذف'))))))));
+    const boxes = [];
+    list.replaceChildren(...[...days.values()].map((slots) => {
+      const free = slots.filter((s) => !s.booked);
+      const dayBox = h('input', { type: 'checkbox', disabled: !free.length, title: 'انتخاب همه زمان‌های خالی این روز' });
+      const own = [];
+      dayBox.onchange = () => { const v = dayBox.checked; for (const b of own) { b.checked = v; b.onchange(); } dayBox.checked = v; };
+      const cards = slots.map((s) => {
+        if (s.booked) {
+          return h('div', { class: 'slot booked' }, fmt.time(s.starts_at),
+            h('small', {}, h('button', { class: 'btn small danger', title: 'لغو نوبت بیمار', onclick: () => cancelAppointment({ id: s.appointment_id }, 'doctor', load) }, 'رزروشده · لغو')));
+        }
+        const cb = h('input', { type: 'checkbox', 'aria-label': `انتخاب ${fmt.time(s.starts_at)}` });
+        const card = h('label', { class: `slot selectable${s.blocked ? ' blocked' : ''}` }, cb, h('span', {}, fmt.time(s.starts_at)),
+          h('small', {}, s.blocked ? 'غیرفعال' : 'خالی'));
+        cb.onchange = () => { if (cb.checked) selected.add(s.id); else selected.delete(s.id); card.classList.toggle('picked', cb.checked); dayBox.checked = own.every((b) => b.checked); paintBar(); };
+        own.push(cb); boxes.push(cb);
+        return card;
+      });
+      return h('div', {}, h('label', { class: 'day-title row', style: 'gap:8px' }, dayBox, fmt.day(slots[0].starts_at),
+        h('span', { class: 'muted small' }, `${fa(slots.filter((s) => s.booked).length)} رزرو · ${fa(free.filter((s) => !s.blocked).length)} خالی${free.some((s) => s.blocked) ? ` · ${fa(free.filter((s) => s.blocked).length)} غیرفعال` : ''}`)),
+      h('div', { class: 'slots' }, cards));
+    }));
     if (!r.items.length) list.append(h('div', { class: 'empty' }, 'زمانی منتشر نشده است.'));
+    clearSel = () => { for (const b of boxes) { b.checked = false; b.onchange(); } };
+    paintBar();
+  };
+  // Action bar for the selected free slots.
+  const selected = new Set();
+  let clearSel = () => {};
+  const selInfo = h('b');
+  const bulk = (action, label) => guard(async () => {
+    if (!selected.size) return;
+    if (action === 'delete' && !confirm(`${fa(selected.size)} زمان خالی حذف شود؟`)) return;
+    const r = await api('POST', '/v1/doctors/me/slots/bulk', { action, ids: [...selected] });
+    toast(`${fa(r.done)} زمان ${label}${r.skipped ? ` (${fa(r.skipped)} مورد رزرو شده بود و تغییری نکرد)` : ''}`);
+    load();
+  });
+  const barBtns = [
+    h('button', { class: 'btn small', type: 'button', onclick: bulk('block', 'غیرفعال شد') }, 'غیرفعال کردن'),
+    h('button', { class: 'btn small', type: 'button', onclick: bulk('unblock', 'فعال شد') }, 'فعال کردن'),
+    h('button', { class: 'btn small danger', type: 'button', onclick: bulk('delete', 'حذف شد') }, 'حذف'),
+    h('button', { class: 'btn small', type: 'button', onclick: () => clearSel() }, 'لغو انتخاب'),
+  ];
+  const bar = h('div', { class: 'slot-bar' }, selInfo, ...barBtns);
+  const paintBar = () => {
+    selInfo.textContent = selected.size ? `${fa(selected.size)} زمان انتخاب شده` : 'برای غیرفعال کردن یا حذف، زمان‌های خالی را انتخاب کنید (یا تیک کنار هر روز برای همه خالی‌های آن روز)';
+    bar.classList.toggle('active', selected.size > 0);
+    for (const b of barBtns) b.disabled = !selected.size;
   };
   // Repeat on weekdays (Saturday first, as in the Iranian week) for a number of weeks.
   const WEEKDAYS = [[6, 'شنبه'], [0, 'یکشنبه'], [1, 'دوشنبه'], [2, 'سه‌شنبه'], [3, 'چهارشنبه'], [4, 'پنجشنبه'], [5, 'جمعه']];
@@ -1181,7 +1259,9 @@ VIEWS.calendar = async () => {
     daysRow,
     preview,
     h('div', {}, h('button', { class: 'btn primary' }, 'انتشار'))),
-  h('div', { class: 'card' }, h('h2', {}, 'زمان‌های من'), list));
+  h('div', { class: 'card' }, h('h2', {}, 'زمان‌های من'),
+    h('p', { class: 'muted small' }, 'زمان «غیرفعال» به بیماران نشان داده نمی‌شود ولی حذف نشده و می‌توانید دوباره فعالش کنید. زمان رزروشده فقط با لغو نوبت (با ذکر دلیل) آزاد می‌شود.'),
+    bar, list));
   await load();
   showPreview();
 };
