@@ -486,3 +486,15 @@ body.has-bottomnav .chat { height: calc(100vh - 260px); }
 .slot-bar b { flex: 1 1 220px; font-weight: 500; color: var(--muted); }
 .slot-bar.active { border-style: solid; border-color: var(--primary); background: var(--primary-soft); }
 .slot-bar.active b { color: var(--primary); font-weight: 700; }
+
+/* Visit summary: assistant draft and dictation */
+.field-head { align-items: center; gap: 6px; margin-bottom: 4px; }
+.field-head label { margin: 0; }
+.draft-box { border: 1px solid var(--primary); background: var(--primary-soft); border-radius: 12px; padding: 10px 12px; margin: 6px 0; display: grid; gap: 8px; }
+.draft-box .pre { background: var(--surface); border-radius: 8px; padding: 8px 10px; max-height: 320px; overflow: auto; }
+.btn.mic.rec { background: var(--danger-soft); color: var(--danger); border-color: var(--danger); animation: q-pulse 1.4s ease-in-out infinite; }
+.draft-box .chips { max-width: 100%; align-self: auto; } .draft-box .chip { cursor: pointer; } .draft-box .chip:disabled { opacity: .5; text-decoration: line-through; }
+
+/* Firefox draws the open list of a <select> itself; give its options the page's font and
+   direction so right-to-left labels are not cut. */
+select option { font-family: Vazirmatn, Tahoma, sans-serif; direction: rtl; text-align: right; }

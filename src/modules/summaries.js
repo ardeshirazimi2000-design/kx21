@@ -11,6 +11,7 @@ import { SPECIALTIES } from './patient.js';
 import { buildVisitSummary, buildPatientSummary, ageFrom, SUMMARY_VERSION } from './ai/visit-summary.js';
 import { checkOutput } from './ai/guardrails.js';
 import { createLlm } from './ai/llm.js';
+import { buildAssessmentDraft, DRAFT_HEADER, ASSESSMENT_DRAFT_VERSION } from './ai/assessment-draft.js';
 
 const EDITABLE = ['subjective', 'objective', 'assessment', 'plan', 'advice', 'follow_up', 'patient_summary'];
 const AUTO = ['subjective', 'objective', 'plan', 'advice'];
@@ -177,6 +178,21 @@ export function register(router, { db, platform, config, domain }) {
     return { body: doctorView(rowOf(c.id)) };
   });
 
+  // Assessment draft from the assistant (rules; nothing leaves the server). The physician
+  // inserts it into the assessment, edits and completes it; it is never saved on its own.
+  router.get('/v1/consultations/:id/summary/assessment-draft', async (ctx) => {
+    requireUser(ctx, 'doctor');
+    const c = load(ctx, ctx.params.id);
+    const f = facts(c);
+    const cxr = db.all(
+      `SELECT x.findings FROM cxr_analyses x JOIN medical_records r ON r.id = x.record_id
+       WHERE r.appointment_id = ? AND r.deleted_at IS NULL ORDER BY x.created_at`, c.appointment_id,
+    ).flatMap((x) => parseJson(x.findings, []));
+    const d = buildAssessmentDraft({ ...f, cxr });
+    platform.audit(ctx, 'summary.assessment_draft', `consultation:${c.id}`, { version: d.version, basis: d.basis, icd: d.icd.map((x) => x.code) });
+    return { body: d };
+  });
+
   router.post('/v1/consultations/:id/summary/regenerate', async (ctx) => {
     requireUser(ctx, 'doctor');
     const c = load(ctx, ctx.params.id);
@@ -191,6 +207,11 @@ export function register(router, { db, platform, config, domain }) {
     let row = rowOf(c.id) ?? await generate(ctx, c);
     if (row.status === 'final') return { body: doctorView(row) };
     if (!String(row.assessment ?? '').trim()) throw badRequest('بخش «ارزیابی پزشک» را بنویسید؛ این بخش خودکار پر نمی‌شود', 'assessment_required');
+    // An inserted assistant draft must be completed by the physician before it is final.
+    const fromDraft = String(row.assessment).includes(DRAFT_HEADER);
+    if (/ارزیابی و تشخیص نهایی پزشک:\s*…\s*$/.test(String(row.assessment).trim())) {
+      throw badRequest('پیش‌نویس دستیار را بازبینی کنید و «ارزیابی و تشخیص نهایی پزشک» را بنویسید', 'assessment_incomplete');
+    }
     const f = facts(c);
     if (f.prescriptions.some((r) => r.status === 'draft') && !ctx.body?.allow_unsigned) {
       throw conflict('نسخه پیش‌نویس امضانشده وجود دارد؛ آن را امضا کنید یا تأیید کنید که بدون آن ثبت شود', 'unsigned_prescription');
@@ -199,9 +220,13 @@ export function register(router, { db, platform, config, domain }) {
     const patientSummary = parseJson(row.edited_fields, []).includes('patient_summary') ? row.patient_summary : patientText(row, f);
     if (!String(patientSummary ?? '').trim()) throw badRequest('متن خلاصه برای بیمار خالی است');
     const now = nowIso();
-    db.run(`UPDATE visit_summaries SET status = 'final', patient_summary = ?, finalized_at = ?, updated_at = ? WHERE id = ? AND status = 'draft'`,
-      patientSummary, now, now, row.id);
-    platform.audit(ctx, 'summary.finalize', `consultation:${c.id}`);
+    // The draft label goes; the reviewed text is now the physician's.
+    const assessment = fromDraft ? String(row.assessment).split('\n').filter((l) => !l.includes(DRAFT_HEADER)).join('\n').trim() : row.assessment;
+    const finalPatient = fromDraft && row.share_assessment && !parseJson(row.edited_fields, []).includes('patient_summary')
+      ? patientText({ ...row, assessment }, f) : patientSummary;
+    db.run(`UPDATE visit_summaries SET status = 'final', assessment = ?, patient_summary = ?, finalized_at = ?, updated_at = ? WHERE id = ? AND status = 'draft'`,
+      assessment, finalPatient, now, now, row.id);
+    platform.audit(ctx, 'summary.finalize', `consultation:${c.id}`, { assessment_from_draft: fromDraft ? ASSESSMENT_DRAFT_VERSION : null });
     const pu = db.get('SELECT u.id, u.phone FROM patients p JOIN users u ON u.id = p.user_id WHERE p.id = ?', c.patient_id);
     if (pu) platform.notify(ctx, { userId: pu.id, channel: 'sms', target: pu.phone, body: 'خلاصه ویزیت شما آماده است؛ در اپ، بخش «نوبت‌های من» ببینید.' });
     row = rowOf(c.id);

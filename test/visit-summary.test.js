@@ -107,3 +107,42 @@ test('finalize requires the physician assessment', async () => {
   const r = await t.call('POST', `/v1/consultations/${appt.consultation.id}/summary/finalize`, { token: doc, body: {} });
   assert.equal(r.body.code, 'assessment_required');
 });
+
+test('assessment draft: rules from recorded data, inserted by the physician, must be completed before final', async () => {
+  const { buildAssessmentDraft, icdForComplaints, DRAFT_HEADER } = await import('../src/modules/ai/assessment-draft.js');
+  // Pure builder: findings, strict ICD matching (no «تبخال» for «تب»), never a diagnosis.
+  assert.deepEqual(icdForComplaints(['برای: خودم | محل: قفسه سینه | علائم: تب، سرفه | مدت: ۱ تا ۳ روز']).map((x) => x.code), ['R07.4', 'R50.9', 'R05']);
+  const d = buildAssessmentDraft({
+    patient: { age: 70, gender: 'female', allergies: ['پنی‌سیلین'] },
+    triage: { urgency_level: 'urgent', red_flags: [], symptoms: [{ name: 'علائم: تب، سرفه', form: { vitals: { temp_c: 38.6, spo2: 92 } } }] },
+    records: [{ lab_rows: [{ name: 'Hb', value: '9.1' }] }],
+    cxr: [{ key: 'Pneumonia', tier: 'moderate' }, { key: 'Mass', tier: 'none' }],
+  });
+  assert.ok(d.text.startsWith(`[${DRAFT_HEADER}]`));
+  assert.match(d.text, /SpO₂ 92٪ \(پایین\)/);
+  assert.match(d.text, /الگوی پنومونی/);
+  assert.doesNotMatch(d.text, /توده/); // not flagged
+  assert.deepEqual(d.icd.map((x) => x.code).sort(), ['D64.9', 'J18.9', 'R05', 'R06.0', 'R50.9'].sort());
+  assert.match(d.text, /ارزیابی و تشخیص نهایی پزشک: …/);
+
+  // Through the API.
+  const p = await t.newPatient({ nationalId: randomNationalId() });
+  const [slot] = (await t.call('GET', '/v1/slots?specialty=gastroenterology&limit=5', { token: p.token })).body.items;
+  const appt = (await t.call('POST', '/v1/appointments', { token: p.token, headers: { 'Idempotency-Key': 'sum-draft' }, body: { doctor_id: slot.doctor_id, slot_id: slot.id, channel: 'chat' } })).body;
+  const doc = await t.login(DEMO_ACCOUNTS.doctors[5].phone);
+  const cid = appt.consultation.id;
+  const draft = (await t.call('GET', `/v1/consultations/${cid}/summary/assessment-draft`, { token: doc })).body;
+  assert.ok(draft.text.includes(DRAFT_HEADER));
+  assert.equal((await t.call('GET', `/v1/consultations/${cid}/summary/assessment-draft`, { token: p.token })).status, 403); // patients never see it
+  await t.call('POST', `/v1/consultations/${cid}/end`, { token: doc, body: {} });
+  await t.call('PUT', `/v1/consultations/${cid}/summary`, { token: doc, body: { assessment: draft.text, share_assessment: true } });
+  const unreviewed = await t.call('POST', `/v1/consultations/${cid}/summary/finalize`, { token: doc, body: { allow_unsigned: true } });
+  assert.equal(unreviewed.body.code, 'assessment_incomplete');
+  const done = draft.text.replace('ارزیابی و تشخیص نهایی پزشک: …', 'ارزیابی و تشخیص نهایی پزشک: سوءهاضمه عملکردی؛ پیگیری دو هفته بعد.');
+  await t.call('PUT', `/v1/consultations/${cid}/summary`, { token: doc, body: { assessment: done } });
+  const fin = (await t.call('POST', `/v1/consultations/${cid}/summary/finalize`, { token: doc, body: { allow_unsigned: true } })).body;
+  assert.equal(fin.status, 'final');
+  assert.ok(!fin.assessment.includes(DRAFT_HEADER)); // the label goes once the physician approved it
+  assert.match(fin.assessment, /سوءهاضمه عملکردی/);
+  assert.ok(!fin.patient_summary.includes(DRAFT_HEADER));
+});

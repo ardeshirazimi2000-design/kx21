@@ -87,7 +87,7 @@ export function reviewLabRows(rows, { sex } = {}) {
     let status = value < lo ? 'low' : value > hi ? 'high' : 'normal';
     const crit = known && CRITICAL[known[0]];
     if (crit && (value < crit[0] || value > crit[1])) status = 'critical';
-    findings.push({ name: row.name, value, unit: row.unit || known?.[2] || '', range: hi === Infinity ? `>${lo}` : `${lo}–${hi}`, range_source: source, status });
+    findings.push({ name: row.name, key: known?.[0] ?? null, dir: value < lo ? 'low' : value > hi ? 'high' : null, value, unit: row.unit || known?.[2] || '', range: hi === Infinity ? `>${lo}` : `${lo}–${hi}`, range_source: source, status });
   }
   return findings;
 }

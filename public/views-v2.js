@@ -213,14 +213,14 @@ export function installV2(x) {
       durDefault.replaceChildren(...on.map((m) => h('option', { value: m, selected: m === cur }, `${fa(m)} دقیقه`)));
     };
     durBoxes.forEach((b) => { b.onchange = syncDefault; });
-    const joinEarly = h('select', {}, [0, 5, 10, 15, 20, 30].map((m) => h('option', { value: m, selected: m === (s.visit.join_early_min ?? 10) }, m ? `${fa(m)} دقیقه قبل از نوبت` : 'سر ساعت نوبت')));
+    const joinEarly = h('select', {}, [0, 5, 10, 15, 20, 30].map((m) => h('option', { value: m, selected: m === (s.visit.join_early_min ?? 10) }, m ? `${fa(m)} دقیقه قبل` : 'سر ساعت')));
     syncDefault();
     x.$app.append(h('div', { class: 'card stack' },
       h('h2', {}, 'مدت زمان ویزیت'),
       h('p', { class: 'muted' }, 'پزشکان هنگام انتشار تقویم فقط از مدت‌های انتخاب‌شده می‌توانند استفاده کنند. اگر فقط یک مدت انتخاب کنید، همه نوبت‌ها با همان مدت ساخته می‌شوند. نوبت‌های قبلاً منتشرشده تغییر نمی‌کنند.'),
       h('div', { class: 'row', style: 'flex-wrap:wrap;gap:6px 16px' }, durBoxes.map((b) => h('label', { class: 'row', style: 'gap:6px;align-items:center' }, b, `${fa(b.value)} دقیقه`))),
       h('div', {}, h('label', {}, 'مدت پیش‌فرض'), durDefault),
-      h('div', {}, h('label', {}, 'باز شدن اتاق ویزیت'), joinEarly,
+      h('div', {}, h('label', {}, 'باز شدن اتاق ویزیت (نسبت به ساعت نوبت)'), joinEarly,
         h('p', { class: 'muted small' }, 'بیمار و پزشک از این زمان تا ۳۰ دقیقه بعد از پایان نوبت می‌توانند وارد اتاق ویزیت شوند. در همین زمان برای هر دو اعلان «اتاق ویزیت باز شد» ارسال می‌شود؛ یک ساعت قبل هم یادآوری ارسال می‌شود.')),
       h('button', { class: 'btn primary', onclick: guard(async () => {
         const durations = durBoxes.filter((b) => b.checked).map((b) => Number(b.value));
@@ -908,11 +908,76 @@ export function installV2(x) {
   const SUMMARY_FIELDS = [
     ['subjective', 'S — شرح حال (گفته‌های بیمار)', 6],
     ['objective', 'O — یافته‌ها (علائم حیاتی، آزمایش، مدارک)', 6],
-    ['assessment', 'A — ارزیابی پزشک * (فقط توسط شما نوشته می‌شود)', 3],
+    ['assessment', 'A — ارزیابی پزشک * (شما می‌نویسید؛ دستیار فقط پیش‌نویس پیشنهاد می‌دهد)', 5],
     ['plan', 'P — برنامه درمان و نسخه', 4],
     ['advice', 'توصیه‌ها به بیمار', 3],
     ['follow_up', 'پیگیری (مثلاً «دو هفته بعد ویزیت مجدد»)', 1],
   ];
+  // 🎤 Dictation into a text field (browser speech recognition, Persian). Chrome sends the audio
+  // to Google for recognition, so the physician is told once and agrees before first use.
+  const Speech = window.SpeechRecognition || window.webkitSpeechRecognition;
+  const micButton = (target) => {
+    if (!Speech) return null;
+    let rec = null;
+    const btn = h('button', { class: 'btn small mic', type: 'button', title: 'تایپ با صدا' }, '🎤');
+    const stop = () => { try { rec?.stop(); } catch { /* already stopped */ } };
+    btn.onclick = () => {
+      if (rec) return stop();
+      let ok = false;
+      try { ok = localStorage.getItem('stt_consent') === '1'; } catch { /* private mode */ }
+      if (!ok) {
+        if (!confirm('تایپ با صدا از سرویس تشخیص گفتار مرورگر استفاده می‌کند و صدای شما برای تبدیل به متن به سرویس گوگل فرستاده می‌شود. نام و مشخصات بیمار را بلند نگویید.\n\nادامه می‌دهید؟')) return;
+        try { localStorage.setItem('stt_consent', '1'); } catch { /* private mode */ }
+      }
+      rec = new Speech();
+      rec.lang = 'fa-IR'; rec.continuous = true; rec.interimResults = false;
+      rec.onresult = (e) => {
+        for (let i = e.resultIndex; i < e.results.length; i++) {
+          if (!e.results[i].isFinal) continue;
+          const said = e.results[i][0].transcript.trim();
+          if (said) { target.value = `${target.value}${target.value && !/\s$/.test(target.value) ? ' ' : ''}${said}`; target.dispatchEvent(new Event('input')); }
+        }
+      };
+      rec.onerror = (e) => { if (e.error !== 'no-speech' && e.error !== 'aborted') toast(e.error === 'not-allowed' ? 'اجازه دسترسی به میکروفون داده نشد' : 'تشخیص گفتار ناموفق بود', true); };
+      rec.onend = () => { rec = null; btn.classList.remove('rec'); btn.textContent = '🎤'; };
+      rec.start();
+      btn.classList.add('rec'); btn.textContent = '⏹';
+      toast('در حال شنیدن… دوباره بزنید تا متوقف شود');
+    };
+    onCleanup(stop);
+    return btn;
+  };
+  // 💡 The assistant's assessment draft (rules, on the server): findings, ICD-10 codes to consider
+  // and background. Inserted into the assessment for the physician to review and complete.
+  const draftHelper = (cid, target) => {
+    const box = h('div');
+    const btn = h('button', { class: 'btn small', type: 'button', onclick: guard(async () => {
+      const d = await api('GET', `/v1/consultations/${cid}/summary/assessment-draft`);
+      const insert = () => {
+        target.value = target.value.trim() ? `${target.value.trim()}\n\n${d.text}` : d.text;
+        target.dispatchEvent(new Event('input'));
+        box.replaceChildren();
+        toast('پیش‌نویس درج شد؛ بازبینی و «ارزیابی نهایی» را کامل کنید');
+        target.focus();
+      };
+      box.replaceChildren(h('div', { class: 'draft-box' },
+        h('div', { class: 'row' }, h('b', { class: 'grow' }, '💡 پیشنهاد دستیار — نیازمند بررسی پزشک'),
+          h('button', { class: 'btn small', type: 'button', onclick: () => box.replaceChildren() }, 'بستن')),
+        h('p', { class: 'muted small' }, 'از داده‌های ثبت‌شده (تریاژ، علائم حیاتی، آزمایش‌ها، رادیوگرافی، سابقه) با قواعد ساخته شده است؛ تشخیص نیست. پس از درج، آن را اصلاح و تکمیل کنید.'),
+        h('div', { class: 'pre' }, d.text),
+        d.icd.length ? h('div', {}, h('label', {}, 'کدهای ICD-10 پیشنهادی (برای افزودن بزنید)'),
+          h('div', { class: 'chips' }, d.icd.map((c) => h('button', { class: 'chip', type: 'button', title: c.reason, onclick: (ev) => {
+            target.value = `${target.value.trim()}${target.value.trim() ? '\n' : ''}${c.code} ${c.label_fa}`;
+            target.dispatchEvent(new Event('input'));
+            ev.currentTarget.disabled = true;
+          } }, `${c.code} ${c.label_fa}`)))) : null,
+        h('div', { class: 'row' }, h('button', { class: 'btn primary small', type: 'button', onclick: insert }, 'درج در ارزیابی'))));
+    }) }, '💡 پیش‌نویس دستیار');
+    return { btn, box };
+  };
+  // Label row of a summary field: title + tools (assistant draft / dictation).
+  const fieldHead = (label, ...tools) => h('div', { class: 'row field-head' }, h('label', { class: 'grow' }, label), ...tools.filter(Boolean));
+
   x.summaryPanel = async (cid, ended) => {
     const card = h('div', { class: 'card stack' });
     const render = (s) => {
@@ -926,17 +991,20 @@ export function installV2(x) {
       if (!ended) {
         // During the visit: only the physician's notes / assessment.
         const a = h('textarea', { rows: 3, placeholder: 'یادداشت و ارزیابی شما؛ پس از پایان ویزیت بقیه خلاصه خودکار ساخته می‌شود' }, s.assessment ?? '');
+        const dh = draftHelper(cid, a);
         card.append(h('p', { class: 'muted' }, 'با پایان ویزیت، پیش‌نویس خلاصه از تریاژ، مدارک، گفتگو و نسخه ساخته می‌شود و شما آن را ویرایش و تأیید می‌کنید.'),
-          h('label', {}, 'یادداشت / ارزیابی پزشک'), a,
+          fieldHead('یادداشت / ارزیابی پزشک', dh.btn, micButton(a)), dh.box, a,
           h('button', { class: 'btn', onclick: guard(async () => { await api('PUT', `/v1/consultations/${cid}/summary`, { assessment: a.value }); toast('یادداشت ذخیره شد'); }) }, 'ذخیره یادداشت'));
         return;
       }
       const inputs = {};
-      card.append(h('div', { class: 'banner info' }, 'پیش‌نویس خودکار از داده‌های ثبت‌شده ساخته شده است. پیش از ارسال بخوانید و اصلاح کنید؛ بخش «ارزیابی» را خودتان بنویسید.',
+      card.append(h('div', { class: 'banner info' }, 'پیش‌نویس خودکار از داده‌های ثبت‌شده ساخته شده است. پیش از ارسال بخوانید و اصلاح کنید؛ بخش «ارزیابی» را خودتان بنویسید یا از «💡 پیش‌نویس دستیار» کمک بگیرید و آن را کامل کنید.',
         s.generator ? h('span', { class: 'muted small' }, ` (${s.generator})`) : null));
       for (const [k, label, rows] of SUMMARY_FIELDS) {
         inputs[k] = rows === 1 ? h('input', { type: 'text', value: s[k] ?? '' }) : h('textarea', { rows }, s[k] ?? '');
-        card.append(h('div', {}, h('label', {}, label, s.edited_fields?.includes(k) ? h('span', { class: 'muted small' }, ' · ویرایش‌شده') : null), inputs[k]));
+        const dh = k === 'assessment' ? draftHelper(cid, inputs[k]) : null;
+        card.append(h('div', {}, fieldHead([label, s.edited_fields?.includes(k) ? h('span', { class: 'muted small' }, ' · ویرایش‌شده') : null], dh?.btn, ['assessment', 'plan', 'advice', 'subjective'].includes(k) ? micButton(inputs[k]) : null),
+          dh?.box, inputs[k]));
       }
       const share = h('input', { type: 'checkbox', checked: s.share_assessment });
       card.append(h('label', { class: 'check' }, share, h('span', {}, 'ارزیابی من در متن بیمار هم آورده شود')));
