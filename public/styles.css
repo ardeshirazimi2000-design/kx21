@@ -96,6 +96,9 @@ input:focus, select:focus, textarea:focus { border-color: var(--primary); box-sh
 input[dir=ltr] { text-align: left; }
 .check { display: flex; gap: 8px; align-items: flex-start; color: var(--text); font-size: 14px; margin: 6px 0; }
 .check input { margin-top: 6px; }
+.terms-item { background: var(--surface-2, rgba(25,118,210,.05)); border-radius: 10px; padding: 10px 12px; line-height: 1.9; cursor: pointer; }
+.terms-item input, .terms-all input { width: 20px; height: 20px; flex: none; }
+.terms-all { border-top: 1px solid var(--border, #e3e8ef); padding-top: 12px; margin-top: 4px; }
 
 .btn {
   display: inline-flex; align-items: center; justify-content: center; gap: 6px;

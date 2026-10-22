@@ -457,6 +457,7 @@ const COLUMNS = {
     ['identity_verified_at', 'TEXT'], ['identity_source', 'TEXT'],
     ['registry_verified_at', 'TEXT'], ['birth_date', 'TEXT'], // civil-registry (PersonInfo) check: name is locked after it
     ['staff_role_id', 'TEXT'], ['disabled_at', 'TEXT'], ['disabled_reason', 'TEXT'], // access control
+    ['terms_version', 'TEXT'], ['terms_accepted_at', 'TEXT'], ['terms_accepted_ip', 'TEXT'], // registration agreement
   ],
   doctors: [
     ['status', "TEXT NOT NULL DEFAULT 'approved'"], // draft | pending_review | approved | rejected | suspended

@@ -1,6 +1,6 @@
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { startApp, NATIONAL_IDS, randomNationalId } from './helpers.js';
+import { startApp, NATIONAL_IDS, randomNationalId, TERMS_V } from './helpers.js';
 import { DEMO_ACCOUNTS } from '../src/seed.js';
 
 let t;
@@ -19,10 +19,19 @@ test('registration: national id + Shahkar before OTP, role-specific entry, verif
   const r0 = await t.call('POST', '/v1/auth/otp/request', { body: { phone: '+989121112233', role: 'patient' } });
   assert.equal(r0.body.registration_required, true);
   assert.equal(r0.body.dev_code, undefined);
-  const badNid = await t.call('POST', '/v1/auth/otp/request', { body: { phone: '09121112233', role: 'patient', national_id: '1234567890' } });
+  const badNid = await t.call('POST', '/v1/auth/otp/request', { body: { phone: '09121112233', role: 'patient', national_id: '1234567890', terms_version: TERMS_V } });
   assert.equal(badNid.body.code, 'invalid_national_id');
+  // Registration needs every agreement item ticked (the current version of the text).
+  const terms = await t.call('GET', '/v1/auth/terms/patient');
+  assert.equal(terms.body.items.length, 5);
+  assert.equal(terms.body.version, TERMS_V);
+  assert.equal((await t.call('GET', '/v1/auth/terms/constructor')).status, 422);
+  for (const tv of [undefined, 'old']) {
+    const noTerms = await t.call('POST', '/v1/auth/otp/request', { body: { phone: '09121112233', role: 'patient', national_id: NATIONAL_IDS[5], terms_version: tv } });
+    assert.equal(noTerms.body.code, 'terms_required');
+  }
 
-  const r1 = await t.call('POST', '/v1/auth/otp/request', { body: { phone: '09121112233', role: 'patient', national_id: NATIONAL_IDS[5] } });
+  const r1 = await t.call('POST', '/v1/auth/otp/request', { body: { phone: '09121112233', role: 'patient', national_id: NATIONAL_IDS[5], terms_version: TERMS_V } });
   assert.equal(r1.status, 202);
   assert.equal(r1.body.identity_verified, true);
   const wrong = await t.call('POST', '/v1/auth/otp/verify', { body: { phone: '09121112233', code: r1.body.dev_code === '000000' ? '111111' : '000000' } });
@@ -30,9 +39,12 @@ test('registration: national id + Shahkar before OTP, role-specific entry, verif
   const ok = await t.call('POST', '/v1/auth/otp/verify', { body: { phone: '09121112233', code: r1.body.dev_code } });
   assert.equal(ok.status, 200);
   const token = ok.body.access_token;
+  const meAfter = await t.call('GET', '/v1/auth/me', { token });
+  assert.equal(meAfter.body.terms_version, TERMS_V);
+  assert.ok(meAfter.body.terms_accepted_at);
 
   // Same national id cannot open a second patient account; doctors' entry refuses patient numbers.
-  const dup = await t.call('POST', '/v1/auth/otp/request', { body: { phone: '09121112234', role: 'patient', national_id: NATIONAL_IDS[5] } });
+  const dup = await t.call('POST', '/v1/auth/otp/request', { body: { phone: '09121112234', role: 'patient', national_id: NATIONAL_IDS[5], terms_version: TERMS_V } });
   assert.equal(dup.body.code, 'national_id_taken');
   const mismatch = await t.call('POST', '/v1/auth/otp/request', { body: { phone: '09121112233', role: 'doctor' } });
   assert.equal(mismatch.body.code, 'role_mismatch');

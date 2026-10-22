@@ -2,7 +2,7 @@
 // directory, patient documents to doctor with AI pre-read, paid services via ZarinPal.
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { startApp, randomNationalId } from './helpers.js';
+import { startApp, randomNationalId, TERMS } from './helpers.js';
 import { DEMO_ACCOUNTS } from '../src/seed.js';
 import { readVerdict, readPerson, createIdentityService } from '../src/modules/identity.js';
 import { reviewLabRows } from '../src/modules/ai/lab-review.js';
@@ -86,7 +86,7 @@ test('patient onboarding takes the official name from the registry and locks it'
 
 test('doctor self-registration → documents → admin reject with reason → resubmit → approve → listed', async () => {
   const phone = '09351239999';
-  const r1 = await t.call('POST', '/v1/auth/otp/request', { body: { phone, role: 'doctor', national_id: randomNationalId() } });
+  const r1 = await t.call('POST', '/v1/auth/otp/request', { body: { phone, role: 'doctor', national_id: randomNationalId(), terms_version: TERMS.doctor.version } });
   const v = await t.call('POST', '/v1/auth/otp/verify', { body: { phone, code: r1.body.dev_code } });
   const doc = v.body.access_token;
   assert.ok(doc, 'first login right after Shahkar+OTP registration');

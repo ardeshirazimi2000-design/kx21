@@ -1,4 +1,5 @@
 import { createApp } from '../src/app.js';
+import { TERMS } from '../src/lib/terms.js';
 import { randomUUID } from 'node:crypto';
 
 export async function startApp(overrides = {}) {
@@ -28,7 +29,7 @@ export async function startApp(overrides = {}) {
   async function login(phone, { nationalId, role } = {}) {
     let r1 = await call('POST', '/v1/auth/otp/request', { body: { phone, role } });
     if (r1.body?.registration_required) {
-      r1 = await call('POST', '/v1/auth/otp/request', { body: { phone, role, national_id: nationalId ?? randomNationalId() } });
+      r1 = await call('POST', '/v1/auth/otp/request', { body: { phone, role, national_id: nationalId ?? randomNationalId(), terms_version: TERMS[role === 'doctor' ? 'doctor' : 'patient'].version } });
     }
     if (!r1.body?.dev_code) throw new Error(`otp request failed: ${JSON.stringify(r1.body)}`);
     const r2 = await call('POST', '/v1/auth/otp/verify', { body: { phone, code: r1.body.dev_code } });
@@ -77,3 +78,6 @@ export function randomNationalId() {
   const r = d.reduce((a, x, i) => a + x * (10 - i), 0) % 11;
   return d.join('') + (r < 2 ? r : 11 - r);
 }
+
+export { TERMS };
+export const TERMS_V = TERMS.patient.version;

@@ -3,7 +3,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createSms } from '../src/lib/sms.js';
-import { startApp, randomNationalId } from './helpers.js';
+import { startApp, randomNationalId, TERMS_V } from './helpers.js';
 import { DEMO_ACCOUNTS, bootstrapProduction } from '../src/seed.js';
 
 test('Kavenegar verify/lookup and SMS.ir send/verify requests', async () => {
@@ -64,7 +64,7 @@ test('production: codes only by SMS, real admin bootstrapped, demo accounts disa
 
     // Demo accounts (fake numbers) are disabled: no login, not bookable.
     assert.equal((await t.call('POST', '/v1/auth/otp/request', { body: { phone: DEMO_ACCOUNTS.admin.phone, role: 'doctor' } })).body.code, 'account_disabled');
-    const p = await t.call('POST', '/v1/auth/otp/request', { body: { phone: '09351112233', role: 'patient', national_id: randomNationalId() } });
+    const p = await t.call('POST', '/v1/auth/otp/request', { body: { phone: '09351112233', role: 'patient', national_id: randomNationalId(), terms_version: TERMS_V } });
     assert.equal(p.status, 503); // no Shahkar token in production → registration refused (fail closed)
     assert.equal(t.app.db.get('SELECT COUNT(*) AS n FROM doctors WHERE deleted_at IS NULL').n, 0);
   } finally {

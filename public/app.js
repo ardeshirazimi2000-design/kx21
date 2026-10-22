@@ -374,6 +374,8 @@ VIEWS.login = () => {
   let role = null; // 'patient' | 'doctor' — chosen on the start screen
   let mfaToken = null;
   let lastNid = null; // national id of a registration, reused by "send again"
+  let termsVersion = null; // version of the agreement accepted on the terms page (registration only)
+  const regBody = () => (lastNid ? { national_id: lastNid, terms_version: termsVersion } : {});
   const box = h('div', { class: 'card narrow stack' });
   const hint = h('div', { class: 'muted' });
   const showDevCode = (code, to = '', delivery = 'sms') => hint.replaceChildren(code
@@ -408,8 +410,14 @@ VIEWS.login = () => {
     const submit = once(async () => {
       phone = input.value.trim();
       lastNid = nid ? nid.value.trim() : null;
-      const r = await api('POST', '/v1/auth/otp/request', { phone, role, ...(lastNid ? { national_id: lastNid } : {}) });
-      if (r.registration_required) { stepPhone(true); return; }
+      let r;
+      try {
+        r = await api('POST', '/v1/auth/otp/request', { phone, role, ...regBody() });
+      } catch (e) {
+        if (e.code === 'terms_required') { stepTerms(); return; } // the text changed meanwhile
+        throw e;
+      }
+      if (r.registration_required) { stepTerms(); return; }
       stepCode(r.registration, r.resend_in);
       if (r.already_sent) toast('کد تأیید چند لحظه پیش ارسال شده است؛ همان کد را وارد کنید');
       showDevCode(r.dev_code, phone, r.delivery);
@@ -429,6 +437,39 @@ VIEWS.login = () => {
     (nid ?? input).focus();
   };
 
+  // New number → the agreement for the chosen entry (patient or doctor); every item must be ticked
+  // before the national id is asked and the account can be created.
+  const stepTerms = async () => {
+    box.className = 'card narrow stack';
+    let t;
+    try { t = await api('GET', `/v1/auth/terms/${role === 'doctor' ? 'doctor' : 'patient'}`); } catch (e) { toast(e.message, true); return; }
+    const boxes = t.items.map(() => h('input', { type: 'checkbox' }));
+    const all = h('input', { type: 'checkbox' });
+    const go = h('button', { class: 'btn primary block', disabled: true }, 'موافقم و ادامه ثبت‌نام');
+    const sync = () => {
+      const n = boxes.filter((b) => b.checked).length;
+      all.checked = n === boxes.length;
+      go.disabled = n !== boxes.length;
+    };
+    boxes.forEach((b) => { b.onchange = sync; });
+    all.onchange = () => { boxes.forEach((b) => { b.checked = all.checked; }); sync(); };
+    const submit = (e) => {
+      e.preventDefault();
+      if (boxes.some((b) => !b.checked)) return toast('برای ثبت‌نام، تأیید همه موارد لازم است', true);
+      termsVersion = t.version;
+      stepPhone(true);
+    };
+    box.replaceChildren(
+      h('button', { class: 'btn small', type: 'button', onclick: () => stepPhone() }, '→ بازگشت'),
+      h('h2', {}, t.title),
+      h('p', { class: 'muted' }, `شماره ${fa(phone)} هنوز در درمان پلاس ثبت‌نام نشده است. برای ادامه ثبت‌نام، موارد زیر را مطالعه و تأیید کنید.`),
+      h('form', { onsubmit: submit, class: 'stack terms' },
+        boxes.map((b, i) => h('label', { class: 'check terms-item' }, b, h('span', {}, h('b', {}, `${fa(i + 1)}. `), t.items[i]))),
+        h('label', { class: 'check terms-all' }, all, h('b', {}, 'همه موارد بالا را مطالعه کرده‌ام و تأیید می‌کنم')),
+        go),
+    );
+  };
+
   const stepCode = (registering = false, resendIn = 60) => {
     const input = h('input', { type: 'text', dir: 'ltr', inputmode: 'numeric', autocomplete: 'one-time-code', maxlength: 6 });
     // "Send again" unlocks after the server's resend window.
@@ -444,7 +485,7 @@ VIEWS.login = () => {
     tick();
     resend.onclick = guard(async () => {
       resend.disabled = true;
-      const r = await api('POST', '/v1/auth/otp/request', { phone, role, ...(lastNid ? { national_id: lastNid } : {}) });
+      const r = await api('POST', '/v1/auth/otp/request', { phone, role, ...regBody() });
       left = r.resend_in ?? 60;
       toast(r.already_sent ? 'کد قبلی هنوز معتبر است؛ کمی بعد دوباره تلاش کنید' : 'کد جدید ارسال شد؛ کدهای قبلی باطل شدند');
       showDevCode(r.dev_code, phone, r.delivery);

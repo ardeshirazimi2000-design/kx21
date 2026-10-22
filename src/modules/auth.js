@@ -4,6 +4,7 @@ import { ApiError, badRequest, forbidden, requireFields } from '../lib/http.js';
 import { signJwt, verifyJwt, sha256, randomDigits, safeEqualHex, seal, unseal, lookupHash } from '../lib/crypto.js';
 import { uuid, nowIso } from '../lib/db.js';
 import { normalizePhone, normalizeFa, isValidNationalId } from '../lib/fa.js';
+import { TERMS } from '../lib/terms.js';
 
 const OTP_TTL_MS = 2 * 60 * 1000;
 const OTP_MAX_ATTEMPTS = 5;
@@ -148,8 +149,10 @@ export function register(router, { db, keys, platform, config, limiter, domain }
         const nid = ctx.body.national_id ? normalizeFa(ctx.body.national_id) : null;
         if (!nid) return { body: { registration_required: true } };
         if (!isValidNationalId(nid)) throw badRequest('کد ملی معتبر نیست', 'invalid_national_id');
-        limiter.hit(`shahkar:${ctx.tenantId}:${phone}`, 5, 60 * 60 * 1000);
         const role = intent ?? 'patient';
+        const terms = TERMS[role === 'doctor' ? 'doctor' : 'patient'];
+        if (ctx.body.terms_version !== terms.version) throw badRequest('برای ثبت‌نام، پذیرش همه موارد صفحه شرایط لازم است', 'terms_required');
+        limiter.hit(`shahkar:${ctx.tenantId}:${phone}`, 5, 60 * 60 * 1000);
         const nidHash = lookupHash(keys, `${ctx.tenantId}:${nid}`);
         const taken = db.get('SELECT 1 FROM users WHERE tenant_id = ? AND national_id_hash = ? AND role = ? AND deleted_at IS NULL', ctx.tenantId, nidHash, role);
         if (taken) throw new ApiError(409, 'national_id_taken', 'برای این کد ملی قبلاً حساب ایجاد شده است؛ با شماره ثبت‌شده وارد شوید');
@@ -158,7 +161,7 @@ export function register(router, { db, keys, platform, config, limiter, domain }
         if (!v.matched) {
           throw badRequest('این شماره موبایل به نام صاحب کد ملی واردشده ثبت نشده است (استعلام شاهکار). لطفاً شماره‌ای که به نام خودتان است وارد کنید.', 'shahkar_mismatch');
         }
-        payload = { role, nid, source: v.source };
+        payload = { role, nid, source: v.source, terms: terms.version };
       }
       limiter.hit(`otp:${ctx.tenantId}:${phone}`, 3, 10 * 60 * 1000);
       const code = issueOtp(ctx, phone, 'login', payload && { ...payload, nid: seal(keys, payload.nid).toString('base64') });
@@ -198,10 +201,11 @@ export function register(router, { db, keys, platform, config, limiter, domain }
       };
       db.tx(() => {
         db.run(
-          `INSERT INTO users (id, tenant_id, role, phone, full_name, created_at, national_id_enc, national_id_hash, identity_verified_at, identity_source)
-           VALUES (?,?,?,?,?,?,?,?,?,?)`,
+          `INSERT INTO users (id, tenant_id, role, phone, full_name, created_at, national_id_enc, national_id_hash, identity_verified_at, identity_source, terms_version, terms_accepted_at, terms_accepted_ip)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
           user.id, user.tenant_id, user.role, user.phone, null, user.created_at,
           seal(keys, nid), lookupHash(keys, `${ctx.tenantId}:${nid}`), nowIso(), reg.source,
+          reg.terms ?? null, reg.terms ? user.created_at : null, reg.terms ? ctx.ip ?? null : null,
         );
         if (reg.role === 'doctor') domain.patient.createDoctorDraft(ctx.tenantId, user.id);
       });
@@ -254,9 +258,16 @@ export function register(router, { db, keys, platform, config, limiter, domain }
     return { body: session(user) };
   });
 
+  // The agreement shown before registration (public: the user has no account yet).
+  router.get('/v1/auth/terms/:role', async (ctx) => {
+    const t = Object.hasOwn(TERMS, ctx.params.role) ? TERMS[ctx.params.role] : null;
+    if (!t) throw badRequest('نقش نامعتبر است');
+    return { body: t };
+  });
+
   router.get('/v1/auth/me', async (ctx) => {
     requireUser(ctx);
-    const user = db.get('SELECT id, role, phone, email, full_name, mfa_enabled, identity_verified_at, identity_source, registry_verified_at, birth_date FROM users WHERE id = ?', ctx.user.sub);
+    const user = db.get('SELECT id, role, phone, email, full_name, mfa_enabled, identity_verified_at, identity_source, registry_verified_at, birth_date, terms_version, terms_accepted_at FROM users WHERE id = ?', ctx.user.sub);
     const doc = db.get('SELECT id, status, review_reason FROM doctors WHERE user_id = ?', ctx.user.sub);
     return {
       body: {
