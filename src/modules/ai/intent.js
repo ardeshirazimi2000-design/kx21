@@ -28,10 +28,10 @@ const SPECIALTY_MENTIONS = [
   ['pediatrics', ['کودکان', 'اطفال', 'متخصص بچه']],
   ['ent', ['گوش و حلق', 'حلق و بینی', 'گوش حلق', 'گوش و حلق و بینی']],
   ['gynecology', ['زنان', 'زایمان']],
-  ['orthopedics', ['ارتوپد']],
+  ['orthopedics', ['ارتوپد', 'استخوان و مفاصل']],
   ['gastroenterology', ['گوارش']],
-  ['internal', ['داخلی']],
-  ['general', ['عمومی']],
+  ['internal', ['داخلی', 'داخلي']],
+  ['general', ['عمومی', 'عمومي', 'جنرال']],
 ].map(([c, kws]) => [c, kws.map(normalizeFa)]);
 
 const ORDINALS = { 'اولی': 1, 'اول': 1, 'دومی': 2, 'دوم': 2, 'سومی': 3, 'سوم': 3, 'چهارمی': 4, 'چهارم': 4, 'پنجمی': 5 };
@@ -40,6 +40,13 @@ const NUM_WORDS = { 'یک': 1, 'یه': 1, 'دو': 2, 'سه': 3, 'چهار': 4, '
 function parseNum(tok) {
   if (/^\d+$/.test(tok)) return Number(tok);
   return NUM_WORDS[tok] ?? null;
+}
+
+/** A specialty named anywhere in the text (e.g. a one-word answer: «داخلی»). */
+export function specialtyIn(text) {
+  const t = normalizeFa(text);
+  for (const [code, kws] of SPECIALTY_MENTIONS) if (kws.some((k) => t.includes(k))) return code;
+  return null;
 }
 
 export function extractEntities(text) {

@@ -7,7 +7,7 @@ import { sha256 } from '../../lib/crypto.js';
 import { formatFaDateTime, toFaDigits } from '../../lib/fa.js';
 import { maskSensitive } from '../../lib/platform.js';
 import { SPECIALTIES } from '../patient.js';
-import { classify } from './intent.js';
+import { classify, specialtyIn } from './intent.js';
 import { assess, detectEmergency } from './triage.js';
 import { assessStructured, summarizeForm } from './triage-structured.js';
 import { checkOutput, EMERGENCY_TEMPLATE, EMERGENCY_HOLD } from './guardrails.js';
@@ -354,12 +354,19 @@ export function createAssistant({ db, platform, domain, llm, config }) {
 
   function offerSlots(ctx, session, turn, b) {
     let { slots } = callTool(ctx, session, turn, 'check_availability', { specialty: b.doctor_id ? undefined : b.specialty, doctor_id: b.doctor_id });
+    const asked = b.specialty;
+    // Is there any approved doctor of this specialty at all (or just no free time)?
+    const hasDoctor = (sp) => !!db.get(`SELECT 1 FROM doctors WHERE tenant_id = ? AND specialty = ? AND status = 'approved' AND deleted_at IS NULL`, ctx.tenantId, sp);
+    const why = (sp) => (hasDoctor(sp) ? `فعلاً پزشک «${SPECIALTIES[sp]}» زمان آزاد ندارد` : `هنوز پزشک «${SPECIALTIES[sp]}» در درمان پلاس فعال نیست`);
+    let triedGeneral = false;
     if (!slots.length && !b.doctor_id && b.specialty && b.specialty !== 'general') {
       // No specialist free: a general practitioner can see the patient first and refer.
+      triedGeneral = true;
       ({ slots } = callTool(ctx, session, turn, 'check_availability', { specialty: 'general' }));
       if (slots.length) {
-        turn.prefix = `${turn.prefix ? `${turn.prefix}\n` : ''}فعلاً پزشک «${SPECIALTIES[b.specialty]}» زمان آزاد ندارد؛ پزشک عمومی می‌تواند ابتدا شما را ویزیت و در صورت نیاز ارجاع دهد.`;
+        turn.prefix = `${turn.prefix ? `${turn.prefix}\n` : ''}${why(asked)}؛ پزشک عمومی می‌تواند ابتدا شما را ویزیت و در صورت نیاز ارجاع دهد. اگر فقط «${SPECIALTIES[asked]}» را می‌خواهید، «انصراف» را بنویسید؛ درخواستتان برای پیگیری به اپراتور می‌رود.`;
         b.specialty = 'general';
+        b.fallbackFrom = asked;
       }
     }
     if (!slots.length) {
@@ -368,7 +375,9 @@ export function createAssistant({ db, platform, domain, llm, config }) {
       session.state = {};
       const esc = callTool(ctx, session, turn, 'escalate_to_human', { kind: 'human_request', reason: `no availability (${b.specialty ?? b.doctor_id}) from ${prevMode}` });
       turn.emit('escalation', { escalation_id: esc.escalation_id, kind: 'human_request' });
-      return turn.reply(`در حال حاضر زمان آزادی برای «${SPECIALTIES[b.specialty] ?? 'این پزشک'}» پیدا نکردم. درخواست شما برای اپراتور ارسال شد تا هماهنگی کند.`);
+      const what = b.doctor_id ? 'در حال حاضر این پزشک زمان آزادی ندارد'
+        : `${why(b.specialty)}${triedGeneral ? ' و پزشک عمومی هم فعلاً زمان آزاد ندارد' : ''}`;
+      return turn.reply(`${what}. درخواست شما برای اپراتور ارسال شد تا هماهنگی کند و نتیجه را به شما اطلاع می‌دهیم.`);
     }
     b.offered = slots.map((s) => ({ id: s.id, doctor_id: s.doctor_id, doctor_name: s.doctor_name, starts_at: s.starts_at, specialty: s.specialty }));
     b.stage = 'choose';
@@ -381,10 +390,19 @@ export function createAssistant({ db, platform, domain, llm, config }) {
     const b = session.state.booking ?? (session.state.booking = {});
     if (nlu.intent === 'deny' || nlu.intent === 'cancel_request') {
       setMode(session, turn, 'INFO_MODE', 'booking_cancelled');
+      const wanted = b.fallbackFrom;
       session.state = {};
+      if (wanted) {
+        // Offered a GP instead of the requested specialist and declined: an operator follows up.
+        const esc = callTool(ctx, session, turn, 'escalate_to_human', { kind: 'human_request', reason: `wants ${wanted}; no free time (declined a general practitioner)` });
+        turn.emit('escalation', { escalation_id: esc.escalation_id, kind: 'human_request' });
+        return turn.reply(`باشه، نوبت پزشک عمومی رزرو نشد. درخواست شما برای نوبت «${SPECIALTIES[wanted]}» به اپراتور ارسال شد تا پیگیری کند.`);
+      }
       return turn.reply('باشه، رزرو انجام نشد. اگر بعداً خواستید بگویید.');
     }
     if (nlu.entities.specialty && !b.stage) b.specialty = nlu.entities.specialty;
+    // Answer to "which specialty?" — often just the name («داخلی»).
+    if (!b.specialty && !b.doctor_id && !b.stage && b.askedSpecialty) b.specialty = specialtyIn(text) ?? undefined;
 
     if (!b.specialty && !b.doctor_id) {
       if (nlu.intent === 'symptom_report') {
@@ -394,11 +412,16 @@ export function createAssistant({ db, platform, domain, llm, config }) {
         return handleTriage(ctx, session, turn, nlu, text);
       }
       if (!b.askedSpecialty) {
-        b.askedSpecialty = true;
+        b.askedSpecialty = 1;
         const list = Object.values(SPECIALTIES).slice(0, 8).join('، ');
         return turn.reply(`برای چه تخصصی نوبت می‌خواهید؟ (مثلاً ${list}) یا علائم‌تان را بگویید تا تخصص مناسب را پیشنهاد کنم.`);
       }
+      if (b.askedSpecialty < 2) {
+        b.askedSpecialty = 2;
+        return turn.reply(`متوجه نشدم کدام تخصص را می‌خواهید. لطفاً فقط نام تخصص را بنویسید (مثلاً «داخلی»، «قلب» یا «پوست»)؛ اگر مطمئن نیستید «عمومی» را بنویسید.`);
+      }
       b.specialty = 'general';
+      turn.prefix = `${turn.prefix ? `${turn.prefix}\n` : ''}زمان‌های پزشک عمومی را برایتان پیدا کردم؛ پزشک عمومی در صورت نیاز ارجاع می‌دهد.`;
     }
 
     if (!b.stage) return offerSlots(ctx, session, turn, b);
