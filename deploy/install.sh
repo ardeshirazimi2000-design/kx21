@@ -290,11 +290,15 @@ fi
 
 # ---------------------------------------------------------------- service
 say "Installing systemd service kx21"
+# Behind a proxy in Docker the app listens on the Docker bridge, which exists only once Docker is up.
+DOCKER_AFTER=""; if [ -n "$APP_BIND" ] && systemctl list-unit-files docker.service >/dev/null 2>&1; then DOCKER_AFTER=" docker.service"; fi
 cat > /etc/systemd/system/kx21.service <<EOF
 [Unit]
 Description=Telehealth clinic server (kx21)
-After=network-online.target
+After=network-online.target$DOCKER_AFTER
 Wants=network-online.target
+# Keep retrying after a reboot until the network it listens on (e.g. the Docker bridge) exists.
+StartLimitIntervalSec=0
 
 [Service]
 User=kx21
@@ -303,7 +307,7 @@ WorkingDirectory=$APP_DIR
 EnvironmentFile=$ENV_FILE
 ExecStart=$NODE_DIR/bin/node --disable-warning=ExperimentalWarning src/server.js
 Restart=always
-RestartSec=3
+RestartSec=5
 NoNewPrivileges=true
 ProtectSystem=strict
 ProtectHome=true
