@@ -29,6 +29,7 @@ import * as rxSuggest from './modules/rx/suggest.js';
 import * as access from './modules/access.js';
 import * as accounting from './modules/accounting.js';
 import * as support from './modules/support.js';
+import * as contracts from './modules/contracts.js';
 import { createLabOcr } from './modules/ai/lab-ocr.js';
 import { createIdentityService } from './modules/identity.js';
 import { createAssistant } from './modules/ai/assistant.js';
@@ -145,6 +146,7 @@ export function createApp(overrides = {}) {
   access.registerActivity(router, deps);
   accounting.register(router, deps);
   support.register(router, deps);
+  contracts.register(router, deps);
 
   router.get('/healthz', async () => ({ body: { status: 'ok' } }));
   router.get('/v1/config', async () => ({

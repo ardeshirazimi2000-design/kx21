@@ -132,7 +132,30 @@ test('doctor self-registration → documents → admin reject with reason → re
   await t.call('POST', '/v1/doctors/me/submit', { token: doc, body: {} });
   assert.equal((await t.call('POST', `/v1/admin/doctors/${app.id}/approve`, { token: admin, body: {} })).body.status, 'approved');
 
+  // Approved → the cooperation agreement comes next: until the doctor signs, no listing, no times.
   const p = await t.newPatient({ nationalId: randomNationalId() });
+  const before = await t.call('GET', '/v1/doctors?specialty=dermatology', { token: p.token });
+  assert.ok(!before.body.items.some((d) => d.id === app.id));
+  assert.equal((await t.call('GET', '/v1/auth/me', { token: doc })).body.doctor_contract_pending, true);
+  const from = new Date(Date.now() + 3 * 864e5).toISOString();
+  const unsigned = await t.call('POST', '/v1/doctors/me/slots', { token: doc, body: { starts_at: from, ends_at: new Date(Date.parse(from) + 1800e3).toISOString() } });
+  assert.equal(unsigned.body.code, 'contract_required');
+  const c0 = await t.call('GET', '/v1/doctors/me/contract', { token: doc });
+  assert.equal(c0.body.status, 'awaiting_doctor');
+  assert.equal(c0.body.contract.articles.length, 13);
+  assert.match(c0.body.contract.preamble[2], /N-778899|N-۷۷۸۸۹۹/);
+  const sig = `data:image/png;base64,${'iVBORw0KGgo'.padEnd(800, 'A')}`;
+  assert.equal((await t.call('POST', '/v1/doctors/me/contract/sign', { token: doc, body: { address: 'تهران، خیابان ولیعصر، پلاک ۱۰', accept: true } })).body.code, 'signature_required');
+  assert.equal((await t.call('POST', '/v1/doctors/me/contract/sign', { token: doc, body: { address: 'کوتاه', accept: true, signature: sig } })).body.code, 'address_required');
+  const signed = await t.call('POST', '/v1/doctors/me/contract/sign', { token: doc, body: { address: 'تهران، خیابان ولیعصر، پلاک ۱۰', accept: true, signature: sig } });
+  assert.equal(signed.status, 201);
+  assert.equal(signed.body.status, 'pending_platform');
+  assert.match(signed.body.contract.preamble[2], /ولیعصر/);
+  assert.equal((await t.call('POST', '/v1/doctors/me/contract/sign', { token: doc, body: { address: 'تهران، خیابان ولیعصر، پلاک ۱۰', accept: true, signature: sig } })).body.code, 'already_signed');
+  const cs = await t.call('POST', `/v1/admin/doctors/${app.id}/contract/countersign`, { token: admin, body: { signature: sig } });
+  assert.equal(cs.body.status, 'active');
+  assert.ok(cs.body.platform_signed_at);
+
   const list = await t.call('GET', '/v1/doctors?specialty=dermatology', { token: p.token });
   const card3 = list.body.items.find((d) => d.id === app.id);
   assert.equal(card3.experience_years, 9);

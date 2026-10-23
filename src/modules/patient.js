@@ -6,6 +6,7 @@ import { seal, unseal, lookupHash, newSigningKeyPair } from '../lib/crypto.js';
 import { uuid, nowIso, parseJson, isUniqueViolation } from '../lib/db.js';
 import { normalizePhone, isValidNationalId, normalizeFa } from '../lib/fa.js';
 import { requireUser } from './auth.js';
+import { DOCTOR_BOOKABLE_SQL } from '../lib/contract-text.js';
 
 export const SPECIALTIES = {
   general: 'پزشک عمومی',
@@ -331,7 +332,7 @@ export function register(router, { db, keys, platform, domain }) {
     const { specialty, q } = ctx.query;
     let rows = db.all(
       `SELECT d.* FROM doctors d JOIN users u ON u.id = d.user_id
-       WHERE d.tenant_id = ? AND d.deleted_at IS NULL AND d.status = 'approved' ${specialty ? 'AND d.specialty = ?' : ''}
+       WHERE d.tenant_id = ? AND d.deleted_at IS NULL AND ${DOCTOR_BOOKABLE_SQL} ${specialty ? 'AND d.specialty = ?' : ''}
        ORDER BY u.full_name`,
       ctx.tenantId, ...(specialty ? [specialty] : []),
     );

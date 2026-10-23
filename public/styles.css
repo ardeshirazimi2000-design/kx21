@@ -527,3 +527,19 @@ body.viewer-open { overflow: hidden; }
 .terms-item .legal-link { color: var(--primary, #1976d2); white-space: nowrap; }
 .table-wrap { overflow-x: auto; }
 .chat .quick { padding-bottom: 6px; }
+
+/* Cooperation agreement */
+.sig-pad { width: 100%; max-width: 600px; aspect-ratio: 600 / 220; border: 2px dashed var(--border); border-radius: 12px; background: #fff; touch-action: none; display: block; }
+.sig-wrap { display: flex; flex-direction: column; gap: 6px; }
+.sig-row { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 20px; }
+.sig-box { border: 1px solid var(--border); border-radius: 12px; padding: 12px; display: flex; flex-direction: column; gap: 6px; align-items: center; text-align: center; }
+.sig-box img { max-width: 100%; height: 90px; object-fit: contain; background: #fff; border-radius: 8px; }
+.sig-empty { height: 90px; display: flex; align-items: center; color: var(--muted); }
+.contract-doc p { text-align: justify; }
+@media (max-width: 560px) { .sig-row { grid-template-columns: 1fr; } }
+@media print {
+  body.print-contract * { visibility: hidden; }
+  body.print-contract .contract-doc, body.print-contract .contract-doc * { visibility: visible; }
+  body.print-contract .contract-doc { position: absolute; inset: 0 auto auto 0; width: 100%; color: #000; font-size: 12pt; }
+  body.print-contract .sig-row { break-inside: avoid; }
+}

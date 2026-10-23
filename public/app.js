@@ -165,7 +165,7 @@ function installButton() {
 let current = { view: null, cleanup: [] };
 const TABS = {
   patient: [['assistant', 'دستیار هوشمند'], ['doctors', 'پزشکان'], ['book', 'رزرو نوبت'], ['appointments', 'نوبت‌های من'], ['records', 'مدارک پزشکی'], ['prescriptions', 'نسخه‌ها'], ['inbox', 'پیام‌ها'], ['support', 'پشتیبانی'], ['profile', 'پروفایل و حریم خصوصی']],
-  doctor: [['doctor-appointments', 'نوبت‌ها'], ['calendar', 'تقویم'], ['doctor-rx', 'نسخه‌ها'], ['doctor-profile', 'پروفایل و مدارک'], ['inbox', 'اعلان‌ها'], ['support', 'پشتیبانی']],
+  doctor: [['doctor-appointments', 'نوبت‌ها'], ['calendar', 'تقویم'], ['doctor-rx', 'نسخه‌ها'], ['doctor-profile', 'پروفایل و مدارک'], ['doctor-contract', 'قرارداد همکاری'], ['inbox', 'اعلان‌ها'], ['support', 'پشتیبانی']],
   doctor_pending: [['doctor-profile', 'پروفایل و مدارک'], ['inbox', 'اعلان‌ها'], ['support', 'پشتیبانی']],
   // Staff tabs are shown by permission (see TAB_PERMS); operator and admin share the same list.
   operator: [['support-desk', 'دستیار پشتیبان'], ['escalations', 'درخواست‌های ارجاع'], ['stats', 'آمار']],
@@ -189,7 +189,7 @@ function tabsFor(u) {
 const TAB_ICONS = {
   home: 'home', assistant: 'assistant', doctors: 'doctors', book: 'stethoscope', appointments: 'calendar', records: 'folder',
   prescriptions: 'rx', inbox: 'bell', profile: 'user', 'my-activity': 'history',
-  'doctor-appointments': 'stethoscope', calendar: 'calendar', 'doctor-rx': 'rx', 'doctor-profile': 'idcard', 'doctor-accounting': 'wallet',
+  'doctor-appointments': 'stethoscope', 'doctor-contract': 'approve', calendar: 'calendar', 'doctor-rx': 'rx', 'doctor-profile': 'idcard', 'doctor-accounting': 'wallet',
   'admin-doctors': 'approve', settings: 'settings', 'drug-catalog': 'catalog', payments: 'card', accounting: 'wallet',
   escalations: 'alert', support: 'support', 'support-desk': 'support', stats: 'chart', audit: 'shield', activity: 'history', staff: 'team', 'staff-create': 'team',
 };
@@ -200,7 +200,7 @@ const BOTTOM_NAV = {
   doctor: [['doctor-appointments', 'نوبت‌ها'], ['calendar', 'تقویم'], ['doctor-rx', 'نسخه‌ها'], ['doctor-accounting', 'حسابداری'], ['doctor-profile', 'پروفایل']],
 };
 // Pages reached from the home screen highlight the bar item they belong to.
-const NAV_PARENT = { doctors: 'home', book: 'home', prescriptions: 'records', summary: 'appointments', room: 'appointments', 'my-activity': 'profile', inbox: 'home', support: 'home' };
+const NAV_PARENT = { doctors: 'home', book: 'home', prescriptions: 'records', summary: 'appointments', room: 'appointments', 'my-activity': 'profile', inbox: 'home', support: 'home', 'doctor-contract': 'doctor-profile' };
 const isStaff = (u) => ['admin', 'operator'].includes(u?.role);
 function navFor(u) {
   if (u.role === 'patient') return BOTTOM_NAV.patient;
@@ -324,9 +324,9 @@ VIEWS.home = async () => {
     return patientHome(me);
   }
   const me = await api('GET', '/v1/auth/me');
-  setSession({ ...session, user: { ...session.user, doctor_status: me.doctor_status, full_name: me.full_name, permissions: me.permissions, staff_role: me.staff_role } });
+  setSession({ ...session, user: { ...session.user, doctor_status: me.doctor_status, doctor_contract_pending: me.doctor_contract_pending, full_name: me.full_name, permissions: me.permissions, staff_role: me.staff_role } });
   if (r === 'doctor' && me.doctor_status !== 'approved') return route('doctor-profile');
-  if (r === 'doctor') return route('doctor-appointments');
+  if (r === 'doctor') return route(me.doctor_contract_pending ? 'doctor-contract' : 'doctor-appointments');
   // Staff: a dashboard of the sections this person may open.
   renderChrome();
   const tones = ['blue', 'green', 'navy', 'amber', 'violet', 'rose'];
@@ -1108,6 +1108,10 @@ async function doctorQueueCard() {
 }
 
 VIEWS['doctor-appointments'] = async () => {
+  if (session.user.doctor_contract_pending) {
+    $app.append(h('div', { class: 'banner warn row' }, h('span', { class: 'grow' }, 'مدارک شما تأیید شده است. برای فعال شدن نوبت‌دهی و نمایش در فهرست پزشکان، قرارداد همکاری را تکمیل و امضا کنید.'),
+      h('button', { class: 'btn primary small', onclick: () => route('doctor-contract') }, 'تکمیل و امضای قرارداد')));
+  }
   const r = await api('GET', '/v1/appointments?limit=100');
   const todayQueue = await doctorQueueCard().catch(() => null);
   if (todayQueue) every(30_000, () => { if (current.view === 'doctor-appointments' && !document.querySelector('.wizard-overlay')) route('doctor-appointments'); });
@@ -1643,6 +1647,6 @@ async function loadConfig() {
   if (!session) return route(view === 'legal' ? 'legal' : 'login', arg);
   // Doctor approval and staff permissions can change while away: refresh before drawing tabs.
   const me = await api('GET', '/v1/auth/me').catch(() => null);
-  if (me) setSession({ ...session, user: { ...session.user, doctor_status: me.doctor_status, full_name: me.full_name, permissions: me.permissions, staff_role: me.staff_role } });
+  if (me) setSession({ ...session, user: { ...session.user, doctor_status: me.doctor_status, doctor_contract_pending: me.doctor_contract_pending, full_name: me.full_name, permissions: me.permissions, staff_role: me.staff_role } });
   route(view && VIEWS[view] && !['login', 'server'].includes(view) ? view : 'home', arg);
 })();

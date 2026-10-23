@@ -279,13 +279,15 @@ export function register(router, { db, keys, platform, config, limiter, domain }
   router.get('/v1/auth/me', async (ctx) => {
     requireUser(ctx);
     const user = db.get('SELECT id, role, phone, email, full_name, mfa_enabled, identity_verified_at, identity_source, registry_verified_at, birth_date, terms_version, terms_accepted_at FROM users WHERE id = ?', ctx.user.sub);
-    const doc = db.get('SELECT id, status, review_reason FROM doctors WHERE user_id = ?', ctx.user.sub);
+    const doc = db.get('SELECT id, status, review_reason, contract_required, contract_signed_at FROM doctors WHERE user_id = ?', ctx.user.sub);
     return {
       body: {
         ...user, person_info_enabled: domain.identity.personInfoEnabled,
         permissions: domain.access.permissionsOf(user.id).perms, super_admin: domain.access.permissionsOf(user.id).superAdmin,
         staff_role: domain.access.permissionsOf(user.id).staffRole, patient_id: ctx.user.pid ?? null, doctor_id: doc?.id ?? ctx.user.did ?? null,
         doctor_status: doc?.status ?? null, doctor_review_reason: doc?.review_reason ?? null,
+        // The cooperation agreement still has to be signed before the doctor can take bookings.
+        doctor_contract_pending: !!doc && doc.status === 'approved' && !!doc.contract_required && !doc.contract_signed_at,
       },
     };
   });

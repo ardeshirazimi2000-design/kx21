@@ -32,6 +32,7 @@ export function register(router, { db, platform, domain }) {
       photo_file_id: d.photo_file_id, license_card_file_id: d.license_card_file_id,
       status: d.status, status_label: STATUS_FA[d.status] ?? d.status,
       review_reason: d.review_reason, submitted_at: d.submitted_at, reviewed_at: d.reviewed_at,
+      contract_required: !!d.contract_required, contract_signed_at: d.contract_signed_at ?? null,
     };
   };
 
@@ -146,12 +147,16 @@ export function register(router, { db, platform, domain }) {
     if (!approve && reason.length < 5) throw badRequest('دلیل رد را بنویسید تا برای پزشک ارسال شود', 'reason_required');
     db.run('UPDATE doctors SET status = ?, review_reason = ?, reviewed_by = ?, reviewed_at = ? WHERE id = ?',
       approve ? 'approved' : 'rejected', approve ? null : reason.slice(0, 1000), ctx.user.sub, nowIso(), d.id);
+    // From now on an approved doctor signs the cooperation agreement before taking bookings.
+    if (approve && !d.contract_signed_at) db.run('UPDATE doctors SET contract_required = 1 WHERE id = ?', d.id);
     platform.audit(ctx, approve ? 'doctor.approve' : 'doctor.reject', `doctor:${d.id}`, approve ? null : { reason });
     const u = db.get('SELECT id, phone FROM users WHERE id = ?', d.user_id);
     platform.notify(ctx, {
       userId: u.id, channel: 'sms', target: u.phone,
       body: approve
-        ? 'مدارک شما تأیید شد و پروفایل‌تان در فهرست پزشکان درمان پلاس قرار گرفت. اکنون می‌توانید تقویم خود را منتشر کنید.'
+        ? (d.contract_signed_at
+          ? 'مدارک شما تأیید شد و پروفایل‌تان در فهرست پزشکان درمان پلاس قرار گرفت. اکنون می‌توانید تقویم خود را منتشر کنید.'
+          : 'مدارک شما تأیید شد. برای فعال شدن نوبت‌دهی، قرارداد همکاری را از بخش «قرارداد همکاری» در درمان پلاس تکمیل و امضا کنید.')
         : `مدارک شما تأیید نشد. دلیل: ${reason}. لطفاً از بخش «پروفایل و مدارک» اصلاح و دوباره ارسال کنید.`,
     });
     return { body: fullView(db.get('SELECT * FROM doctors WHERE id = ?', d.id)) };

@@ -7,6 +7,7 @@ import { sha256 } from '../../lib/crypto.js';
 import { formatFaDateTime, toFaDigits } from '../../lib/fa.js';
 import { maskSensitive } from '../../lib/platform.js';
 import { SPECIALTIES } from '../patient.js';
+import { DOCTOR_BOOKABLE_SQL } from '../../lib/contract-text.js';
 import { classify, specialtyIn } from './intent.js';
 import { assess, detectEmergency } from './triage.js';
 import { assessStructured, summarizeForm } from './triage-structured.js';
@@ -356,7 +357,7 @@ export function createAssistant({ db, platform, domain, llm, config }) {
     let { slots } = callTool(ctx, session, turn, 'check_availability', { specialty: b.doctor_id ? undefined : b.specialty, doctor_id: b.doctor_id });
     const asked = b.specialty;
     // Is there any approved doctor of this specialty at all (or just no free time)?
-    const hasDoctor = (sp) => !!db.get(`SELECT 1 FROM doctors WHERE tenant_id = ? AND specialty = ? AND status = 'approved' AND deleted_at IS NULL`, ctx.tenantId, sp);
+    const hasDoctor = (sp) => !!db.get(`SELECT 1 FROM doctors d WHERE d.tenant_id = ? AND d.specialty = ? AND ${DOCTOR_BOOKABLE_SQL} AND d.deleted_at IS NULL`, ctx.tenantId, sp);
     const why = (sp) => (hasDoctor(sp) ? `فعلاً پزشک «${SPECIALTIES[sp]}» زمان آزاد ندارد` : `هنوز پزشک «${SPECIALTIES[sp]}» در درمان پلاس فعال نیست`);
     let triedGeneral = false;
     if (!slots.length && !b.doctor_id && b.specialty && b.specialty !== 'general') {

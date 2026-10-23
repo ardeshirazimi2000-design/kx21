@@ -173,7 +173,10 @@ export function installV2(x) {
       draft: h('div', { class: 'banner info' }, 'برای قرار گرفتن در فهرست پزشکان، پروفایل و مدارک را کامل کنید و «ارسال برای بررسی» را بزنید.'),
       pending_review: h('div', { class: 'banner warn' }, '⏳ مدارک شما در حال بررسی توسط مدیر سامانه است. نتیجه پیامک می‌شود.'),
       rejected: h('div', { class: 'banner danger' }, h('b', {}, 'مدارک تأیید نشد. '), `دلیل: ${d.review_reason ?? '—'}`, h('br'), 'موارد را اصلاح کنید و دوباره ارسال کنید.'),
-      approved: h('div', { class: 'banner info' }, '✅ پروفایل شما تأیید شده و در فهرست پزشکان نمایش داده می‌شود. نام، تخصص، شماره و کارت نظام پزشکی فقط با درخواست به مدیر تغییر می‌کند.'),
+      approved: d.contract_required && !d.contract_signed_at
+        ? h('div', { class: 'banner warn row' }, h('span', { class: 'grow' }, '✅ مدارک شما تأیید شد. برای فعال شدن نوبت‌دهی و نمایش در فهرست پزشکان، قرارداد همکاری را تکمیل و امضا کنید.'),
+          h('button', { class: 'btn primary small', onclick: () => route('doctor-contract') }, 'قرارداد همکاری'))
+        : h('div', { class: 'banner info' }, '✅ پروفایل شما تأیید شده و در فهرست پزشکان نمایش داده می‌شود. نام، تخصص، شماره و کارت نظام پزشکی فقط با درخواست به مدیر تغییر می‌کند.'),
     }[d.status];
     const save = async () => {
       const body = { education: f.education.value, experience_years: f.experience_years.value === '' ? null : Number(f.experience_years.value), bio: f.bio.value, photo_file_id: photoId };
@@ -199,6 +202,117 @@ export function installV2(x) {
           h('button', { class: 'btn', onclick: guard(async () => { await save(); toast('ذخیره شد'); route('doctor-profile'); }) }, 'ذخیره'),
           approved ? null : h('button', { class: 'btn primary', onclick: guard(async () => { await save(); await api('POST', '/v1/doctors/me/submit', {}); toast('برای بررسی ارسال شد'); route('doctor-profile'); }) }, 'ذخیره و ارسال برای بررسی'))));
   };
+
+  // ---------------------------------------------------------------- cooperation agreement
+  // Signature drawn with finger or mouse; returns { el, isEmpty, toDataURL, clear }.
+  function signaturePad() {
+    const canvas = h('canvas', { class: 'sig-pad', width: 600, height: 220, 'aria-label': 'کادر امضا' });
+    const g = canvas.getContext('2d');
+    const reset = () => { g.fillStyle = '#fff'; g.fillRect(0, 0, canvas.width, canvas.height); g.strokeStyle = '#0d2b55'; g.lineWidth = 3.2; g.lineCap = 'round'; g.lineJoin = 'round'; };
+    reset();
+    let drawing = false; let strokes = 0;
+    const pos = (e) => { const r = canvas.getBoundingClientRect(); return [(e.clientX - r.left) * (canvas.width / r.width), (e.clientY - r.top) * (canvas.height / r.height)]; };
+    canvas.addEventListener('pointerdown', (e) => { drawing = true; strokes++; canvas.setPointerCapture(e.pointerId); const [px, py] = pos(e); g.beginPath(); g.moveTo(px, py); g.lineTo(px + 0.1, py + 0.1); g.stroke(); });
+    canvas.addEventListener('pointermove', (e) => { if (!drawing) return; const [px, py] = pos(e); g.lineTo(px, py); g.stroke(); });
+    const stop = () => { drawing = false; };
+    canvas.addEventListener('pointerup', stop); canvas.addEventListener('pointercancel', stop);
+    const clear = () => { strokes = 0; reset(); };
+    const el = h('div', { class: 'sig-wrap' }, canvas, h('div', { class: 'row', style: 'justify-content:space-between' },
+      h('span', { class: 'muted small' }, 'امضای خود را با انگشت یا ماوس در کادر بالا رسم کنید.'),
+      h('button', { class: 'btn small', type: 'button', onclick: clear }, 'پاک کردن امضا')));
+    return { el, clear, isEmpty: () => strokes === 0, toDataURL: () => canvas.toDataURL('image/png') };
+  }
+
+  // The agreement text with both signature boxes.
+  function contractDoc(c, { address = null } = {}) {
+    const k = c.contract;
+    const sigBox = (title, name, img, at) => h('div', { class: 'sig-box' }, h('b', {}, title), h('div', {}, name || '—'),
+      img ? h('img', { src: img, alt: `امضای ${title}` }) : h('div', { class: 'sig-empty' }, 'امضا نشده'),
+      h('div', { class: 'muted small' }, at ? `تاریخ امضا: ${fmt.dt(at)}` : ''));
+    const doctorName = /دکتر\s+(.+?)،/.exec(k.preamble[2])?.[1];
+    return h('article', { class: 'contract-doc legal' },
+      h('h2', { style: 'text-align:center' }, k.title),
+      k.preamble.map((p, i) => h('p', {}, i === 2 && address ? p.replace(/نشانی حرفه‌ای …………… /, `نشانی حرفه‌ای ${address} `) : p)),
+      k.articles.map((a) => h('section', {}, h('h3', {}, a.h), a.items.map((it) => h('p', {}, it)))),
+      h('section', {}, h('h3', {}, k.annex.h), h('ul', {}, k.annex.items.map((it) => h('li', {}, it)))),
+      h('p', {}, k.closing),
+      h('div', { class: 'sig-row' },
+        sigBox('طرف اول — پلتفرم', `شرکت رایان افزار پژوه${c.platform_signer ? ` (${c.platform_signer})` : ''}`, c.platform_signature, c.platform_signed_at),
+        sigBox('طرف دوم — پزشک', doctorName ? `دکتر ${doctorName}` : '', c.doctor_signature, c.doctor_signed_at)),
+      h('p', { class: 'muted small' }, `نسخه متن قرارداد: ${fa(k.version)}`));
+  }
+  const CONTRACT_STATUS = { awaiting_doctor: ['منتظر امضای پزشک', 'warn'], optional: ['امضا نشده', 'warn'], pending_platform: ['امضای پزشک ثبت شد — منتظر امضای پلتفرم', 'info'], active: ['امضاشده توسط طرفین', 'ok'], not_available: ['پس از تأیید مدارک', ''] };
+  const printContract = () => { document.body.classList.add('print-contract'); window.print(); setTimeout(() => document.body.classList.remove('print-contract'), 500); };
+
+  VIEWS['doctor-contract'] = async () => {
+    const c = await api('GET', '/v1/doctors/me/contract');
+    const [label, tone] = CONTRACT_STATUS[c.status] ?? [c.status, ''];
+    const head = h('div', { class: 'card' }, h('div', { class: 'row' }, h('h2', { class: 'grow' }, 'قرارداد همکاری با درمان پلاس'), h('span', { class: `pill ${tone}` }, label)));
+    if (c.status === 'not_available') {
+      head.append(h('p', { class: 'muted' }, 'قرارداد همکاری پس از تأیید مدارک شما توسط مدیر سامانه در این بخش در دسترس قرار می‌گیرد.'));
+      x.$app.append(head);
+      return;
+    }
+    if (['pending_platform', 'active'].includes(c.status)) {
+      head.append(h('p', { class: 'muted' }, c.status === 'active' ? 'قرارداد به امضای هر دو طرف رسیده است.' : 'امضای شما ثبت شد و نوبت‌دهی شما فعال است. پس از امضای نماینده پلتفرم به شما اعلان می‌شود.'),
+        h('button', { class: 'btn small', onclick: printContract }, '🖨 چاپ / ذخیره PDF'));
+      x.$app.append(head, h('div', { class: 'card' }, contractDoc(c)));
+      return;
+    }
+    // Fill in, read, sign.
+    const address = h('input', { type: 'text', maxlength: 300, placeholder: 'مثلاً تهران، خیابان ولیعصر، ساختمان پزشکان، طبقه ۳، واحد ۱۲' });
+    const accept = h('input', { type: 'checkbox' });
+    const pad = signaturePad();
+    const docBox = h('div', {}, contractDoc(c));
+    address.oninput = () => docBox.replaceChildren(contractDoc(c, { address: address.value.trim() || null }));
+    head.append(h('div', { class: 'banner info' }, 'مدارک شما تأیید شده است. لطفاً قرارداد را مطالعه کنید، نشانی حرفه‌ای را وارد و قرارداد را امضا کنید. پس از امضا، نوبت‌دهی شما فعال می‌شود.'));
+    x.$app.append(head,
+      h('div', { class: 'card' }, docBox),
+      h('div', { class: 'card stack' },
+        h('h3', {}, 'تکمیل و امضای قرارداد'),
+        h('div', {}, h('label', {}, 'نشانی حرفه‌ای (مطب یا مرکز درمانی) *'), address),
+        h('label', { class: 'check' }, accept, h('span', {}, 'متن کامل قرارداد و پیوست مالی را مطالعه کرده‌ام و با امضای الکترونیکی زیر، مفاد آن را می‌پذیرم.')),
+        h('label', {}, 'امضای پزشک *'), pad.el,
+        h('button', { class: 'btn primary', onclick: guard(async (e) => {
+          if (address.value.trim().length < 10) return toast('نشانی حرفه‌ای را کامل بنویسید', true);
+          if (!accept.checked) return toast('پذیرش متن قرارداد را تأیید کنید', true);
+          if (pad.isEmpty()) return toast('امضای خود را در کادر رسم کنید', true);
+          e.currentTarget.disabled = true;
+          try {
+            await api('POST', '/v1/doctors/me/contract/sign', { address: address.value.trim(), accept: true, signature: pad.toDataURL() });
+          } finally { e.currentTarget.disabled = false; }
+          const s = x.getSession();
+          x.setSession({ ...s, user: { ...s.user, doctor_contract_pending: false } });
+          toast('قرارداد امضا شد؛ نوبت‌دهی شما فعال است');
+          route('doctor-contract');
+        }) }, 'امضا و ارسال قرارداد')));
+  };
+
+  // Credential reviewer: the doctor's agreement and the platform's signature.
+  async function adminContractCard(id) {
+    const c = await api('GET', `/v1/admin/doctors/${id}/contract`).catch(() => null);
+    if (!c || c.status === 'not_available') return null;
+    const [label, tone] = CONTRACT_STATUS[c.status] ?? [c.status, ''];
+    const card = h('div', { class: 'card stack' }, h('div', { class: 'row' }, h('h2', { class: 'grow' }, 'قرارداد همکاری'), h('span', { class: `pill ${tone}` }, label)));
+    if (!['pending_platform', 'active'].includes(c.status)) {
+      card.append(h('p', { class: 'muted' }, 'پزشک هنوز قرارداد را امضا نکرده است.'));
+      return card;
+    }
+    card.append(h('details', {}, h('summary', {}, 'مشاهده متن قرارداد امضاشده'), contractDoc(c)),
+      h('p', { class: 'muted small' }, `امضای پزشک: ${fmt.dt(c.doctor_signed_at)}${c.doctor_sign_ip ? ` — IP ${c.doctor_sign_ip}` : ''}`));
+    if (c.status === 'pending_platform') {
+      const pad = signaturePad();
+      card.append(h('label', {}, 'امضای نماینده پلتفرم'), pad.el,
+        h('button', { class: 'btn primary', onclick: guard(async () => {
+          if (pad.isEmpty()) return toast('امضا را در کادر رسم کنید', true);
+          await api('POST', `/v1/admin/doctors/${id}/contract/countersign`, { signature: pad.toDataURL() });
+          toast('قرارداد به امضای پلتفرم رسید'); route('admin-doctors', id);
+        }) }, 'امضای قرارداد از طرف پلتفرم'));
+    } else {
+      card.append(h('button', { class: 'btn small', onclick: () => { card.querySelector('details').open = true; printContract(); } }, '🖨 چاپ / ذخیره PDF'));
+    }
+    return card;
+  }
 
   // ---------------------------------------------------------------- admin: credential review
   VIEWS['admin-doctors'] = async (id) => {
@@ -243,6 +357,7 @@ export function installV2(x) {
         d.status === 'pending_review' ? h('button', { class: 'btn primary', onclick: guard(async () => { await api('POST', `/v1/admin/doctors/${id}/approve`, {}); toast('پزشک تأیید شد'); route('admin-doctors'); }) }, '✅ تأیید و افزودن به فهرست پزشکان') : null,
         reason,
         h('button', { class: 'btn danger', onclick: guard(async () => { await api('POST', `/v1/admin/doctors/${id}/reject`, { reason: reason.value }); toast('نتیجه برای پزشک ارسال شد'); route('admin-doctors'); }) }, d.status === 'approved' ? 'لغو تأیید با ذکر دلیل' : 'رد با ذکر دلیل')) : null);
+    if (d.status === 'approved') { const cc = await adminContractCard(id); if (cc) x.$app.append(cc); }
   }
 
   // ---------------------------------------------------------------- admin: settings & payments

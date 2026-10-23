@@ -9,6 +9,7 @@ import { formatFaDateTime, toFaDigits } from '../lib/fa.js';
 import { requireUser } from './auth.js';
 import { SPECIALTIES } from './patient.js';
 import { getVisitSettings, JOIN_LATE_MIN } from '../lib/visit-settings.js';
+import { DOCTOR_BOOKABLE_SQL, doctorBookable } from '../lib/contract-text.js';
 
 const CHANNELS = ['video', 'audio', 'chat'];
 const MAX_SLOTS_PER_REQUEST = 64;
@@ -30,7 +31,7 @@ export function createAppointmentDomain({ db, platform, config = {}, patientDoma
   // by the assistant's check_availability tool.
   function checkAvailability(tenantId, { doctorId, specialty, from, limit = 20 } = {}) {
     const fromIso = from && !isNaN(Date.parse(from)) ? new Date(from).toISOString() : nowIso();
-    const where = ['s.tenant_id = ?', 's.starts_at > ?', 's.blocked_at IS NULL', 'd.deleted_at IS NULL', "d.status = 'approved'",
+    const where = ['s.tenant_id = ?', 's.starts_at > ?', 's.blocked_at IS NULL', 'd.deleted_at IS NULL', DOCTOR_BOOKABLE_SQL,
       `NOT EXISTS (SELECT 1 FROM appointments a WHERE a.slot_id = s.id AND a.status IN ('pending','confirmed'))`];
     const params = [tenantId, fromIso];
     if (doctorId) { where.push('s.doctor_id = ?'); params.push(doctorId); }
@@ -110,7 +111,7 @@ export function createAppointmentDomain({ db, platform, config = {}, patientDoma
     const slot = db.get('SELECT * FROM slots WHERE id = ? AND tenant_id = ?', slotId, ctx.tenantId);
     if (!slot || slot.doctor_id !== doctorId) throw notFound('زمان انتخاب‌شده');
     if (slot.blocked_at) throw conflict('این زمان توسط پزشک غیرفعال شده است', 'slot_blocked');
-    if (db.get('SELECT status FROM doctors WHERE id = ?', doctorId)?.status !== 'approved') throw conflict('این پزشک فعلاً نوبت نمی‌پذیرد', 'doctor_not_available');
+    if (!doctorBookable(db.get('SELECT status, contract_required, contract_signed_at FROM doctors WHERE id = ?', doctorId))) throw conflict('این پزشک فعلاً نوبت نمی‌پذیرد', 'doctor_not_available');
     if (slot.starts_at <= nowIso()) throw conflict('زمان این نوبت گذشته است', 'slot_in_past');
     if (triageResultId) {
       const t = db.get('SELECT user_id, patient_id FROM triage_results WHERE id = ? AND tenant_id = ?', triageResultId, ctx.tenantId);
@@ -378,8 +379,9 @@ export function register(router, { db, platform, domain }) {
 
   const requireApprovedDoctor = (ctx) => {
     requireUser(ctx, 'doctor');
-    const st = db.get('SELECT status FROM doctors WHERE id = ?', ctx.user.did)?.status;
-    if (st !== 'approved') throw forbidden('انتشار نوبت پس از تأیید مدارک توسط مدیر ممکن است', 'doctor_not_approved');
+    const d = db.get('SELECT status, contract_required, contract_signed_at FROM doctors WHERE id = ?', ctx.user.did);
+    if (d?.status !== 'approved') throw forbidden('انتشار نوبت پس از تأیید مدارک توسط مدیر ممکن است', 'doctor_not_approved');
+    if (!doctorBookable(d)) throw forbidden('انتشار نوبت پس از امضای قرارداد همکاری ممکن است (بخش «قرارداد همکاری»)', 'contract_required');
   };
 
   router.post('/v1/doctors/me/slots', async (ctx) => {

@@ -194,6 +194,24 @@ CREATE TABLE IF NOT EXISTS escalations (
   resolved_at  TEXT
 );
 
+-- Doctor–platform agreement: the doctor signs after the credentials are approved, then the platform.
+CREATE TABLE IF NOT EXISTS doctor_contracts (
+  id                  TEXT PRIMARY KEY,
+  tenant_id           TEXT NOT NULL,
+  doctor_id           TEXT NOT NULL REFERENCES doctors(id),
+  version             TEXT NOT NULL,
+  status              TEXT NOT NULL CHECK (status IN ('pending_platform','active','terminated')),
+  content             TEXT NOT NULL,
+  doctor_signature    TEXT NOT NULL,
+  doctor_signed_at    TEXT NOT NULL,
+  doctor_sign_ip      TEXT,
+  platform_signature  TEXT,
+  platform_signed_at  TEXT,
+  platform_signer_id  TEXT REFERENCES users(id),
+  created_at          TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_contract_doctor ON doctor_contracts (doctor_id, created_at);
+
 -- Support: one conversation per request; the support assistant answers first, a support agent
 -- (permission support.handle) takes over when asked or when the assistant cannot help.
 CREATE TABLE IF NOT EXISTS support_tickets (
@@ -492,6 +510,7 @@ const COLUMNS = {
     ['education', 'TEXT'], ['experience_years', 'INTEGER'],
     ['review_reason', 'TEXT'], ['reviewed_by', 'TEXT'], ['reviewed_at', 'TEXT'], ['submitted_at', 'TEXT'],
     ['sheba', 'TEXT'], // bank account (IBAN) for payouts
+    ['contract_required', 'INTEGER'], ['contract_signed_at', 'TEXT'], // cooperation agreement (doctors approved from 1405/07)
   ],
   appointments: [['payment_due_at', 'TEXT'], ['cancel_reason', 'TEXT'], ['cancelled_by', 'TEXT'], ['reminded_60_at', 'TEXT'], ['reminded_room_at', 'TEXT'],
     ['queue_next_at', 'TEXT'], ['queue_delay_notified', 'INTEGER'], // live queue notifications
