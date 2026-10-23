@@ -9,7 +9,7 @@ export const CONTRACT_PLATFORM = {
   name: 'شرکت رایان افزار پژوه',
   national_id: '10610062269',
   address: 'سنندج، پارک علم و فناوری کردستان',
-  representative: 'اردشیر عظمی نیا',
+  representative: 'اردشیر عظیمی‌نیا',
 };
 export const CONTRACT_TERM = 'یک سال';
 export const CONTRACT_NOTICE_DAYS = 30;
