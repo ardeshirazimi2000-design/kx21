@@ -1282,18 +1282,29 @@ function cancelAppointment(a, role, after = () => route(current.view)) {
 
 // «افزودن به تقویم گوشی»: the phone's own calendar reminds 60 and 10 minutes before the visit,
 // even with the app closed — no SMS needed. Opened outside the app so the calendar can take it.
+// The link is fetched as soon as the button is drawn, so the tap itself opens it straight away:
+// iPhone Safari shows its «Add to Calendar» sheet only for a page opened directly by the tap.
+const IS_IOS = /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+const calLinks = new Map();
+const calendarLink = (a) => {
+  if (!calLinks.has(a.id)) calLinks.set(a.id, api('POST', `/v1/appointments/${a.id}/calendar-link`, {}).then((r) => apiUrl(r.url)).catch((e) => { calLinks.delete(a.id); throw e; }));
+  return calLinks.get(a.id);
+};
 async function addToCalendar(a) {
-  const r = await api('POST', `/v1/appointments/${a.id}/calendar-link`, {});
-  const url = apiUrl(r.url);
-  if (IS_NATIVE) { location.href = url; return; }
+  const standalone = IS_IOS && (navigator.standalone || matchMedia('(display-mode: standalone)').matches);
+  const win = standalone ? window.open('', '_blank') : null; // the installed web app hands the file to Safari
+  const url = await calendarLink(a);
+  if (win) { win.location.href = url; return; }
+  if (IS_NATIVE || IS_IOS) { location.href = url; return; }
   const link = h('a', { href: url, download: 'darman-plus-visit.ics' });
   document.body.append(link); link.click(); link.remove();
-  toast('فایل تقویم دریافت شد؛ آن را باز کنید و «افزودن» را بزنید');
+  toast('فایل تقویم دریافت شد؛ آن را باز کنید و «افزودن» یا «ذخیره» را بزنید');
 }
-const calendarButton = (a) => h('button', { class: 'btn small', type: 'button', onclick: guard(() => addToCalendar(a)) }, icon('calendar', 16), ' افزودن به تقویم');
+const calendarButton = (a) => { calendarLink(a).catch(() => {}); return h('button', { class: 'btn small', type: 'button', onclick: guard(() => addToCalendar(a)) }, icon('calendar', 16), ' افزودن به تقویم'); };
 // After booking: a reminder to put the visit in the phone's calendar.
 function suggestCalendar(a) {
   if (!a?.id) return;
+  calendarLink(a).catch(() => {});
   const box = h('div', { class: 'wizard-overlay', role: 'dialog', 'aria-modal': 'true' }, h('div', { class: 'card pay-box stack', style: 'text-align:center' },
     h('div', { style: 'display:flex;justify-content:center' }, h('span', { class: 'svc-ic tone-blue' }, icon('calendar', 32))),
     h('h2', {}, 'نوبت شما ثبت شد'),

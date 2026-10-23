@@ -553,7 +553,8 @@ export function register(router, { db, platform, domain, config }) {
     });
     ctx.res.writeHead(200, {
       'Content-Type': 'text/calendar; charset=utf-8',
-      'Content-Disposition': `attachment; filename="darman-plus-visit.ics"`,
+      // inline: iPhone Safari then shows its «Add to Calendar» sheet instead of saving a file.
+      'Content-Disposition': `inline; filename="darman-plus-visit.ics"`,
       'Cache-Control': 'private, no-store',
     });
     ctx.res.end(body);
