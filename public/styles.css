@@ -399,16 +399,34 @@ body.has-bottomnav .chat { height: calc(100vh - 260px); }
   body.has-bottomnav .chat { height: calc(100vh - 250px); }
 }
 
-/* Staff menu: icon chips in a scrolling row on phones, a side menu on wide screens */
-.tabs.nav-side button { display: inline-flex; align-items: center; gap: 6px; }
+/* Staff menu: grouped sections that open and close; a side menu on wide screens, one «☰ منو»
+   button that unfolds the same menu on phones. */
+.tabs.nav-side { display: block; padding: 8px 12px; overflow: visible; }
+.tabs.nav-side button { display: flex; align-items: center; gap: 8px; width: 100%; border-radius: 10px; padding: 9px 12px; text-align: start; white-space: normal; }
+.tabs.nav-side .ic { display: inline-flex; flex: none; }
+.tabs.nav-side .nav-body { display: flex; flex-direction: column; gap: 2px; }
+.nav-toggle { font-weight: 700; color: var(--text) !important; background: var(--surface-2) !important; }
+.nav-gh { color: var(--text) !important; font-weight: 600; }
+.nav-gh .lbl { flex: 1; }
+.nav-gh .chev { transition: transform .2s; font-size: 18px; line-height: 1; color: var(--muted); }
+.nav-group.open > .nav-gh .chev { transform: rotate(90deg); }
+.nav-group.here > .nav-gh { color: var(--primary) !important; }
+.nav-items { display: none; flex-direction: column; gap: 2px; padding-inline-start: 14px; margin-inline-start: 18px; border-inline-start: 2px solid var(--border); }
+.nav-group.open > .nav-items { display: flex; }
+.nav-items button { font-size: 14px; padding: 7px 10px !important; }
+@media (max-width: 899px) {
+  .tabs.nav-side .nav-body { display: none; margin-top: 6px; max-height: 70vh; overflow-y: auto; }
+  .tabs.nav-side.open .nav-body { display: flex; }
+}
 @media (min-width: 900px) {
   .tabs.nav-side {
-    position: fixed; top: var(--header-h, 61px); bottom: 0; inset-inline-start: 0; width: 230px; flex-direction: column; gap: 2px;
+    position: fixed; top: var(--header-h, 61px); bottom: 0; inset-inline-start: 0; width: 240px;
     padding: 12px 10px; border-bottom: 0; border-inline-end: 1px solid var(--border); overflow-y: auto;
   }
-  .tabs.nav-side button { border-radius: 10px; padding: 9px 12px; text-align: start; }
-  body.has-sidenav .container { margin-inline-start: 240px; margin-inline-end: auto; max-width: min(960px, calc(100vw - 260px)); }
+  .nav-toggle { display: none !important; }
+  body.has-sidenav .container { margin-inline-start: 250px; margin-inline-end: auto; max-width: min(960px, calc(100vw - 270px)); }
 }
+.dash-sec h3 { margin: 16px 0 8px; font-size: 15px; color: var(--muted); }
 
 /* Home screen */
 .home-hello h2 { margin: 6px 0 0; font-size: 20px; }

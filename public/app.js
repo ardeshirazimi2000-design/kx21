@@ -282,10 +282,59 @@ function renderChrome() {
   const bottom = !isStaff(u);
   $tabs.classList.add(bottom ? 'nav-bottom' : 'nav-side');
   document.body.classList.add(bottom ? 'has-bottomnav' : 'has-sidenav');
+  if (!bottom) return staffMenu(items, active);
   for (const [id, label, fab] of items) {
     $tabs.append(h('button', { class: fab ? 'fab' : null, 'aria-current': active === id ? 'page' : null, onclick: () => route(id) },
       h('span', { class: 'ic' }, icon(TAB_ICONS[id] ?? 'plus', fab ? 28 : 22)), h('span', { class: 'lbl' }, label)));
   }
+}
+
+// Staff menu: sections grouped under headings that open and close (accordion). The group of the
+// open page is always open; which other groups are open is remembered on the device. On phones the
+// whole menu folds into one «☰ منو» button. A short menu (a support agent) stays a plain list.
+const NAV_GROUPS = [
+  ['g-doctors', 'پزشکان و دارو', 'approve', ['admin-doctors', 'drug-catalog']],
+  ['g-finance', 'امور مالی', 'wallet', ['payments', 'accounting']],
+  ['g-support', 'پشتیبانی و ارجاع', 'support', ['support-desk', 'support-report', 'escalations']],
+  ['g-reports', 'گزارش‌ها و امنیت', 'chart', ['stats', 'audit', 'activity', 'my-activity']],
+  ['g-system', 'تنظیمات و کاربران', 'settings', ['settings', 'staff']],
+];
+function groupNav(items) {
+  const byId = new Map(items.map((it) => [it[0], it]));
+  const used = new Set();
+  const groups = NAV_GROUPS.map(([gid, label, ic, ids]) => {
+    const list = ids.filter((id) => byId.has(id)).map((id) => { used.add(id); return byId.get(id); });
+    return list.length ? { gid, label, ic, items: list } : null;
+  }).filter(Boolean);
+  return { loose: items.filter(([id]) => !used.has(id)), groups };
+}
+function staffMenu(items, active) {
+  const navBtn = ([id, label]) => h('button', { 'aria-current': active === id ? 'page' : null, onclick: () => { $tabs.classList.remove('open'); route(id); } },
+    h('span', { class: 'ic' }, icon(TAB_ICONS[id] ?? 'plus', 20)), h('span', { class: 'lbl' }, label));
+  const body = h('div', { class: 'nav-body' });
+  const flat = items.length <= 5;
+  if (flat) body.append(...items.map(navBtn));
+  else {
+    const { loose, groups } = groupNav(items);
+    const openSet = new Set(store.get('nav_open', []));
+    body.append(...loose.filter(([id]) => id === 'home').map(navBtn));
+    for (const g of groups) {
+      const here = g.items.some(([id]) => id === active);
+      const sec = h('div', { class: `nav-group${here || openSet.has(g.gid) ? ' open' : ''}${here ? ' here' : ''}` });
+      const head = h('button', { class: 'nav-gh', 'aria-expanded': String(sec.classList.contains('open')), onclick: () => {
+        const open = sec.classList.toggle('open');
+        head.setAttribute('aria-expanded', String(open));
+        if (open) openSet.add(g.gid); else openSet.delete(g.gid);
+        store.set('nav_open', [...openSet]);
+      } }, h('span', { class: 'ic' }, icon(g.ic, 20)), h('span', { class: 'lbl' }, g.label), h('span', { class: 'chev', 'aria-hidden': 'true' }, '‹'));
+      sec.append(head, h('div', { class: 'nav-items' }, g.items.map(navBtn)));
+      body.append(sec);
+    }
+    body.append(...loose.filter(([id]) => id !== 'home').map(navBtn));
+  }
+  const current = items.find(([id]) => id === active)?.[1] ?? 'منو';
+  $tabs.append(h('button', { class: 'nav-toggle', 'aria-label': 'باز و بسته کردن منو', onclick: () => $tabs.classList.toggle('open') },
+    h('span', { 'aria-hidden': 'true' }, '☰'), h('span', { class: 'lbl' }, `منو — ${current}`)), body);
 }
 
 // The public website, shown in the app (login screen, home screen).
@@ -330,9 +379,14 @@ VIEWS.home = async () => {
   // Staff: a dashboard of the sections this person may open.
   renderChrome();
   const tones = ['blue', 'green', 'navy', 'amber', 'violet', 'rose'];
+  const all = [...tabsFor(session.user)];
+  const { loose, groups } = groupNav(all);
+  const sections = all.length <= 5 ? [{ label: null, items: all }] : [...groups, ...(loose.length ? [{ label: 'سایر', items: loose }] : [])];
+  let i = 0;
   $app.append(h('div', { class: 'card' }, h('h2', {}, `سلام ${me.full_name || ''}`.trim()),
     h('p', { class: 'muted' }, me.staff_role ? `نقش شما: ${me.staff_role.name ?? me.staff_role}` : 'دسترسی کامل مدیریت'),
-    h('div', { class: 'svc-grid' }, [...tabsFor(session.user)].map(([id, label], i) => tile(id, label, tones[i % tones.length])))));
+    sections.map((sec) => h('section', { class: 'dash-sec' }, sec.label ? h('h3', {}, sec.label) : null,
+      h('div', { class: 'svc-grid' }, sec.items.map(([id, label]) => tile(id, label, tones[i++ % tones.length])))))));
 };
 
 async function patientHome(me) {
