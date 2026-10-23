@@ -289,6 +289,9 @@ function renderChrome() {
 
 // The public website, shown in the app (login screen, home screen).
 const SITE = 'darman-plus.ir';
+// Terms, privacy, … — opened over the current page (keeps what the user has filled in).
+const legalLink = (label = 'قوانین و حریم خصوصی', id = null) => h('a', { class: 'muted legal-link', href: `#legal${id ? `/${id}` : ''}`,
+  onclick: (e) => { e.preventDefault(); e.stopPropagation(); (id ? openLegal(id) : openLegalIndex()).catch((err) => toast(err.message, true)); } }, label);
 const siteLink = () => h('a', { class: 'muted site-link', href: `https://${SITE}`, target: '_blank', rel: 'noopener' }, '🌐 ', h('bdi', {}, SITE));
 
 // Home-screen tile: a coloured icon with its label.
@@ -298,7 +301,7 @@ const tile = (id, label, tone, onclick = () => route(id), sub = null) => h('butt
 function route(view, arg) {
   for (const c of current.cleanup) c();
   current = { view, arg, cleanup: [] };
-  if (!['login', 'server'].includes(view) && !session) view = current.view = 'login';
+  if (!['login', 'server', 'legal'].includes(view) && !session) view = current.view = 'login';
   location.hash = ['login', 'server'].includes(view) ? '' : (arg ? `${view}/${arg}` : view);
   renderChrome();
   $app.replaceChildren();
@@ -349,7 +352,7 @@ async function patientHome(me) {
         tile('prescriptions', 'نسخه‌ها', 'violet'),
         tile('records', 'مدارک پزشکی', 'amber'),
         tile('inbox', 'پیام‌ها', 'rose'))),
-    h('p', { class: 'muted', style: 'text-align:center' }, 'درمان پلاس — ', siteLink()),
+    h('p', { class: 'muted', style: 'text-align:center' }, 'درمان پلاس — ', siteLink(), ' · ', legalLink()),
   );
   // The next confirmed visit, if any, right on the home screen.
   const r = await api('GET', '/v1/appointments?limit=50').catch(() => ({ items: [] }));
@@ -386,7 +389,7 @@ VIEWS.login = () => {
   // App builds with the server address built in only show the website; others can change the server.
   const footer = () => h('div', { class: 'row', style: 'justify-content:space-between' },
     IS_NATIVE ? (window.TELEHEALTH_API_BASE ? null : h('button', { class: 'btn small', onclick: () => route('server') }, `سرور: ${API_BASE.replace(/^https?:\/\//, '')} — تغییر`)) : installButton(),
-    siteLink());
+    h('span', {}, legalLink(), ' · ', siteLink()));
 
   // Start screen: two entries, as in the requirements.
   const stepRole = () => {
@@ -464,9 +467,11 @@ VIEWS.login = () => {
       h('h2', {}, t.title),
       h('p', { class: 'muted' }, `شماره ${fa(phone)} هنوز در درمان پلاس ثبت‌نام نشده است. برای ادامه ثبت‌نام، موارد زیر را مطالعه و تأیید کنید.`),
       h('form', { onsubmit: submit, class: 'stack terms' },
-        boxes.map((b, i) => h('label', { class: 'check terms-item' }, b, h('span', {}, h('b', {}, `${fa(i + 1)}. `), t.items[i]))),
+        boxes.map((b, i) => h('label', { class: 'check terms-item' }, b, h('span', {}, h('b', {}, `${fa(i + 1)}. `), t.items[i],
+          t.links?.[i] ? h('span', {}, ' ', legalLink('(مشاهده متن)', t.links[i])) : null))),
         h('label', { class: 'check terms-all' }, all, h('b', {}, 'همه موارد بالا را مطالعه کرده‌ام و تأیید می‌کنم')),
         go),
+      h('p', { style: 'text-align:center' }, legalLink('📄 متن کامل شرایط و مقررات')),
     );
   };
 
@@ -721,10 +726,12 @@ VIEWS.assistant = async (arg) => {
 };
 
 // ---------- booking ----------
-VIEWS.book = async () => {
+VIEWS.book = async (arg) => {
+  // book/credit:<appointment id>:<channel> — new time for a visit the doctor/clinic cancelled after payment.
+  const [, creditId, creditChannel] = /^credit:([0-9a-f-]{36}):(\w+)$/.exec(arg ?? '') ?? [];
   const specs = (await api('GET', '/v1/specialties')).items;
   const sel = h('select', {}, h('option', { value: '' }, 'همه تخصص‌ها'), specs.map((s) => h('option', { value: s.code }, s.label)));
-  const channel = h('select', {}, Object.entries(LABELS.channel).map(([k, v]) => h('option', { value: k }, v)));
+  const channel = h('select', { disabled: !!creditId }, Object.entries(LABELS.channel).map(([k, v]) => h('option', { value: k, selected: k === creditChannel }, v)));
   const out = h('div');
   const confirmBox = h('div');
   let chosen = null;
@@ -767,7 +774,9 @@ VIEWS.book = async () => {
       const btn = e.currentTarget;
       btn.disabled = true;
       try {
-        const a = await api('POST', '/v1/appointments', { doctor_id: chosen.doctor_id, slot_id: chosen.id, channel: channel.value }, { 'Idempotency-Key': key });
+        const a = creditId
+          ? await api('POST', `/v1/appointments/${creditId}/credit`, { choice: 'rebook', doctor_id: chosen.doctor_id, slot_id: chosen.id }, { 'Idempotency-Key': key })
+          : await api('POST', '/v1/appointments', { doctor_id: chosen.doctor_id, slot_id: chosen.id, channel: channel.value }, { 'Idempotency-Key': key });
         if (a.status === 'pending' && a.payment) {
           toast('نوبت به‌طور موقت رزرو شد؛ پرداخت را انجام دهید');
           route('appointments');
@@ -788,9 +797,46 @@ VIEWS.book = async () => {
   };
 
   sel.onchange = load;
+  if (creditId) $app.append(h('div', { class: 'banner info' }, 'انتخاب زمان جدید برای نوبتی که از طرف پزشک یا کلینیک لغو شد — بدون پرداخت مجدد (همان نوع ویزیت).'));
   $app.append(h('div', { class: 'card row' }, h('div', { class: 'grow' }, h('label', {}, 'تخصص'), sel),
     h('p', { class: 'muted grow' }, 'نمی‌دانید کدام تخصص؟ از «دستیار هوشمند» بخواهید علائم‌تان را بررسی کند.')), confirmBox, out);
   load();
+};
+
+// ---------- legal documents (public) ----------
+function legalBody(d) {
+  return h('article', { class: 'legal stack' },
+    h('p', { class: 'muted small' }, `آخرین به‌روزرسانی: ${fa(d.updated)} — ${d.company.name}`),
+    d.sections.map((s) => h('section', {},
+      s.h ? h('h3', {}, s.h) : null,
+      (s.p ?? []).map((p) => h('p', {}, p)),
+      s.list ? h('ul', {}, s.list.map((li) => h('li', {}, li))) : null,
+      s.table ? h('div', { class: 'table-wrap' }, h('table', { class: 'legal-table' },
+        h('thead', {}, h('tr', {}, s.table.head.map((c) => h('th', {}, c)))),
+        h('tbody', {}, s.table.rows.map((r) => h('tr', {}, r.map((c) => h('td', {}, c))))))) : null)),
+    h('p', { class: 'muted small' }, `${d.company.name} — ${d.company.address} — `, h('bdi', {}, d.company.email)));
+}
+async function openLegal(id) {
+  const d = await api('GET', `/v1/legal/${id}`);
+  V2.sheet(d.title, h('div', { class: 'legal-page' }, legalBody(d)));
+}
+async function openLegalIndex() {
+  const r = await api('GET', '/v1/legal');
+  V2.sheet('قوانین و مقررات', h('div', { class: 'legal-page stack' },
+    r.items.map((it) => h('button', { class: 'entry', type: 'button', onclick: guard(() => openLegal(it.id)) }, h('span', {}, h('b', {}, it.title)))),
+    h('p', { class: 'muted small' }, `آخرین به‌روزرسانی: ${fa(r.updated)} — ${r.company.name}`)));
+}
+VIEWS.legal = async (id) => {
+  const back = h('button', { class: 'btn small', type: 'button', onclick: () => route(session ? 'home' : 'login') }, '→ بازگشت');
+  if (id) {
+    const d = await api('GET', `/v1/legal/${id}`);
+    $app.append(h('div', { class: 'card narrow stack' }, back, h('h2', {}, d.title), legalBody(d), h('a', { href: '#legal', onclick: (e) => { e.preventDefault(); route('legal'); } }, 'سایر اسناد')));
+    return;
+  }
+  const r = await api('GET', '/v1/legal');
+  $app.append(h('div', { class: 'card narrow stack' }, back, h('h2', {}, 'قوانین و مقررات'),
+    r.items.map((it) => h('button', { class: 'entry', type: 'button', onclick: () => route('legal', it.id) }, h('span', {}, h('b', {}, it.title)))),
+    h('p', { class: 'muted small' }, `${r.company.name} — ${r.company.address} — `, h('bdi', {}, r.company.email))));
 };
 
 // ---------- appointments ----------
@@ -857,11 +903,20 @@ function queueBox(a) {
 // Cancel a visit. A doctor must give a reason, which is sent to the patient.
 function cancelAppointment(a, role, after = () => route(current.view)) {
   const reason = h('textarea', { rows: 3, maxlength: 300, placeholder: role === 'doctor' ? 'مثلاً: شرایط اضطراری؛ لطفاً نوبت دیگری بگیرید' : 'اختیاری' });
+  // Cancellation rules, shown before a patient cancels a paid visit.
+  const paid = a.payment?.status === 'paid';
+  const refundable = !a.refund_until || Date.parse(a.refund_until) > serverNow();
+  const rule = role === 'patient' && paid
+    ? h('div', { class: `banner ${refundable ? 'info' : 'warn'}` }, refundable
+      ? 'طبق قوانین لغو نوبت، هزینه پرداختی شما بازگردانده می‌شود.'
+      : 'مهلت لغو با بازگشت وجه گذشته است؛ طبق قوانین لغو نوبت، در صورت لغو هزینه بازگردانده نمی‌شود.')
+    : null;
   const box = h('div', { class: 'wizard-overlay', role: 'dialog', 'aria-modal': 'true' }, h('div', { class: 'card pay-box stack' },
     h('h2', {}, 'لغو نوبت'),
     h('p', { class: 'muted' }, role === 'doctor'
-      ? 'دلیل لغو برای بیمار پیامک/اعلان می‌شود. اگر بیمار هزینه را پرداخت کرده باشد، بازگشت وجه به مدیر اطلاع داده می‌شود.'
+      ? 'دلیل لغو برای بیمار پیامک/اعلان می‌شود. اگر بیمار هزینه را پرداخت کرده باشد، می‌تواند بدون پرداخت مجدد زمان دیگری بگیرد یا بازگشت وجه بخواهد.'
       : 'نوبت آزاد می‌شود و به پزشک اطلاع داده می‌شود.'),
+    rule,
     h('label', {}, role === 'doctor' ? 'دلیل لغو (الزامی)' : 'دلیل لغو'), reason,
     h('div', { class: 'row' },
       h('button', { class: 'btn danger', onclick: guard(async () => {
@@ -884,7 +939,20 @@ function appointmentItem(a, role) {
   if (a.status === 'completed' && role === 'doctor') actions.push(h('button', { class: 'btn small', onclick: () => route('room', a.consultation.id) }, a.summary_ready ? 'پرونده ویزیت' : '📝 خلاصه ویزیت (پیش‌نویس)'));
   if (a.status === 'completed' && role === 'patient' && a.summary_ready) actions.push(h('button', { class: 'btn primary small', onclick: () => route('summary', a.consultation.id) }, '📝 خلاصه ویزیت'));
   if (role === 'patient' && ['pending', 'confirmed'].includes(a.status)) actions.push(h('button', { class: 'btn small', onclick: () => route('records') }, '📎 ارسال مدرک'));
-  return h('li', {}, role === 'patient' ? V2.paymentBanner(a, () => route('appointments')) : null, role === 'patient' ? queueBox(a) : null, h('div', { class: 'row' },
+  // Cancelled by the doctor/clinic after payment: a new time without paying again, or a refund.
+  const credit = role === 'patient' && a.refund_policy === 'credit' ? h('div', { class: 'banner info stack' },
+    h('div', {}, 'این نوبت از طرف پزشک یا کلینیک لغو شد. می‌توانید بدون پرداخت مجدد زمان دیگری انتخاب کنید یا بازگشت کامل وجه را درخواست کنید.'),
+    h('div', { class: 'row', style: 'gap:8px;flex-wrap:wrap' },
+      h('button', { class: 'btn primary small', onclick: () => route('book', `credit:${a.id}:${a.channel}`) }, 'انتخاب زمان جدید (بدون پرداخت)'),
+      h('button', { class: 'btn small', onclick: guard(async () => {
+        if (!confirm('بازگشت وجه درخواست شود؟ پس از آن امکان انتخاب زمان جدید با این پرداخت وجود ندارد.')) return;
+        await api('POST', `/v1/appointments/${a.id}/credit`, { choice: 'refund' });
+        toast('درخواست بازگشت وجه ثبت شد'); route('appointments');
+      }) }, 'درخواست بازگشت وجه'))) : null;
+  const refundNote = role === 'patient' && a.status === 'cancelled'
+    ? { refund: 'هزینه این نوبت بازگردانده می‌شود.', credit_refund: 'درخواست بازگشت وجه ثبت شده است.', forfeit: 'طبق قوانین لغو، هزینه این نوبت بازگردانده نمی‌شود.', credit_used: 'هزینه این نوبت برای نوبت جدید شما استفاده شد.' }[a.refund_policy]
+    : null;
+  return h('li', {}, role === 'patient' ? V2.paymentBanner(a, () => route('appointments')) : null, credit, role === 'patient' ? queueBox(a) : null, h('div', { class: 'row' },
     h('div', { class: 'grow' },
       h('b', {}, role === 'doctor' ? (a.patient?.full_name ?? 'بیمار') : a.doctor?.full_name), ' ',
       h('span', { class: 'muted' }, role === 'doctor' ? '' : a.doctor?.specialty_label), h('br'),
@@ -892,7 +960,8 @@ function appointmentItem(a, role) {
       a.booked_via === 'ai_assistant' ? h('span', { class: 'pill info', style: 'margin-inline-start:6px' }, 'رزرو با دستیار') : null,
       a.triage ? h('span', { style: 'margin-inline-start:6px' }, urgencyPill(a.triage.urgency_level)) : null,
       a.status === 'cancelled' && a.cancelled_by && a.cancel_reason !== 'rescheduled'
-        ? h('div', { class: 'muted small' }, `لغو توسط ${{ doctor: 'پزشک', patient: 'بیمار', admin: 'مدیر', operator: 'اپراتور' }[a.cancelled_by] ?? 'سامانه'}${a.cancel_reason ? ` — دلیل: ${a.cancel_reason}` : ''}`) : null),
+        ? h('div', { class: 'muted small' }, `لغو توسط ${{ doctor: 'پزشک', patient: 'بیمار', admin: 'مدیر', operator: 'اپراتور' }[a.cancelled_by] ?? 'سامانه'}${a.cancel_reason ? ` — دلیل: ${a.cancel_reason}` : ''}`) : null,
+      refundNote ? h('div', { class: 'muted small' }, refundNote) : null),
     statusPill(a.status), ...actions));
 }
 
@@ -1462,7 +1531,7 @@ async function loadConfig() {
   if (IS_NATIVE && !API_BASE) return route('server');
   await loadConfig();
   const [view, arg] = location.hash.slice(1).split('/');
-  if (!session) return route('login');
+  if (!session) return route(view === 'legal' ? 'legal' : 'login', arg);
   // Doctor approval and staff permissions can change while away: refresh before drawing tabs.
   const me = await api('GET', '/v1/auth/me').catch(() => null);
   if (me) setSession({ ...session, user: { ...session.user, doctor_status: me.doctor_status, full_name: me.full_name, permissions: me.permissions, staff_role: me.staff_role } });

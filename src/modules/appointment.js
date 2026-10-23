@@ -61,7 +61,9 @@ export function createAppointmentDomain({ db, platform, config = {}, patientDoma
       starts_at: slot?.starts_at, ends_at: slot?.ends_at,
       join: joinWindow(a.tenant_id, slot),
       queue: queueFor(a),
-      cancel_reason: a.cancel_reason ?? null, cancelled_by: a.cancelled_by ?? null,
+      cancel_reason: a.cancel_reason ?? null, cancelled_by: a.cancelled_by ?? null, refund_policy: a.refund_policy ?? null,
+      // Until when a patient's cancellation gets the fee back (cancellation rules).
+      refund_until: slot ? new Date(Date.parse(slot.starts_at) - getVisitSettings(db, a.tenant_id).cancel_refund_hours * 3600e3).toISOString() : null,
       doctor: doc && { id: doc.id, full_name: doc.full_name, specialty: doc.specialty, specialty_label: SPECIALTIES[doc.specialty] },
       consultation: consultation ?? null,
       payment_due_at: a.payment_due_at ?? null,
@@ -83,7 +85,8 @@ export function createAppointmentDomain({ db, platform, config = {}, patientDoma
   }
 
   // Core booking. Returns { appointment, replayed }.
-  function book(ctx, { patientId, doctorId, slotId, channel = 'video', idempotencyKey, bookedVia = 'app', triageResultId = null }) {
+  // prepaidPaymentId: a paid fee moved over from a cancelled or rescheduled visit (no new payment).
+  function book(ctx, { patientId, doctorId, slotId, channel = 'video', idempotencyKey, bookedVia = 'app', triageResultId = null, prepaidPaymentId = null }) {
     if (!idempotencyKey || typeof idempotencyKey !== 'string' || idempotencyKey.length > 64) {
       throw badRequest('هدر Idempotency-Key الزامی است (حداکثر ۶۴ کاراکتر)', 'idempotency_key_required');
     }
@@ -130,7 +133,8 @@ export function createAppointmentDomain({ db, platform, config = {}, patientDoma
           id, ctx.tenantId, patientId, doctorId, slotId, channel, scopedKey, requestHash, bookedVia, triageResultId, ts, ts,
         );
         // A visit with a tariff stays "pending" (slot held) until the payment is verified.
-        if (payments) billing = payments.forAppointment(ctx, { appointmentId: id, patientUserId: patientUser, channel, doctorName });
+        if (prepaidPaymentId) db.run('UPDATE payments SET ref_id = ?, doctor_id = ? WHERE id = ?', id, doctorId, prepaidPaymentId);
+        else if (payments) billing = payments.forAppointment(ctx, { appointmentId: id, patientUserId: patientUser, channel, doctorName });
         db.run('UPDATE appointments SET status = ?, payment_due_at = ? WHERE id = ?', billing.status, billing.due_at ?? null, id);
         db.run(
           'INSERT INTO consultations (id, tenant_id, appointment_id, room_id, channel) VALUES (?,?,?,?,?)',
@@ -164,21 +168,32 @@ export function createAppointmentDomain({ db, platform, config = {}, patientDoma
     if (by === 'doctor' && reason !== 'rescheduled' && (!reason || reason.length < 3)) {
       throw badRequest('دلیل لغو نوبت را بنویسید؛ برای بیمار ارسال می‌شود', 'cancel_reason_required');
     }
-    db.run(`UPDATE appointments SET status = 'cancelled', cancel_reason = ?, cancelled_by = ?, updated_at = ? WHERE id = ?`, reason, by, nowIso(), appt.id);
-    platform.audit(ctx, 'appointment.cancel', `appointment:${appt.id}`, { reason, by });
-    // Paid visit: the money has to go back (refunds are made by the clinic; admins are told).
-    const paid = db.get(`SELECT id, ref_number FROM payments WHERE purpose = 'appointment' AND ref_id = ? AND status = 'paid'`, appt.id);
-    if (paid) {
-      db.run(`UPDATE payments SET status = 'refund_required' WHERE id = ?`, paid.id);
-      for (const ad of db.all(`SELECT id, phone FROM users WHERE tenant_id = ? AND role = 'admin' AND deleted_at IS NULL`, appt.tenant_id)) {
-        platform.notify(ctx, { userId: ad.id, channel: 'push', target: ad.phone, body: `نوبت پرداخت‌شده لغو شد (پرداخت ${paid.ref_number ?? ''})؛ بازگشت وجه به بیمار لازم است.` });
-      }
-    }
     const slot = db.get('SELECT starts_at FROM slots WHERE id = ?', appt.slot_id);
+    // Cancellation rules for a paid visit: the patient gets the fee back when cancelling at least
+    // cancel_refund_hours before the visit, otherwise not; when the doctor/clinic cancels, the patient
+    // chooses between a new time without paying again and a full refund (credit).
+    const paid = db.get(`SELECT id, ref_number FROM payments WHERE purpose = 'appointment' AND ref_id = ? AND status = 'paid'`, appt.id);
+    let policy = null;
+    if (paid) {
+      const hours = getVisitSettings(db, appt.tenant_id).cancel_refund_hours;
+      if (by !== 'patient') policy = 'credit';
+      else policy = slot && Date.parse(slot.starts_at) - Date.now() >= hours * 3600e3 ? 'refund' : 'forfeit';
+    }
+    db.run(`UPDATE appointments SET status = 'cancelled', cancel_reason = ?, cancelled_by = ?, refund_policy = ?, updated_at = ? WHERE id = ?`, reason, by, policy, nowIso(), appt.id);
+    platform.audit(ctx, 'appointment.cancel', `appointment:${appt.id}`, { reason, by, refund_policy: policy });
+    if (policy === 'refund') requestRefund(ctx, appt.tenant_id, paid);
     platform.publish(ctx, 'appointment.cancelled', {
       appointment_id: appt.id, patient_id: appt.patient_id, doctor_id: appt.doctor_id, starts_at: slot?.starts_at,
-      cancelled_by: by, reason, refund: !!paid,
+      cancelled_by: by, reason, refund: policy === 'refund', refund_policy: policy,
     });
+  }
+
+  // The money goes back (refunds are made by the clinic; admins are told).
+  function requestRefund(ctx, tenantId, paid) {
+    db.run(`UPDATE payments SET status = 'refund_required' WHERE id = ?`, paid.id);
+    for (const ad of db.all(`SELECT id, phone FROM users WHERE tenant_id = ? AND role = 'admin' AND deleted_at IS NULL`, tenantId)) {
+      platform.notify(ctx, { userId: ad.id, channel: 'push', target: ad.phone, body: `نوبت پرداخت‌شده لغو شد (پرداخت ${paid.ref_number ?? ''})؛ بازگشت وجه به بیمار لازم است.` });
+    }
   }
 
   // ---------------------------------------------------------------- live queue
@@ -313,16 +328,20 @@ export function createAppointmentDomain({ db, platform, config = {}, patientDoma
     const when = e.starts_at ? formatFaDateTime(e.starts_at) : '';
     if (e.reason === 'rescheduled') return;
     const why = e.reason ? ` دلیل: ${e.reason}` : '';
-    const refund = e.refund ? ' هزینه پرداختی شما بازگردانده می‌شود.' : '';
+    const refund = {
+      refund: ' هزینه پرداختی شما بازگردانده می‌شود.',
+      forfeit: ' طبق قوانین لغو نوبت، به دلیل لغو در کمتر از مهلت مقرر، هزینه بازگردانده نمی‌شود.',
+      credit: ' از بخش «نوبت‌ها» می‌توانید بدون پرداخت مجدد زمان دیگری انتخاب کنید یا بازگشت وجه را درخواست کنید.',
+    }[e.refund_policy] ?? '';
     if (p) platform.notify(ctx, { userId: p.id, channel: 'sms', target: p.phone, body: e.cancelled_by === 'doctor' ? `نوبت ${when} با ${d?.full_name ?? 'پزشک'} توسط پزشک لغو شد.${why}${refund}` : `نوبت ${when} لغو شد.${refund}` });
     if (d) platform.notify(ctx, { userId: d.id, channel: 'push', target: d.phone, body: `نوبت ${when} (${p?.full_name ?? 'بیمار'}) لغو شد${e.cancelled_by === 'patient' ? ' (توسط بیمار)' : ''}.` });
   });
 
-  return { checkAvailability, book, cancel, appointmentView, remind, joinWindow, dayQueue, queueFor, queueNotify, tehranDay };
+  return { checkAvailability, book, cancel, requestRefund, appointmentView, remind, joinWindow, dayQueue, queueFor, queueNotify, tehranDay };
 }
 
 export function register(router, { db, platform, domain }) {
-  const { checkAvailability, book, cancel, appointmentView, dayQueue } = domain.appointment;
+  const { checkAvailability, book, cancel, requestRefund, appointmentView, dayQueue } = domain.appointment;
 
   const loadForActor = (ctx, id) => {
     requireUuid(id, 'id');
@@ -515,14 +534,54 @@ export function register(router, { db, platform, domain }) {
     const a = loadForActor(ctx, ctx.params.id);
     requireFields(ctx.body, ['slot_id']);
     const key = ctx.req.headers['idempotency-key'];
+    // A paid visit moves with its fee, but only within the cancellation rules (as a refund would).
+    const paid = ['pending', 'confirmed'].includes(a.status)
+      && db.get(`SELECT id FROM payments WHERE purpose = 'appointment' AND ref_id = ? AND status = 'paid'`, a.id);
+    if (paid) {
+      const slot = db.get('SELECT starts_at FROM slots WHERE id = ?', a.slot_id);
+      const hours = getVisitSettings(db, a.tenant_id).cancel_refund_hours;
+      if (Date.parse(slot.starts_at) - Date.now() < hours * 3600e3) {
+        throw conflict(`جابه‌جایی نوبت پرداخت‌شده فقط تا ${toFaDigits(hours)} ساعت قبل از زمان ویزیت ممکن است`, 'reschedule_window_passed');
+      }
+    }
     const result = db.tx(() => {
       const r = book(ctx, {
         patientId: a.patient_id, doctorId: ctx.body.doctor_id ?? a.doctor_id, slotId: ctx.body.slot_id,
-        channel: ctx.body.channel ?? a.channel, idempotencyKey: key, triageResultId: a.triage_result_id,
+        channel: ctx.body.channel ?? a.channel, idempotencyKey: key, triageResultId: a.triage_result_id, prepaidPaymentId: paid?.id ?? null,
       });
       if (!r.replayed) cancel(ctx, a, 'rescheduled');
       return r;
     });
+    return { status: result.replayed ? 200 : 201, body: appointmentView(result.appointment) };
+  });
+
+  // Visit cancelled by the doctor/clinic after payment: the patient picks a new time without paying
+  // again ({ choice: 'rebook', slot_id, doctor_id? }) or a full refund ({ choice: 'refund' }).
+  router.post('/v1/appointments/:id/credit', async (ctx) => {
+    requireUser(ctx, 'patient');
+    const a = loadForActor(ctx, ctx.params.id);
+    if (a.refund_policy !== 'credit') throw conflict('برای این نوبت اعتبار قابل استفاده‌ای وجود ندارد', 'no_credit');
+    const paid = db.get(`SELECT id, ref_number FROM payments WHERE purpose = 'appointment' AND ref_id = ? AND status = 'paid'`, a.id);
+    if (!paid) throw conflict('برای این نوبت اعتبار قابل استفاده‌ای وجود ندارد', 'no_credit');
+    if (ctx.body.choice === 'refund') {
+      db.tx(() => {
+        db.run(`UPDATE appointments SET refund_policy = 'credit_refund', updated_at = ? WHERE id = ?`, nowIso(), a.id);
+        requestRefund(ctx, a.tenant_id, paid);
+      });
+      platform.audit(ctx, 'appointment.credit_refund', `appointment:${a.id}`);
+      return { body: appointmentView(db.get('SELECT * FROM appointments WHERE id = ?', a.id)) };
+    }
+    if (ctx.body.choice !== 'rebook') throw badRequest('گزینه نامعتبر است (rebook یا refund)');
+    requireFields(ctx.body, ['slot_id']);
+    const result = db.tx(() => {
+      const r = book(ctx, {
+        patientId: a.patient_id, doctorId: ctx.body.doctor_id ?? a.doctor_id, slotId: ctx.body.slot_id,
+        channel: a.channel, idempotencyKey: ctx.req.headers['idempotency-key'], triageResultId: a.triage_result_id, prepaidPaymentId: paid.id, // same visit type as paid for
+      });
+      if (!r.replayed) db.run(`UPDATE appointments SET refund_policy = 'credit_used', updated_at = ? WHERE id = ?`, nowIso(), a.id);
+      return r;
+    });
+    platform.audit(ctx, 'appointment.credit_rebook', `appointment:${a.id}`, { new_appointment: result.appointment.id });
     return { status: result.replayed ? 200 : 201, body: appointmentView(result.appointment) };
   });
 

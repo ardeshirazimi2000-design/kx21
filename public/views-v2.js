@@ -32,30 +32,40 @@ export function installV2(x) {
       if (IS_NATIVE) location.href = url; else window.open(url, '_blank', 'noopener');
       return;
     }
-    let closed = false;
     const img = h('img', { src: url, alt: title });
+    const s = sheet(title, img, { zoom: true });
+    img.onclick = () => s.box.classList.toggle('zoomed');
+  }
+  x.openFile = openFile;
+
+  // Full-screen page over the current view with a back button; the phone's back key closes it.
+  // Returns { box, body, back }.
+  function sheet(title, content, { zoom = false, cls = '' } = {}) {
+    let closed = false;
+    const depth = (Number(history.state?.viewer) || 0) + 1; // sheets can open over sheets
     const close = () => {
       if (closed) return;
       closed = true;
       window.removeEventListener('popstate', onPop);
       box.remove();
-      document.body.classList.remove('viewer-open');
+      if (!document.querySelector('.viewer')) document.body.classList.remove('viewer-open');
     };
-    const onPop = () => close();
-    const back = () => { if (history.state?.viewer) history.back(); else close(); };
+    const onPop = () => { if ((Number(history.state?.viewer) || 0) < depth) close(); };
+    const back = () => { if (history.state?.viewer === depth) history.back(); else close(); };
+    const body = h('div', { class: `viewer-body ${cls}`, onclick: zoom ? (e) => { if (e.target === e.currentTarget) back(); } : null }, content);
     const box = h('div', { class: 'viewer', role: 'dialog', 'aria-modal': 'true', 'aria-label': title },
       h('div', { class: 'viewer-bar' },
         h('button', { class: 'btn small', type: 'button', onclick: back }, '→ بازگشت'),
         h('b', {}, title),
-        h('button', { class: 'btn small', type: 'button', onclick: () => box.classList.toggle('zoomed') }, 'بزرگ‌نمایی')),
-      h('div', { class: 'viewer-body', onclick: (e) => { if (e.target === e.currentTarget) back(); } }, img));
-    img.onclick = () => box.classList.toggle('zoomed');
+        zoom ? h('button', { class: 'btn small', type: 'button', onclick: () => box.classList.toggle('zoomed') }, 'بزرگ‌نمایی') : h('span', { style: 'width:72px' })),
+      body);
     window.addEventListener('popstate', onPop);
-    history.pushState({ ...(history.state ?? {}), viewer: true }, '');
+    history.pushState({ ...(history.state ?? {}), viewer: depth }, '');
     document.body.classList.add('viewer-open');
     document.body.append(box);
+    return { box, body, back };
   }
-  x.openFile = openFile;
+  x.sheet = sheet;
   const fileLink = (url, mime, title, ...children) => h('a', {
     href: url, target: '_blank', onclick: (e) => { e.preventDefault(); openFile(url, mime, title); },
   }, ...children);
@@ -249,6 +259,8 @@ export function installV2(x) {
     };
     durBoxes.forEach((b) => { b.onchange = syncDefault; });
     const joinEarly = h('select', {}, [0, 5, 10, 15, 20, 30].map((m) => h('option', { value: m, selected: m === (s.visit.join_early_min ?? 10) }, m ? `${fa(m)} دقیقه قبل` : 'سر ساعت')));
+    const refundHours = h('select', {}, [...new Set([0, 2, 6, 12, 24, 48, 72, s.visit.cancel_refund_hours ?? 24])].sort((a, b) => a - b)
+      .map((n) => h('option', { value: n, selected: n === (s.visit.cancel_refund_hours ?? 24) }, n ? `تا ${fa(n)} ساعت قبل از ویزیت` : 'تا زمان شروع ویزیت')));
     syncDefault();
     x.$app.append(h('div', { class: 'card stack' },
       h('h2', {}, 'مدت زمان ویزیت'),
@@ -257,10 +269,12 @@ export function installV2(x) {
       h('div', {}, h('label', {}, 'مدت پیش‌فرض'), durDefault),
       h('div', {}, h('label', {}, 'باز شدن اتاق ویزیت (نسبت به ساعت نوبت)'), joinEarly,
         h('p', { class: 'muted small' }, 'بیمار و پزشک از این زمان تا ۳۰ دقیقه بعد از پایان نوبت می‌توانند وارد اتاق ویزیت شوند. در همین زمان برای هر دو اعلان «اتاق ویزیت باز شد» ارسال می‌شود؛ یک ساعت قبل هم یادآوری ارسال می‌شود.')),
+      h('div', {}, h('label', {}, 'مهلت لغو یا جابه‌جایی با بازگشت وجه'), refundHours,
+        h('p', { class: 'muted small' }, 'اگر بیمار تا این زمان نوبت پرداخت‌شده را لغو کند، هزینه بازگردانده می‌شود؛ بعد از آن بازگردانده نمی‌شود. اگر پزشک یا کلینیک نوبت را لغو کند، بیمار بین انتخاب زمان دیگر (بدون پرداخت مجدد) و بازگشت کامل وجه انتخاب می‌کند.')),
       h('button', { class: 'btn primary', onclick: guard(async () => {
         const durations = durBoxes.filter((b) => b.checked).map((b) => Number(b.value));
         if (!durations.length) { toast('حداقل یک مدت را انتخاب کنید'); return; }
-        await api('PUT', '/v1/admin/settings', { visit: { durations, default: Number(durDefault.value), join_early_min: Number(joinEarly.value) } });
+        await api('PUT', '/v1/admin/settings', { visit: { durations, default: Number(durDefault.value), join_early_min: Number(joinEarly.value), cancel_refund_hours: Number(refundHours.value) } });
         toast('مدت زمان ویزیت ذخیره شد');
       }) }, 'ذخیره مدت ویزیت')));
     const inputs = Object.fromEntries(Object.keys(s.tariffs).map((k) => [k, h('input', { type: 'number', min: 0, step: 1000, value: Math.round(s.tariffs[k] / 10) })]));

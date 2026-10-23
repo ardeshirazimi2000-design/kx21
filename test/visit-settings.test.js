@@ -10,7 +10,7 @@ test('admin sets the allowed visit durations; doctors can only publish those', a
     const doctor = await t.login(DEMO_ACCOUNTS.doctors[0].phone, { role: 'doctor' });
 
     const s0 = await t.call('GET', '/v1/admin/settings', { token: admin });
-    assert.deepEqual(s0.body.visit, { durations: [15, 20, 30, 45, 60], default: 30, join_early_min: 10 });
+    assert.deepEqual(s0.body.visit, { durations: [15, 20, 30, 45, 60], default: 30, join_early_min: 10, cancel_refund_hours: 24 });
 
     assert.equal((await t.call('PUT', '/v1/admin/settings', { token: admin, body: { visit: { durations: [] } } })).status, 422);
     assert.equal((await t.call('PUT', '/v1/admin/settings', { token: admin, body: { visit: { durations: [15, 7] } } })).status, 422);
@@ -18,11 +18,11 @@ test('admin sets the allowed visit durations; doctors can only publish those', a
     const tariffsBefore = s0.body.tariffs;
     const put = await t.call('PUT', '/v1/admin/settings', { token: admin, body: { visit: { durations: [30, 15], default: 15 } } });
     assert.equal(put.status, 200);
-    assert.deepEqual(put.body.visit, { durations: [15, 30], default: 15, join_early_min: 10 });
+    assert.deepEqual(put.body.visit, { durations: [15, 30], default: 15, join_early_min: 10, cancel_refund_hours: 24 });
     assert.deepEqual(put.body.tariffs, tariffsBefore); // saving the visit settings leaves the tariffs alone
 
     const mine = await t.call('GET', '/v1/doctors/me/slots', { token: doctor });
-    assert.deepEqual(mine.body.visit, { durations: [15, 30], default: 15, join_early_min: 10 });
+    assert.deepEqual(mine.body.visit, { durations: [15, 30], default: 15, join_early_min: 10, cancel_refund_hours: 24 });
 
     const day = new Date(Date.now() + 60 * 864e5);
     day.setUTCHours(1, 0, 0, 0);

@@ -467,7 +467,10 @@ const COLUMNS = {
     ['sheba', 'TEXT'], // bank account (IBAN) for payouts
   ],
   appointments: [['payment_due_at', 'TEXT'], ['cancel_reason', 'TEXT'], ['cancelled_by', 'TEXT'], ['reminded_60_at', 'TEXT'], ['reminded_room_at', 'TEXT'],
-    ['queue_next_at', 'TEXT'], ['queue_delay_notified', 'INTEGER']], // live queue notifications
+    ['queue_next_at', 'TEXT'], ['queue_delay_notified', 'INTEGER'], // live queue notifications
+    // Money of a cancelled paid visit: forfeit (patient cancelled late) | credit (cancelled by the clinic
+    // side; the patient picks a new time or a refund) | credit_used | credit_refund | refund.
+    ['refund_policy', 'TEXT']],
   consultations: [['doctor_joined_at', 'TEXT']],
   // blocked_at: a free slot switched off by the doctor (not offered); removed_at: deleted by the
   // doctor but kept because past (e.g. cancelled) visits refer to it.

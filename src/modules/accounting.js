@@ -33,7 +33,7 @@ export function register(router, { db, platform, domain }) {
     `SELECT p.id, p.amount, p.status AS pay_status, p.paid_at, p.ref_number,
             COALESCE(p.doctor_id, a.doctor_id) AS doctor_id, COALESCE(p.commission_percent, 0) AS commission_percent,
             COALESCE(p.platform_amount, 0) AS platform_amount, COALESCE(p.doctor_amount, p.amount) AS doctor_amount,
-            a.id AS appointment_id, a.status AS appt_status, a.channel, s.starts_at, u.full_name AS patient_name
+            a.id AS appointment_id, a.status AS appt_status, a.refund_policy, a.channel, s.starts_at, u.full_name AS patient_name
      FROM payments p JOIN appointments a ON a.id = p.ref_id JOIN slots s ON s.id = a.slot_id
      JOIN patients pt ON pt.id = a.patient_id JOIN users u ON u.id = pt.user_id
      WHERE p.tenant_id = ? AND p.purpose = 'appointment' AND p.status IN ('paid','refund_required','refunded')
@@ -41,7 +41,9 @@ export function register(router, { db, platform, domain }) {
      ORDER BY p.paid_at DESC`,
     tenantId, from, to, ...(doctorId ? [doctorId] : []),
   );
-  const state = (r) => (r.pay_status !== 'paid' ? 'refund' : EARNED.includes(r.appt_status) ? 'earned' : PENDING.includes(r.appt_status) ? 'pending' : 'refund');
+  // A visit the patient cancelled too late keeps its fee (cancellation rules): earned like a visit.
+  const state = (r) => (r.pay_status !== 'paid' ? 'refund'
+    : EARNED.includes(r.appt_status) || r.refund_policy === 'forfeit' ? 'earned' : PENDING.includes(r.appt_status) ? 'pending' : 'refund');
   const sum = (rows, k) => rows.reduce((a, r) => a + (r[k] ?? 0), 0);
   const payoutsOf = (doctorId, from = '0000', to = '9999') => db.all(
     'SELECT * FROM doctor_payouts WHERE doctor_id = ? AND paid_at >= ? AND paid_at <= ? ORDER BY paid_at DESC', doctorId, from, to,

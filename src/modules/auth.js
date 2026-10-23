@@ -1,10 +1,12 @@
 // Auth service (Keycloak in production): phone OTP, JWT issuance, RBAC and mandatory MFA
 // for doctor/admin/operator accounts.
-import { ApiError, badRequest, forbidden, requireFields } from '../lib/http.js';
+import { ApiError, badRequest, forbidden, notFound, requireFields } from '../lib/http.js';
 import { signJwt, verifyJwt, sha256, randomDigits, safeEqualHex, seal, unseal, lookupHash } from '../lib/crypto.js';
 import { uuid, nowIso } from '../lib/db.js';
 import { normalizePhone, normalizeFa, isValidNationalId } from '../lib/fa.js';
 import { TERMS } from '../lib/terms.js';
+import { legalDoc, legalIndex, LEGAL_UPDATED, COMPANY } from '../lib/legal.js';
+import { getVisitSettings } from '../lib/visit-settings.js';
 
 const OTP_TTL_MS = 2 * 60 * 1000;
 const OTP_MAX_ATTEMPTS = 5;
@@ -256,6 +258,15 @@ export function register(router, { db, keys, platform, config, limiter, domain }
     const user = db.get('SELECT * FROM users WHERE id = ? AND deleted_at IS NULL', ctx.user.sub);
     if (!user) throw new ApiError(401, 'unauthenticated', 'کاربر یافت نشد');
     return { body: session(user) };
+  });
+
+  // Legal documents (public: linked from the agreement page and the site footer).
+  const legalSettings = (tenantId) => ({ refundHours: getVisitSettings(db, tenantId).cancel_refund_hours, holdMin: domain.payments?.HOLD_MIN ?? 15 });
+  router.get('/v1/legal', async (ctx) => ({ body: { updated: LEGAL_UPDATED, company: COMPANY, items: legalIndex(legalSettings(ctx.tenantId)) } }));
+  router.get('/v1/legal/:id', async (ctx) => {
+    const d = legalDoc(ctx.params.id, legalSettings(ctx.tenantId));
+    if (!d) throw notFound('سند');
+    return { body: d };
   });
 
   // The agreement shown before registration (public: the user has no account yet).
