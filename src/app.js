@@ -8,7 +8,8 @@ import { readFile } from 'node:fs/promises';
 import { dirname, extname, join, normalize } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Router, RateLimiter, readJson, sendJson, sendError, newTraceId, ApiError } from './lib/http.js';
-import { openDb } from './lib/db.js';
+import { openDb, uuid, nowIso } from './lib/db.js';
+import { createModerator } from './lib/moderation.js';
 import { createKeyring } from './lib/crypto.js';
 import { createPlatform } from './lib/platform.js';
 import * as auth from './modules/auth.js';
@@ -123,6 +124,7 @@ export function createApp(overrides = {}) {
   domain.drugDirectory = createDrugDirectory({ db, config });
   domain.drugCatalog = drugCatalog.createDrugCatalog({ db });
   domain.patient = patient.createPatientDomain({ db, keys, files: () => domain.files });
+  domain.moderate = createModerator({ db, ApiError, uuid, nowIso });
   domain.payments = payments.createPaymentsDomain({ db, platform, config });
   domain.appointment = appointment.createAppointmentDomain({ db, platform, config, patientDomain: domain.patient, payments: domain.payments });
   const deps = { db, keys, platform, config, limiter, domain };

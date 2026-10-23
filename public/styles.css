@@ -543,3 +543,13 @@ body.viewer-open { overflow: hidden; }
   body.print-contract .contract-doc { position: absolute; inset: 0 auto auto 0; width: 100%; color: #000; font-size: 12pt; }
   body.print-contract .sig-row { break-inside: avoid; }
 }
+
+/* Support: ratings and figures */
+.stars { display: flex; gap: 4px; }
+.star { font-size: 30px; line-height: 1; background: none; border: 0; cursor: pointer; color: var(--border); padding: 2px; }
+.star.on { color: #f5a623; }
+.stars-read { color: #f5a623; letter-spacing: 1px; unicode-bidi: isolate; }
+.rate-card { border: 1px solid #f5d38a; }
+.grid4 { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; }
+.stat-tile { background: var(--surface-2); border-radius: 12px; padding: 10px 12px; }
+.stat-tile .stat { font-size: 20px; font-weight: 700; }

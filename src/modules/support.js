@@ -21,7 +21,16 @@ const ACT = {
   close: { type: 'close', label: 'مشکلم حل شد' },
 };
 
-export function register(router, { db, platform, domain, limiter }) {
+// Ready-made staff role for support agents: the support desk only (no medical records, payments, …).
+export const SUPPORT_ROLE = { name: 'کارشناس پشتیبانی', permissions: ['support.handle'] };
+const RATE_DAYS = 14; // a closed conversation can be rated for this long
+
+export function register(router, { db, platform, domain, limiter, config }) {
+  for (const t of db.all('SELECT DISTINCT tenant_id FROM users').map((r) => r.tenant_id).concat(config.defaultTenant ?? []).filter(Boolean)) {
+    if (!db.get('SELECT 1 FROM staff_roles WHERE tenant_id = ? AND name = ?', t, SUPPORT_ROLE.name)) {
+      db.run('INSERT INTO staff_roles (id, tenant_id, name, permissions, created_at) VALUES (?,?,?,?,?)', uuid(), t, SUPPORT_ROLE.name, JSON.stringify(SUPPORT_ROLE.permissions), nowIso());
+    }
+  }
   const audienceOf = (role) => (role === 'doctor' ? 'doctor' : 'patient');
   const indexes = {
     patient: buildIndex(SUPPORT_KB.filter((d) => d.for !== 'doctor').map((d) => ({ id: d.id, title: d.title, text: `${d.keys} ${d.title}` }))),
@@ -36,9 +45,24 @@ export function register(router, { db, platform, domain, limiter }) {
   const search = (role, text) => indexes[audienceOf(role)].search(text, 3);
 
   const roleOf = (userId) => db.get('SELECT role FROM users WHERE id = ?', userId)?.role;
-  const msgView = (m) => ({ id: m.id, sender: m.sender, body: m.body, actions: parseJson(m.actions, []), created_at: m.created_at });
-  const messagesOf = (ticketId) => db.all('SELECT * FROM support_messages WHERE ticket_id = ? ORDER BY created_at, rowid', ticketId).map(msgView);
-  const ticketView = (t) => t && { id: t.id, status: t.status, topic: t.topic, created_at: t.created_at, updated_at: t.updated_at, escalated_at: t.escalated_at, closed_at: t.closed_at };
+  // staff: the desk sees which agent wrote each answer; the user sees «کارشناس پشتیبانی».
+  const msgView = (m, { staff = false } = {}) => ({
+    id: m.id, sender: m.sender, body: m.body, actions: parseJson(m.actions, []), created_at: m.created_at,
+    ...(staff && m.staff_id ? { staff_name: m.staff_name ?? null } : {}),
+  });
+  const messagesOf = (ticketId, opts) => db.all(
+    'SELECT m.*, u.full_name AS staff_name FROM support_messages m LEFT JOIN users u ON u.id = m.staff_id WHERE m.ticket_id = ? ORDER BY m.created_at, m.rowid', ticketId,
+  ).map((m) => msgView(m, opts));
+  const ticketView = (t) => t && {
+    id: t.id, status: t.status, topic: t.topic, created_at: t.created_at, updated_at: t.updated_at, escalated_at: t.escalated_at, closed_at: t.closed_at,
+    rating: t.rating ?? null, rating_comment: t.rating_comment ?? null,
+  };
+  // The latest conversation the support team answered, closed and not rated yet.
+  const toRate = (ctx) => db.get(
+    `SELECT t.id, t.topic FROM support_tickets t WHERE t.tenant_id = ? AND t.user_id = ? AND t.status = 'closed' AND t.rating IS NULL AND t.closed_at > ?
+       AND EXISTS (SELECT 1 FROM support_messages m WHERE m.ticket_id = t.id AND m.sender = 'staff') ORDER BY t.closed_at DESC LIMIT 1`,
+    ctx.tenantId, ctx.user.sub, new Date(Date.now() - RATE_DAYS * 864e5).toISOString(),
+  ) ?? null;
   const openTicketOf = (ctx) => db.get(
     `SELECT * FROM support_tickets WHERE tenant_id = ? AND user_id = ? AND status != 'closed' ORDER BY created_at DESC LIMIT 1`, ctx.tenantId, ctx.user.sub,
   );
@@ -102,7 +126,7 @@ export function register(router, { db, platform, domain, limiter }) {
 
   const state = (ctx) => {
     const t = openTicketOf(ctx);
-    return { ticket: t ? ticketView(t) : null, messages: t ? messagesOf(t.id) : [], topics: topicsFor(ctx.user.role) };
+    return { ticket: t ? ticketView(t) : null, messages: t ? messagesOf(t.id) : [], topics: topicsFor(ctx.user.role), rate: t ? null : toRate(ctx) };
   };
 
   router.get('/v1/support', async (ctx) => {
@@ -118,6 +142,7 @@ export function register(router, { db, platform, domain, limiter }) {
     if (ctx.body.topic && (!topic || !topicsFor(ctx.user.role).some((x) => x.id === topic.id))) throw badRequest('موضوع نامعتبر است');
     const text = topic ? topic.title : String(ctx.body.body ?? '').trim();
     if (!text || text.length > 2000) throw badRequest('متن پیام را بنویسید (حداکثر ۲۰۰۰ نویسه)');
+    if (!topic) domain.moderate(ctx, text, 'support');
     let t = openTicketOf(ctx);
     if (!t) {
       const id = uuid();
@@ -154,7 +179,7 @@ export function register(router, { db, platform, domain, limiter }) {
     const t = openTicketOf(ctx);
     if (t) {
       add(t.id, 'system', 'گفتگو بسته شد.');
-      db.run(`UPDATE support_tickets SET status = 'closed', closed_at = ?, updated_at = ? WHERE id = ?`, nowIso(), nowIso(), t.id);
+      db.run(`UPDATE support_tickets SET status = 'closed', closed_at = ?, closed_by = ?, updated_at = ? WHERE id = ?`, nowIso(), ctx.user.sub, nowIso(), t.id);
       platform.audit(ctx, 'support.close', `support:${t.id}`, { by: 'user' });
     }
     return { body: state(ctx) };
@@ -162,6 +187,11 @@ export function register(router, { db, platform, domain, limiter }) {
 
   // ---- support desk (staff with support.handle)
   const requireAgent = (ctx) => domain.access.require(ctx, 'support.handle');
+  const loadOwn = (ctx) => {
+    const t = db.get('SELECT * FROM support_tickets WHERE id = ? AND tenant_id = ? AND user_id = ?', requireUuid(ctx.params.id, 'id'), ctx.tenantId, ctx.user.sub);
+    if (!t) throw notFound('گفتگو');
+    return t;
+  };
   const loadTicket = (ctx) => {
     const t = db.get('SELECT * FROM support_tickets WHERE id = ? AND tenant_id = ?', requireUuid(ctx.params.id, 'id'), ctx.tenantId);
     if (!t) throw notFound('گفتگو');
@@ -191,7 +221,7 @@ export function register(router, { db, platform, domain, limiter }) {
     const t = loadTicket(ctx);
     platform.audit(ctx, 'support.read', `support:${t.id}`);
     const u = db.get('SELECT id, full_name, phone, role, created_at FROM users WHERE id = ?', t.user_id);
-    const messages = messagesOf(t.id);
+    const messages = messagesOf(t.id, { staff: true });
     // Ready-made answers for the agent, from the user's latest question.
     const lastQ = [...messages].reverse().find((m) => m.sender === 'user');
     const suggestions = lastQ ? search(u.role, lastQ.body).map((h) => ({ id: h.id, title: h.title, text: answerOf(t.tenant_id, h.id) })) : [];
@@ -204,6 +234,7 @@ export function register(router, { db, platform, domain, limiter }) {
     const text = String(ctx.body.body ?? '').trim();
     if (!text || text.length > 4000) throw badRequest('متن پاسخ را بنویسید');
     if (t.status === 'closed') throw conflict('این گفتگو بسته شده است', 'closed');
+    domain.moderate(ctx, text, 'staff_reply', { allowLinks: true });
     add(t.id, 'staff', text, { staffId: ctx.user.sub });
     db.run(`UPDATE support_tickets SET status = 'answered', assigned_to = ?, updated_at = ? WHERE id = ?`, ctx.user.sub, nowIso(), t.id);
     platform.audit(ctx, 'support.reply', `support:${t.id}`);
@@ -217,9 +248,116 @@ export function register(router, { db, platform, domain, limiter }) {
     const t = loadTicket(ctx);
     if (t.status !== 'closed') {
       add(t.id, 'system', 'گفتگو توسط پشتیبانی بسته شد. اگر پرسش دیگری دارید، پیام جدید بنویسید.');
-      db.run(`UPDATE support_tickets SET status = 'closed', closed_at = ?, updated_at = ? WHERE id = ?`, nowIso(), nowIso(), t.id);
+      db.run(`UPDATE support_tickets SET status = 'closed', closed_at = ?, closed_by = ?, updated_at = ? WHERE id = ?`, nowIso(), ctx.user.sub, nowIso(), t.id);
       platform.audit(ctx, 'support.close', `support:${t.id}`, { by: 'staff' });
+      if (db.get(`SELECT 1 FROM support_messages WHERE ticket_id = ? AND sender = 'staff'`, t.id)) {
+        const u = db.get('SELECT phone FROM users WHERE id = ?', t.user_id);
+        platform.notify(ctx, { userId: t.user_id, channel: 'push', target: u?.phone, body: 'گفتگوی پشتیبانی شما بسته شد. لطفاً از بخش «پشتیبانی» به پاسخ کارشناس امتیاز دهید.' });
+      }
     }
     return { body: { ok: true } };
+  });
+
+  // The user rates the support team's answers (1–5 and an optional comment), once.
+  router.post('/v1/support/tickets/:id/rate', async (ctx) => {
+    requireUser(ctx);
+    const t = loadOwn(ctx);
+    const rating = Number(ctx.body.rating);
+    if (!Number.isInteger(rating) || rating < 1 || rating > 5) throw badRequest('امتیاز باید بین ۱ تا ۵ باشد');
+    if (t.status !== 'closed') throw conflict('امتیاز پس از بسته شدن گفتگو ثبت می‌شود', 'not_closed');
+    if (t.rating != null) throw conflict('برای این گفتگو قبلاً امتیاز ثبت شده است', 'already_rated');
+    if (!db.get(`SELECT 1 FROM support_messages WHERE ticket_id = ? AND sender = 'staff'`, t.id)) throw conflict('این گفتگو پاسخ کارشناس نداشته است', 'no_staff_answer');
+    const comment = String(ctx.body.comment ?? '').trim().slice(0, 500) || null;
+    if (comment) domain.moderate(ctx, comment, 'rating');
+    db.run('UPDATE support_tickets SET rating = ?, rating_comment = ?, rated_at = ? WHERE id = ?', rating, comment, nowIso(), t.id);
+    platform.audit(ctx, 'support.rate', `support:${t.id}`, { rating });
+    return { body: state(ctx) };
+  });
+  router.post('/v1/support/tickets/:id/rate/skip', async (ctx) => {
+    requireUser(ctx);
+    const t = loadOwn(ctx);
+    if (t.rating == null) db.run('UPDATE support_tickets SET rating = 0, rated_at = ? WHERE id = ?', nowIso(), t.id); // 0 = declined to rate
+    return { body: state(ctx) };
+  });
+
+  // ---- performance report: answers, response times and satisfaction per agent
+  const reportRange = (ctx) => {
+    const from = ctx.query.from && !isNaN(Date.parse(ctx.query.from)) ? new Date(ctx.query.from).toISOString() : new Date(Date.now() - 30 * 864e5).toISOString();
+    const to = ctx.query.to && !isNaN(Date.parse(ctx.query.to)) ? new Date(ctx.query.to).toISOString() : nowIso();
+    return { from, to };
+  };
+  function agentStats(tenantId, { from, to }, agentId = null) {
+    const rows = db.all(
+      `SELECT m.staff_id, m.ticket_id, m.created_at, t.escalated_at, t.rating, t.closed_by,
+              (SELECT MIN(m2.created_at) FROM support_messages m2 WHERE m2.ticket_id = t.id AND m2.sender = 'staff') AS first_staff_at,
+              (SELECT m3.staff_id FROM support_messages m3 WHERE m3.ticket_id = t.id AND m3.sender = 'staff' ORDER BY m3.created_at DESC, m3.rowid DESC LIMIT 1) AS last_staff
+       FROM support_messages m JOIN support_tickets t ON t.id = m.ticket_id
+       WHERE t.tenant_id = ? AND m.sender = 'staff' AND m.created_at >= ? AND m.created_at <= ? ${agentId ? 'AND m.staff_id = ?' : ''}`,
+      tenantId, from, to, ...(agentId ? [agentId] : []),
+    );
+    const by = new Map();
+    for (const r of rows) {
+      if (!by.has(r.staff_id)) by.set(r.staff_id, { replies: 0, tickets: new Map() });
+      const a = by.get(r.staff_id);
+      a.replies++;
+      a.tickets.set(r.ticket_id, r);
+    }
+    return [...by.entries()].map(([id, a]) => {
+      const u = db.get('SELECT full_name, phone, role FROM users WHERE id = ?', id);
+      const tickets = [...a.tickets.values()];
+      // A conversation's rating counts for the agent who answered it last.
+      const rated = tickets.filter((t) => t.last_staff === id && t.rating > 0);
+      const firsts = tickets.filter((t) => t.escalated_at && t.first_staff_at && db.get(
+        `SELECT staff_id FROM support_messages WHERE ticket_id = ? AND sender = 'staff' ORDER BY created_at, rowid LIMIT 1`, t.ticket_id,
+      )?.staff_id === id).map((t) => (Date.parse(t.first_staff_at) - Date.parse(t.escalated_at)) / 60000);
+      return {
+        agent_id: id, full_name: u?.full_name ?? null, phone: u?.phone ?? null,
+        replies: a.replies, tickets: tickets.length, closed: tickets.filter((t) => t.closed_by === id).length,
+        avg_first_response_min: firsts.length ? Math.round(firsts.reduce((x, y) => x + y, 0) / firsts.length) : null,
+        ratings: rated.length, avg_rating: rated.length ? Math.round((rated.reduce((x, t) => x + t.rating, 0) / rated.length) * 10) / 10 : null,
+        satisfied: rated.filter((t) => t.rating >= 4).length, dissatisfied: rated.filter((t) => t.rating <= 2).length,
+      };
+    }).sort((x, y) => y.replies - x.replies);
+  }
+  const recentRatings = (tenantId, { from, to }, agentId = null) => db.all(
+    `SELECT t.id, t.topic, t.rating, t.rating_comment, t.rated_at, u.full_name AS user_name,
+            (SELECT s.full_name FROM support_messages m JOIN users s ON s.id = m.staff_id WHERE m.ticket_id = t.id AND m.sender = 'staff' ORDER BY m.created_at DESC, m.rowid DESC LIMIT 1) AS agent_name,
+            (SELECT m.staff_id FROM support_messages m WHERE m.ticket_id = t.id AND m.sender = 'staff' ORDER BY m.created_at DESC, m.rowid DESC LIMIT 1) AS agent_id
+     FROM support_tickets t JOIN users u ON u.id = t.user_id
+     WHERE t.tenant_id = ? AND t.rating > 0 AND t.rated_at >= ? AND t.rated_at <= ? ORDER BY t.rated_at DESC LIMIT 200`, tenantId, from, to,
+  ).filter((r) => !agentId || r.agent_id === agentId);
+
+  router.get('/v1/support/report', async (ctx) => {
+    domain.access.require(ctx, 'support.report');
+    const range = reportRange(ctx);
+    const T = (sql, ...a) => db.get(sql, ctx.tenantId, range.from, range.to, ...a).n;
+    const rated = db.get(`SELECT COUNT(*) AS n, AVG(rating) AS avg FROM support_tickets WHERE tenant_id = ? AND rating > 0 AND rated_at >= ? AND rated_at <= ?`, ctx.tenantId, range.from, range.to);
+    return {
+      body: {
+        range,
+        totals: {
+          conversations: T('SELECT COUNT(*) AS n FROM support_tickets WHERE tenant_id = ? AND created_at >= ? AND created_at <= ?'),
+          escalated: T('SELECT COUNT(*) AS n FROM support_tickets WHERE tenant_id = ? AND escalated_at >= ? AND escalated_at <= ?'),
+          // Closed without ever reaching a person: the assistant's answer was enough.
+          solved_by_assistant: T(`SELECT COUNT(*) AS n FROM support_tickets WHERE tenant_id = ? AND status = 'closed' AND escalated_at IS NULL AND closed_at >= ? AND closed_at <= ?`),
+          waiting_now: db.get(`SELECT COUNT(*) AS n FROM support_tickets WHERE tenant_id = ? AND status = 'waiting'`, ctx.tenantId).n,
+          ratings: rated.n, avg_rating: rated.avg ? Math.round(rated.avg * 10) / 10 : null,
+        },
+        agents: agentStats(ctx.tenantId, range),
+        ratings: recentRatings(ctx.tenantId, range),
+        // Messages rejected as inappropriate, for review (and for spotting wrong rejections).
+        moderation: db.all(
+          `SELECT e.context, e.reason, e.excerpt, e.created_at, u.full_name, u.phone, u.role FROM moderation_events e JOIN users u ON u.id = e.user_id
+           WHERE e.tenant_id = ? AND e.created_at >= ? AND e.created_at <= ? ORDER BY e.created_at DESC LIMIT 100`, ctx.tenantId, range.from, range.to,
+        ),
+      },
+    };
+  });
+
+  // An agent's own figures and the ratings of the conversations they answered.
+  router.get('/v1/support/report/me', async (ctx) => {
+    requireAgent(ctx);
+    const range = reportRange(ctx);
+    return { body: { range, me: agentStats(ctx.tenantId, range, ctx.user.sub)[0] ?? null, ratings: recentRatings(ctx.tenantId, range, ctx.user.sub) } };
   });
 }

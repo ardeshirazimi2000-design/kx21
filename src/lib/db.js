@@ -212,6 +212,18 @@ CREATE TABLE IF NOT EXISTS doctor_contracts (
 );
 CREATE INDEX IF NOT EXISTS idx_contract_doctor ON doctor_contracts (doctor_id, created_at);
 
+-- Messages rejected as inappropriate (insults, obscene words, spam, meaningless text).
+CREATE TABLE IF NOT EXISTS moderation_events (
+  id          TEXT PRIMARY KEY,
+  tenant_id   TEXT NOT NULL,
+  user_id     TEXT NOT NULL REFERENCES users(id),
+  context     TEXT NOT NULL,
+  reason      TEXT NOT NULL,
+  excerpt     TEXT,
+  created_at  TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_moderation_user ON moderation_events (user_id, created_at);
+
 -- Support: one conversation per request; the support assistant answers first, a support agent
 -- (permission support.handle) takes over when asked or when the assistant cannot help.
 CREATE TABLE IF NOT EXISTS support_tickets (
@@ -518,6 +530,8 @@ const COLUMNS = {
     // side; the patient picks a new time or a refund) | credit_used | credit_refund | refund.
     ['refund_policy', 'TEXT']],
   consultations: [['doctor_joined_at', 'TEXT']],
+  // Satisfaction with the support team's answers (1–5) and who closed the conversation.
+  support_tickets: [['rating', 'INTEGER'], ['rating_comment', 'TEXT'], ['rated_at', 'TEXT'], ['closed_by', 'TEXT']],
   // blocked_at: a free slot switched off by the doctor (not offered); removed_at: deleted by the
   // doctor but kept because past (e.g. cancelled) visits refer to it.
   slots: [['blocked_at', 'TEXT'], ['removed_at', 'TEXT']],

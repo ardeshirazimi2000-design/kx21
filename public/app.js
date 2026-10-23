@@ -169,13 +169,13 @@ const TABS = {
   doctor_pending: [['doctor-profile', 'پروفایل و مدارک'], ['inbox', 'اعلان‌ها'], ['support', 'پشتیبانی']],
   // Staff tabs are shown by permission (see TAB_PERMS); operator and admin share the same list.
   operator: [['support-desk', 'دستیار پشتیبان'], ['escalations', 'درخواست‌های ارجاع'], ['stats', 'آمار']],
-  admin: [['admin-doctors', 'تأیید پزشکان'], ['settings', 'تنظیمات سیستم'], ['drug-catalog', 'فهرست داروها'], ['payments', 'پرداخت‌ها'], ['accounting', 'حسابداری'], ['support-desk', 'دستیار پشتیبان'], ['escalations', 'درخواست‌های ارجاع'], ['stats', 'آمار'], ['audit', 'لاگ ممیزی'], ['activity', 'سابقه ورود و فعالیت'], ['staff', 'کاربران و نقش‌ها']],
+  admin: [['admin-doctors', 'تأیید پزشکان'], ['settings', 'تنظیمات سیستم'], ['drug-catalog', 'فهرست داروها'], ['payments', 'پرداخت‌ها'], ['accounting', 'حسابداری'], ['support-desk', 'دستیار پشتیبان'], ['support-report', 'گزارش پشتیبانی'], ['escalations', 'درخواست‌های ارجاع'], ['stats', 'آمار'], ['audit', 'لاگ ممیزی'], ['activity', 'سابقه ورود و فعالیت'], ['staff', 'کاربران و نقش‌ها']],
 };
 TABS.doctor.splice(4, 0, ['doctor-accounting', 'حسابداری من']);
 for (const k of ['patient', 'doctor', 'doctor_pending']) TABS[k].push(['my-activity', 'سابقه ورود']);
 const TAB_PERMS = {
   'admin-doctors': 'doctors.review', settings: 'tariffs.manage', 'drug-catalog': 'drug_catalog.manage', payments: 'payments.view',
-  accounting: 'accounting.view', 'support-desk': 'support.handle', escalations: 'escalations.handle', stats: 'stats.view', audit: 'audit.view', activity: 'activity.view', staff: 'users.manage',
+  accounting: 'accounting.view', 'support-desk': 'support.handle', 'support-report': 'support.report', escalations: 'escalations.handle', stats: 'stats.view', audit: 'audit.view', activity: 'activity.view', staff: 'users.manage',
 };
 function tabsFor(u) {
   if (['admin', 'operator'].includes(u.role)) {
@@ -191,7 +191,7 @@ const TAB_ICONS = {
   prescriptions: 'rx', inbox: 'bell', profile: 'user', 'my-activity': 'history',
   'doctor-appointments': 'stethoscope', 'doctor-contract': 'approve', calendar: 'calendar', 'doctor-rx': 'rx', 'doctor-profile': 'idcard', 'doctor-accounting': 'wallet',
   'admin-doctors': 'approve', settings: 'settings', 'drug-catalog': 'catalog', payments: 'card', accounting: 'wallet',
-  escalations: 'alert', support: 'support', 'support-desk': 'support', stats: 'chart', audit: 'shield', activity: 'history', staff: 'team', 'staff-create': 'team',
+  escalations: 'alert', support: 'support', 'support-desk': 'support', 'support-report': 'chart', stats: 'chart', audit: 'shield', activity: 'history', staff: 'team', 'staff-create': 'team',
 };
 // Phones: a bottom bar with five sections for patients and doctors (the rest is on the home
 // screen and in the top bar). Staff have many sections: a menu (side menu on wide screens).
@@ -810,7 +810,7 @@ VIEWS.book = async (arg) => {
 // the support team, whose answers appear here too.
 const SUPPORT_STATUS = { bot: ['دستیار پشتیبانی', 'info'], waiting: ['در انتظار پاسخ کارشناس', 'warn'], answered: ['کارشناس پاسخ داد', 'ok'], closed: ['بسته‌شده', ''] };
 const supportMsg = (m, viewer = 'user') => h('div', { class: `msg ${m.sender === 'user' ? (viewer === 'user' ? 'me' : 'bot') : m.sender === 'staff' ? (viewer === 'user' ? 'operator' : 'me') : m.sender === 'bot' ? 'bot' : 'system'}` },
-  h('span', { class: 'who' }, { user: viewer === 'user' ? 'شما' : 'کاربر', bot: 'دستیار پشتیبانی', staff: 'کارشناس پشتیبانی', system: '' }[m.sender]), m.body);
+  h('span', { class: 'who' }, { user: viewer === 'user' ? 'شما' : 'کاربر', bot: 'دستیار پشتیبانی', staff: m.staff_name ? `کارشناس پشتیبانی — ${m.staff_name}` : 'کارشناس پشتیبانی', system: '' }[m.sender]), m.body);
 
 VIEWS.support = async () => {
   const log = h('div', { class: 'chat-log', 'aria-live': 'polite' });
@@ -821,9 +821,10 @@ VIEWS.support = async () => {
   const paint = (s) => {
     const [label, tone] = SUPPORT_STATUS[s.ticket?.status ?? 'bot'];
     pill.className = `pill ${tone}`; pill.textContent = label;
-    const sig = JSON.stringify([s.ticket?.status, s.messages.length]);
+    const sig = JSON.stringify([s.ticket?.status, s.messages.length, s.rate?.id]);
     if (sig === last) return;
     last = sig;
+    rateBox.replaceChildren(...(s.rate ? [ratingCard(s.rate)] : []));
     log.replaceChildren(
       h('div', { class: 'msg bot' }, h('span', { class: 'who' }, 'دستیار پشتیبانی'),
         'سلام! من دستیار پشتیبانی درمان پلاس هستم و به پرسش‌های شما درباره کار با سامانه پاسخ می‌دهم: ثبت‌نام و ورود، نوبت، پرداخت و لغو، اتاق ویزیت، مدارک و … . هر زمان بخواهید، گفتگو را به کارشناس پشتیبانی ارجاع می‌دهم.'),
@@ -836,6 +837,25 @@ VIEWS.support = async () => {
     quick.replaceChildren(...acts.map((a) => h('button', { class: `btn small ${a.type === 'escalate' ? 'primary' : ''}`, type: 'button', onclick: guard(() => act(a)) }, a.label)));
     log.scrollTop = log.scrollHeight;
   };
+  const rateBox = h('div');
+  const ratingCard = (r) => {
+    let stars = 0;
+    const row = h('div', { class: 'stars', role: 'radiogroup', 'aria-label': 'امتیاز' });
+    const paintStars = () => row.replaceChildren(...[1, 2, 3, 4, 5].map((n) => h('button', {
+      type: 'button', class: `star ${n <= stars ? 'on' : ''}`, 'aria-label': `${fa(n)} از ۵`, onclick: () => { stars = n; paintStars(); },
+    }, '★')));
+    paintStars();
+    const comment = h('input', { type: 'text', maxlength: 500, placeholder: 'نظر شما (اختیاری)' });
+    return h('div', { class: 'card stack rate-card' },
+      h('b', {}, 'از پاسخ کارشناس پشتیبانی چقدر راضی بودید؟'), h('div', { class: 'muted small' }, `موضوع: ${r.topic ?? '—'}`), row, comment,
+      h('div', { class: 'row', style: 'gap:8px' },
+        h('button', { class: 'btn primary small', type: 'button', onclick: guard(async () => {
+          if (!stars) return toast('یک تا پنج ستاره انتخاب کنید', true);
+          paint(await api('POST', `/v1/support/tickets/${r.id}/rate`, { rating: stars, comment: comment.value.trim() || undefined }));
+          toast('سپاس از نظر شما');
+        }) }, 'ثبت امتیاز'),
+        h('button', { class: 'btn small', type: 'button', onclick: guard(async () => paint(await api('POST', `/v1/support/tickets/${r.id}/rate/skip`, {}))) }, 'بعداً نه')));
+  };
   const act = async (a) => {
     if (a.type === 'topic') paint(await api('POST', '/v1/support/messages', { topic: a.id }));
     else if (a.type === 'escalate') paint(await api('POST', '/v1/support/escalate', {}));
@@ -844,10 +864,10 @@ VIEWS.support = async () => {
   const send = once(async () => {
     const text = input.value.trim();
     if (!text) return;
+    paint(await api('POST', '/v1/support/messages', { body: text })); // a rejected message stays in the box
     input.value = '';
-    paint(await api('POST', '/v1/support/messages', { body: text }));
   });
-  $app.append(h('div', { class: 'card chat' },
+  $app.append(rateBox, h('div', { class: 'card chat' },
     h('div', { class: 'chat-head' }, h('span', { class: 'svc-ic tone-teal' }, icon('support', 24)), h('b', { class: 'grow' }, 'پشتیبانی درمان پلاس'), pill),
     log, quick,
     h('form', { class: 'chat-input', onsubmit: send }, input, h('button', { class: 'btn primary' }, 'ارسال'))),
@@ -875,9 +895,60 @@ VIEWS['support-desk'] = async (id) => {
         h('span', { class: 'muted' }, fmt.short(t.updated_at)), h('button', { class: 'btn small primary', onclick: () => route('support-desk', t.id) }, 'باز کردن'))))
         : h('div', { class: 'empty' }, 'گفتگویی در این وضعیت نیست.'));
   };
-  $app.append(tabsBox, list);
+  const mine = h('div');
+  $app.append(mine, tabsBox, list);
   await load();
+  api('GET', '/v1/support/report/me').then((r) => {
+    const m = r.me;
+    mine.replaceChildren(h('div', { class: 'card' }, h('h3', {}, 'عملکرد من در ۳۰ روز گذشته'),
+      m ? h('div', { class: 'grid4' }, statTile('پاسخ‌های ارسالی', fa(m.replies)), statTile('گفتگوها', fa(m.tickets)),
+        statTile('میانگین زمان اولین پاسخ', m.avg_first_response_min == null ? '—' : `${fa(m.avg_first_response_min)} دقیقه`),
+        statTile('رضایت کاربران', m.avg_rating == null ? '—' : `${fa(m.avg_rating)} از ۵ (${fa(m.ratings)} نظر)`))
+        : h('p', { class: 'muted' }, 'هنوز پاسخی ثبت نکرده‌اید.')));
+  }).catch(() => {});
   every(15_000, () => load().catch(() => {}));
+};
+const statTile = (label, value) => h('div', { class: 'stat-tile' }, h('div', { class: 'muted small' }, label), h('div', { class: 'stat' }, value));
+
+// Support team performance: answers, response times, satisfaction, rejected messages.
+VIEWS['support-report'] = async () => {
+  const days = h('select', {}, [[7, '۷ روز گذشته'], [30, '۳۰ روز گذشته'], [90, '۹۰ روز گذشته'], [365, 'یک سال گذشته']].map(([v, l]) => h('option', { value: v, selected: v === 30 }, l)));
+  const out = h('div');
+  const REASON = { insult: 'توهین', obscene: 'واژه نامناسب', spam: 'تبلیغ/لینک', gibberish: 'بی‌معنی' };
+  const CONTEXT = { support: 'پشتیبانی', assistant: 'دستیار هوشمند', staff_reply: 'پاسخ کارشناس', rating: 'نظر کاربر' };
+  const load = guard(async () => {
+    const r = await api('GET', `/v1/support/report?from=${new Date(Date.now() - Number(days.value) * 864e5).toISOString()}`);
+    const T = r.totals;
+    out.replaceChildren(
+      h('div', { class: 'card' }, h('h3', {}, 'خلاصه'), h('div', { class: 'grid4' },
+        statTile('گفتگوهای پشتیبانی', fa(T.conversations)), statTile('حل‌شده توسط دستیار', fa(T.solved_by_assistant)),
+        statTile('ارجاع به کارشناس', fa(T.escalated)), statTile('در انتظار پاسخ (اکنون)', fa(T.waiting_now)),
+        statTile('میانگین رضایت', T.avg_rating == null ? '—' : `${fa(T.avg_rating)} از ۵`), statTile('تعداد نظرها', fa(T.ratings)))),
+      h('div', { class: 'card' }, h('h3', {}, 'عملکرد کارشناسان'),
+        r.agents.length ? h('div', { class: 'table-wrap' }, h('table', {},
+          h('thead', {}, h('tr', {}, ['کارشناس', 'پاسخ‌ها', 'گفتگوها', 'بسته‌شده', 'زمان اولین پاسخ', 'میانگین رضایت', 'راضی / ناراضی'].map((c) => h('th', {}, c)))),
+          h('tbody', {}, r.agents.map((a) => h('tr', {},
+            h('td', {}, a.full_name || h('bdi', {}, a.phone)), h('td', {}, fa(a.replies)), h('td', {}, fa(a.tickets)), h('td', {}, fa(a.closed)),
+            h('td', {}, a.avg_first_response_min == null ? '—' : `${fa(a.avg_first_response_min)} دقیقه`),
+            h('td', {}, a.avg_rating == null ? '—' : `${fa(a.avg_rating)} (${fa(a.ratings)})`), h('td', {}, `${fa(a.satisfied)} / ${fa(a.dissatisfied)}`))))))
+          : h('p', { class: 'muted' }, 'در این بازه پاسخی ثبت نشده است.'),
+        h('p', { class: 'muted small' }, 'برای دیدن جزئیات هر اقدام (خواندن، پاسخ، بستن) به «سابقه ورود و فعالیت» بروید و فعالیت‌ها را با عبارت support فیلتر کنید.')),
+      h('div', { class: 'card' }, h('h3', {}, 'نظرهای کاربران'),
+        r.ratings.length ? h('ul', { class: 'list' }, r.ratings.map((x) => h('li', {},
+          h('span', { class: 'stars-read' }, '★'.repeat(x.rating), h('span', { class: 'muted' }, '★'.repeat(5 - x.rating))), ' ',
+          h('b', {}, x.user_name || 'کاربر'), h('span', { class: 'muted' }, ` · کارشناس: ${x.agent_name ?? '—'} · ${fmt.short(x.rated_at)}`),
+          h('div', { class: 'muted small' }, `موضوع: ${x.topic ?? '—'}`), x.rating_comment ? h('div', {}, `«${x.rating_comment}»`) : null)))
+          : h('p', { class: 'muted' }, 'نظری ثبت نشده است.')),
+      h('div', { class: 'card' }, h('h3', {}, 'پیام‌های ردشده (نامناسب)'),
+        r.moderation.length ? h('div', { class: 'table-wrap' }, h('table', {},
+          h('thead', {}, h('tr', {}, ['زمان', 'کاربر', 'بخش', 'دلیل', 'متن'].map((c) => h('th', {}, c)))),
+          h('tbody', {}, r.moderation.map((m) => h('tr', {}, h('td', {}, fmt.short(m.created_at)), h('td', {}, m.full_name || h('bdi', {}, m.phone)),
+            h('td', {}, CONTEXT[m.context] ?? m.context), h('td', {}, REASON[m.reason] ?? m.reason), h('td', { class: 'muted small' }, m.excerpt))))))
+          : h('p', { class: 'muted' }, 'موردی نیست.')));
+  });
+  days.onchange = load;
+  $app.append(h('div', { class: 'card row' }, h('h2', { class: 'grow' }, 'گزارش عملکرد پشتیبانی'), days), out);
+  await load();
 };
 
 async function supportTicket(id) {
@@ -890,7 +961,8 @@ async function supportTicket(id) {
       h('div', { class: 'card' }, h('div', { class: 'row' },
         h('h2', { class: 'grow' }, t.user.full_name || 'کاربر', ' ', h('bdi', { class: 'muted' }, t.user.phone)),
         h('span', { class: 'pill' }, LABELS.role[t.user.role]), h('span', { class: `pill ${tone}` }, label)),
-      h('p', { class: 'muted' }, `موضوع: ${t.topic ?? '—'} · شروع: ${fmt.short(t.created_at)}`)),
+      h('p', { class: 'muted' }, `موضوع: ${t.topic ?? '—'} · شروع: ${fmt.short(t.created_at)}`),
+      t.rating > 0 ? h('p', {}, h('b', {}, 'رضایت کاربر: '), h('span', { class: 'stars-read' }, '★'.repeat(t.rating), h('span', { class: 'muted' }, '★'.repeat(5 - t.rating))), t.rating_comment ? ` — «${t.rating_comment}»` : '') : null),
       h('div', { class: 'card chat', style: 'height:auto' }, h('div', { class: 'chat-log', style: 'max-height:440px' }, t.messages.map((m) => supportMsg(m, 'staff')))),
       t.status !== 'closed' ? h('div', { class: 'card stack' },
         t.suggestions.length ? h('div', {}, h('label', {}, 'پاسخ‌های آماده (از دانش‌نامه پشتیبانی) — برای درج بزنید:'),
@@ -1555,11 +1627,15 @@ VIEWS['staff-create'] = async () => {
   const specs = (await api('GET', '/v1/specialties')).items;
   const f = { full_name: h('input', { type: 'text' }), phone: h('input', { type: 'tel', dir: 'ltr' }), email: h('input', { type: 'email', dir: 'ltr' }),
     specialty: h('select', {}, specs.map((s) => h('option', { value: s.code }, s.label))), license_no: h('input', { type: 'text', dir: 'ltr' }) };
-  const role = h('select', {}, h('option', { value: 'doctor' }, 'پزشک'), h('option', { value: 'operator' }, 'اپراتور'), h('option', { value: 'admin' }, 'مدیر'));
+  const roles = (await api('GET', '/v1/admin/roles').catch(() => ({ items: [] }))).items;
+  const supportRole = roles.find((r) => r.name === 'کارشناس پشتیبانی');
+  const role = h('select', {}, h('option', { value: 'doctor' }, 'پزشک'), supportRole ? h('option', { value: 'support' }, 'کارشناس پشتیبانی (فقط دستیار پشتیبان)') : null,
+    h('option', { value: 'operator' }, 'اپراتور'), h('option', { value: 'admin' }, 'مدیر'));
   const submit = guard(async (e) => {
     e.preventDefault();
     const base = { full_name: f.full_name.value, phone: f.phone.value, email: f.email.value || null };
     if (role.value === 'doctor') await api('POST', '/v1/admin/doctors', { ...base, specialty: f.specialty.value, license_no: f.license_no.value });
+    else if (role.value === 'support') await api('POST', '/v1/admin/staff', { ...base, role: 'operator', staff_role_id: supportRole.id });
     else await api('POST', '/v1/admin/staff', { ...base, role: role.value });
     toast('کاربر ایجاد شد'); e.target.reset();
   });

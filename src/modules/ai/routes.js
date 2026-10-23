@@ -30,6 +30,7 @@ export function register(router, { db, platform, limiter, domain }) {
     const g = checkInput(text);
     if (!g.ok) throw badRequest(g.message, `input_${g.code}`);
     if (g.injection) platform.audit(ctx, 'ai.guardrail.injection_attempt', `ai_session:${sessionId}`);
+    if (type === 'text') domain.moderate(ctx, text, 'assistant');
 
     const owner = db.get('SELECT user_id FROM chat_sessions WHERE id = ?', sessionId);
     if (owner && owner.user_id !== ctx.user.sub) throw forbidden('این گفتگو متعلق به شما نیست');

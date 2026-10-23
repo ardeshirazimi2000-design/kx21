@@ -15,6 +15,7 @@ export const PERMISSIONS = {
   'drug_catalog.manage': 'مدیریت فهرست رسمی داروها',
   'escalations.handle': 'رسیدگی به ارجاع‌ها و اورژانس‌ها',
   'support.handle': 'پاسخگویی در دستیار پشتیبان (پشتیبانی و شکایات)',
+  'support.report': 'گزارش عملکرد پشتیبانی و رضایت کاربران',
   'stats.view': 'مشاهده آمار',
   'audit.view': 'لاگ ممیزی',
   'activity.view': 'سابقه ورود و فعالیت کاربران',
