@@ -7,7 +7,8 @@ import { uuid, nowIso, parseJson } from '../lib/db.js';
 import { requireUser } from './auth.js';
 import { buildIndex } from './ai/kb.js';
 import { SUPPORT_KB } from '../lib/support-kb.js';
-import { getVisitSettings } from '../lib/visit-settings.js';
+import { getVisitSettings, getSupportSettings } from '../lib/visit-settings.js';
+import { toFaDigits } from '../lib/fa.js';
 
 const ANSWER_MIN = 0.45; // retrieval confidence needed to answer instead of asking again
 // Asking for a person, complaints and security reports go straight to the team.
@@ -199,20 +200,41 @@ export function register(router, { db, platform, domain, limiter, config }) {
     return t;
   };
 
+  // A claimed conversation is answered by the agent handling it; a supervisor (support.report) can
+  // step in. Unclaimed conversations are open to every agent.
+  const isSupervisor = (ctx) => domain.access.can(ctx, 'support.report');
+  const canAct = (ctx, t) => !t.assigned_to || t.assigned_to === ctx.user.sub || isSupervisor(ctx);
+  const requireHandler = (ctx, t) => {
+    if (canAct(ctx, t)) return;
+    const who = db.get('SELECT full_name FROM users WHERE id = ?', t.assigned_to)?.full_name ?? 'همکار دیگر';
+    throw conflict(`این گفتگو در حال رسیدگی توسط ${who} است`, 'claimed_by_other');
+  };
+  const note = (t, staffId, body, kind = 'note') => db.run('INSERT INTO support_notes (id, ticket_id, staff_id, kind, body, created_at) VALUES (?,?,?,?,?,?)',
+    uuid(), t.id, staffId, kind, body, nowIso());
+  const nameOf = (id) => db.get('SELECT full_name, phone FROM users WHERE id = ?', id);
+
   router.get('/v1/support/tickets', async (ctx) => {
     requireAgent(ctx);
-    const status = ['waiting', 'answered', 'closed', 'bot'].includes(ctx.query.status) ? ctx.query.status : 'waiting';
+    // status=mine: the open conversations this agent is handling.
+    const mine = ctx.query.status === 'mine';
+    const status = mine ? null : ['waiting', 'answered', 'closed', 'bot'].includes(ctx.query.status) ? ctx.query.status : 'waiting';
     const rows = db.all(
-      `SELECT t.*, u.full_name, u.phone, u.role,
+      `SELECT t.*, u.full_name, u.phone, u.role, a.full_name AS assignee_name,
               (SELECT body FROM support_messages m WHERE m.ticket_id = t.id ORDER BY m.created_at DESC, m.rowid DESC LIMIT 1) AS last_body
-       FROM support_tickets t JOIN users u ON u.id = t.user_id
-       WHERE t.tenant_id = ? AND t.status = ? ORDER BY t.updated_at ${status === 'waiting' ? 'ASC' : 'DESC'} LIMIT 100`, ctx.tenantId, status,
+       FROM support_tickets t JOIN users u ON u.id = t.user_id LEFT JOIN users a ON a.id = t.assigned_to
+       WHERE t.tenant_id = ? AND ${mine ? "t.assigned_to = ? AND t.status IN ('waiting','answered')" : 't.status = ?'}
+       ORDER BY ${mine ? "CASE t.status WHEN 'waiting' THEN 0 ELSE 1 END," : ''} t.updated_at ${status === 'waiting' || mine ? 'ASC' : 'DESC'} LIMIT 100`,
+      ctx.tenantId, mine ? ctx.user.sub : status,
     );
     const counts = Object.fromEntries(db.all(`SELECT status, COUNT(*) AS n FROM support_tickets WHERE tenant_id = ? GROUP BY status`, ctx.tenantId).map((r) => [r.status, r.n]));
+    counts.mine = db.get(`SELECT COUNT(*) AS n FROM support_tickets WHERE tenant_id = ? AND assigned_to = ? AND status IN ('waiting','answered')`, ctx.tenantId, ctx.user.sub).n;
     return {
       body: {
         counts,
-        items: rows.map((r) => ({ ...ticketView(r), user: { full_name: r.full_name, phone: r.phone, role: r.role }, last_body: r.last_body?.slice(0, 160) ?? null })),
+        items: rows.map((r) => ({
+          ...ticketView(r), user: { full_name: r.full_name, phone: r.phone, role: r.role }, last_body: r.last_body?.slice(0, 160) ?? null,
+          assignee: r.assigned_to ? { id: r.assigned_to, full_name: r.assignee_name, me: r.assigned_to === ctx.user.sub } : null,
+        })),
       },
     };
   });
@@ -226,7 +248,20 @@ export function register(router, { db, platform, domain, limiter, config }) {
     // Ready-made answers for the agent, from the user's latest question.
     const lastQ = [...messages].reverse().find((m) => m.sender === 'user');
     const suggestions = lastQ ? search(u.role, lastQ.body).map((h) => ({ id: h.id, title: h.title, text: answerOf(t.tenant_id, h.id) })) : [];
-    return { body: { ...ticketView(t), user: u, messages, suggestions } };
+    const assignee = t.assigned_to ? db.get('SELECT id, full_name FROM users WHERE id = ?', t.assigned_to) : null;
+    return {
+      body: {
+        ...ticketView(t), user: u, messages, suggestions,
+        assignee: assignee && { ...assignee, me: assignee.id === ctx.user.sub }, claimed_at: t.claimed_at,
+        can_reply: canAct(ctx, t), supervisor: isSupervisor(ctx),
+        notes: db.all('SELECT n.kind, n.body, n.created_at, u2.full_name AS staff_name FROM support_notes n JOIN users u2 ON u2.id = n.staff_id WHERE n.ticket_id = ? ORDER BY n.created_at, n.rowid', t.id),
+        // Colleagues to hand over to, with how many open conversations each is handling.
+        agents: agents(t.tenant_id).filter((a) => a.id !== ctx.user.sub).map((a) => ({
+          id: a.id, full_name: db.get('SELECT full_name FROM users WHERE id = ?', a.id)?.full_name ?? a.phone,
+          open: db.get(`SELECT COUNT(*) AS n FROM support_tickets WHERE assigned_to = ? AND status IN ('waiting','answered')`, a.id).n,
+        })),
+      },
+    };
   });
 
   router.post('/v1/support/tickets/:id/reply', async (ctx) => {
@@ -235,9 +270,12 @@ export function register(router, { db, platform, domain, limiter, config }) {
     const text = String(ctx.body.body ?? '').trim();
     if (!text || text.length > 4000) throw badRequest('متن پاسخ را بنویسید');
     if (t.status === 'closed') throw conflict('این گفتگو بسته شده است', 'closed');
+    requireHandler(ctx, t);
     domain.moderate(ctx, text, 'staff_reply', { allowLinks: true });
     add(t.id, 'staff', text, { staffId: ctx.user.sub });
-    db.run(`UPDATE support_tickets SET status = 'answered', assigned_to = ?, updated_at = ? WHERE id = ?`, ctx.user.sub, nowIso(), t.id);
+    // Answering an unclaimed conversation takes it.
+    // (a supervisor stepping in leaves the conversation with the agent handling it).
+    db.run(`UPDATE support_tickets SET status = 'answered', assigned_to = COALESCE(assigned_to, ?), claimed_at = COALESCE(claimed_at, ?), updated_at = ? WHERE id = ?`, ctx.user.sub, nowIso(), nowIso(), t.id);
     platform.audit(ctx, 'support.reply', `support:${t.id}`);
     const u = db.get('SELECT phone FROM users WHERE id = ?', t.user_id);
     platform.notify(ctx, { userId: t.user_id, channel: 'push', target: u?.phone, body: `پاسخ پشتیبانی درمان پلاس: ${text}`.slice(0, 300) });
@@ -248,6 +286,7 @@ export function register(router, { db, platform, domain, limiter, config }) {
     requireAgent(ctx);
     const t = loadTicket(ctx);
     if (t.status !== 'closed') {
+      requireHandler(ctx, t);
       add(t.id, 'system', 'گفتگو توسط پشتیبانی بسته شد. اگر پرسش دیگری دارید، پیام جدید بنویسید.');
       db.run(`UPDATE support_tickets SET status = 'closed', closed_at = ?, closed_by = ?, updated_at = ? WHERE id = ?`, nowIso(), ctx.user.sub, nowIso(), t.id);
       platform.audit(ctx, 'support.close', `support:${t.id}`, { by: 'staff' });
@@ -258,6 +297,88 @@ export function register(router, { db, platform, domain, limiter, config }) {
     }
     return { body: { ok: true } };
   });
+
+  // «رسیدگی می‌کنم»: the agent takes the conversation; colleagues see who is on it.
+  router.post('/v1/support/tickets/:id/claim', async (ctx) => {
+    requireAgent(ctx);
+    const t = loadTicket(ctx);
+    if (t.status === 'closed') throw conflict('این گفتگو بسته شده است', 'closed');
+    if (t.assigned_to === ctx.user.sub) return { body: { ok: true } };
+    requireHandler(ctx, t);
+    db.run('UPDATE support_tickets SET assigned_to = ?, claimed_at = ? WHERE id = ?', ctx.user.sub, nowIso(), t.id);
+    note(t, ctx.user.sub, t.assigned_to ? `رسیدگی را از ${nameOf(t.assigned_to)?.full_name ?? 'همکار'} برعهده گرفت` : 'رسیدگی را برعهده گرفت', 'claim');
+    platform.audit(ctx, 'support.claim', `support:${t.id}`, { from: t.assigned_to ?? null });
+    return { body: { ok: true } };
+  });
+
+  router.post('/v1/support/tickets/:id/release', async (ctx) => {
+    requireAgent(ctx);
+    const t = loadTicket(ctx);
+    if (!t.assigned_to) return { body: { ok: true } };
+    requireHandler(ctx, t);
+    db.run('UPDATE support_tickets SET assigned_to = NULL, claimed_at = NULL WHERE id = ?', t.id);
+    note(t, ctx.user.sub, 'گفتگو را به صف عمومی برگرداند', 'release');
+    platform.audit(ctx, 'support.release', `support:${t.id}`);
+    return { body: { ok: true } };
+  });
+
+  // Hand over to a colleague (or a supervisor), with a note for them.
+  router.post('/v1/support/tickets/:id/transfer', async (ctx) => {
+    requireAgent(ctx);
+    const t = loadTicket(ctx);
+    if (t.status === 'closed') throw conflict('این گفتگو بسته شده است', 'closed');
+    requireHandler(ctx, t);
+    const to = requireUuid(ctx.body.to_user_id, 'to_user_id');
+    const target = agents(t.tenant_id).find((a) => a.id === to);
+    if (!target) throw badRequest('این کاربر دسترسی پاسخگویی پشتیبانی ندارد', 'not_an_agent');
+    const why = String(ctx.body.note ?? '').trim().slice(0, 1000);
+    if (why) domain.moderate(ctx, why, 'staff_reply', { allowLinks: true });
+    db.run('UPDATE support_tickets SET assigned_to = ?, claimed_at = ? WHERE id = ?', to, nowIso(), t.id);
+    note(t, ctx.user.sub, `واگذار شد به ${nameOf(to)?.full_name ?? 'همکار'}${why ? ` — ${why}` : ''}`, 'transfer');
+    platform.audit(ctx, 'support.transfer', `support:${t.id}`, { to });
+    platform.notify(ctx, { userId: to, channel: 'push', target: target.phone, body: `گفتگوی پشتیبانی «${t.topic ?? ''}» به شما واگذار شد${why ? `: ${why}` : ''}`.slice(0, 250) });
+    return { body: { ok: true } };
+  });
+
+  // Internal note: only agents see it.
+  router.post('/v1/support/tickets/:id/notes', async (ctx) => {
+    requireAgent(ctx);
+    const t = loadTicket(ctx);
+    const text = String(ctx.body.body ?? '').trim();
+    if (!text || text.length > 2000) throw badRequest('متن یادداشت را بنویسید');
+    domain.moderate(ctx, text, 'staff_reply', { allowLinks: true });
+    note(t, ctx.user.sub, text);
+    platform.audit(ctx, 'support.note', `support:${t.id}`);
+    return { status: 201, body: { ok: true } };
+  });
+
+  // Delay alert: a conversation waiting longer than the set time is reported to the supervisors
+  // (and to the agent handling it), then again every same period while it keeps waiting.
+  function slaSweep(now = Date.now()) {
+    for (const tenantId of db.all(`SELECT DISTINCT tenant_id FROM support_tickets WHERE status = 'waiting'`).map((r) => r.tenant_id)) {
+      const minutes = getSupportSettings(db, tenantId).alert_minutes;
+      if (!minutes) continue;
+      const cutoff = new Date(now - minutes * 60000).toISOString();
+      const late = db.all(
+        `SELECT t.*, u.full_name FROM support_tickets t JOIN users u ON u.id = t.user_id WHERE t.tenant_id = ? AND t.status = 'waiting' AND t.updated_at < ?
+           AND (t.last_alert_at IS NULL OR t.last_alert_at < ?)`, tenantId, cutoff, cutoff,
+      );
+      if (!late.length) continue;
+      const sup = db.all(`SELECT id, phone FROM users WHERE tenant_id = ? AND role IN ('admin','operator') AND deleted_at IS NULL AND disabled_at IS NULL`, tenantId)
+        .filter((u) => domain.access.permissionsOf(u.id).perms.includes('support.report'));
+      const ctx = { tenantId, user: null };
+      for (const t of late) {
+        const waited = Math.round((now - Date.parse(t.updated_at)) / 60000);
+        const body = `⏰ گفتگوی پشتیبانی ${t.full_name ?? ''} («${t.topic ?? ''}») ${toFaDigits(waited)} دقیقه است بی‌پاسخ مانده${t.assigned_to ? ` (مسئول: ${nameOf(t.assigned_to)?.full_name ?? '—'})` : ' و کسی رسیدگی را برعهده نگرفته'}.`.slice(0, 250);
+        const to = new Map(sup.map((u) => [u.id, u]));
+        if (t.assigned_to) { const a = nameOf(t.assigned_to); to.set(t.assigned_to, { id: t.assigned_to, phone: a?.phone }); }
+        for (const u of to.values()) platform.notify(ctx, { userId: u.id, channel: 'push', target: u.phone, body });
+        db.run('UPDATE support_tickets SET last_alert_at = ? WHERE id = ?', new Date(now).toISOString(), t.id);
+      }
+    }
+  }
+  domain.support = { slaSweep };
+  if (!config.disableSweeper) setInterval(() => { try { slaSweep(); } catch (e) { console.error('[support] sweep', e.message); } }, 60_000).unref();
 
   // The user rates the support team's answers (1–5 and an optional comment), once.
   router.post('/v1/support/tickets/:id/rate', async (ctx) => {

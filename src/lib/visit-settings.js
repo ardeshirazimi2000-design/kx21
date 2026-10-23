@@ -38,3 +38,22 @@ export function setVisitSettings(db, ctx, input) {
   );
   return value;
 }
+
+// Support desk: after how many minutes without an answer a waiting conversation is reported to the
+// support supervisors (0 = never).
+export const SUPPORT_DEFAULTS = { alert_minutes: 30 };
+export function getSupportSettings(db, tenantId) {
+  const v = parseJson(db.get(`SELECT value FROM settings WHERE tenant_id = ? AND key = 'support'`, tenantId)?.value, {});
+  return { alert_minutes: Number.isInteger(v.alert_minutes) && v.alert_minutes >= 0 && v.alert_minutes <= 1440 ? v.alert_minutes : SUPPORT_DEFAULTS.alert_minutes };
+}
+export function setSupportSettings(db, ctx, input) {
+  const m = Number(input.alert_minutes);
+  if (!Number.isInteger(m) || m < 0 || m > 1440) throw badRequest('زمان هشدار تأخیر پشتیبانی باید بین ۰ تا ۱۴۴۰ دقیقه باشد');
+  const value = { alert_minutes: m };
+  db.run(
+    `INSERT INTO settings (tenant_id, key, value, updated_at, updated_by) VALUES (?, 'support', ?, ?, ?)
+     ON CONFLICT (tenant_id, key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at, updated_by = excluded.updated_by`,
+    ctx.tenantId, JSON.stringify(value), nowIso(), ctx.user.sub,
+  );
+  return value;
+}

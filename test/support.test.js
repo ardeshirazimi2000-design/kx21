@@ -6,7 +6,8 @@ import { startApp, randomNationalId } from './helpers.js';
 import { DEMO_ACCOUNTS } from '../src/seed.js';
 
 let t;
-before(async () => { t = await startApp({ disableSweeper: true }); });
+let admin;
+before(async () => { t = await startApp({ disableSweeper: true }); admin = await t.login(DEMO_ACCOUNTS.admin.phone); });
 after(() => t.close());
 
 test('support assistant answers, escalates to the support desk; agents reply and close', async () => {
@@ -67,7 +68,6 @@ test('support assistant answers, escalates to the support desk; agents reply and
 });
 
 test('support agents: ready-made limited role, ratings after closing, performance report', async () => {
-  const admin = await t.login(DEMO_ACCOUNTS.admin.phone);
   const roles = (await t.call('GET', '/v1/admin/roles', { token: admin })).body.items;
   const role = roles.find((r) => r.name === 'کارشناس پشتیبانی');
   assert.deepEqual(role.permissions, ['support.handle']);
@@ -130,7 +130,6 @@ test('inappropriate messages are rejected and logged; repeated abuse pauses send
   assert.equal(paused.status, 429);
   assert.equal(paused.body.code, 'moderation_blocked');
   // Staff answers are checked as well; the report lists rejections.
-  const admin = await t.login(DEMO_ACCOUNTS.admin.phone);
   const tk = (await t.call('GET', '/v1/support/tickets?status=bot', { token: admin })).body.items.find((x) => x.user.phone === p.phone);
   assert.equal((await t.call('POST', `/v1/support/tickets/${tk.id}/reply`, { token: admin, body: { body: 'خفه شو' } })).body.code, 'inappropriate_content');
   const rep = await t.call('GET', '/v1/support/report', { token: admin });
@@ -138,7 +137,6 @@ test('inappropriate messages are rejected and logged; repeated abuse pauses send
 });
 
 test('a patient account becomes a support agent on the same number; the old patient token stops working', async () => {
-  const admin = await t.login(DEMO_ACCOUNTS.admin.phone);
   const role = (await t.call('GET', '/v1/admin/roles', { token: admin })).body.items.find((r) => r.name === 'کارشناس پشتیبانی');
   const p = await t.newPatient({ nationalId: randomNationalId() });
   const u = (await t.call('GET', `/v1/admin/users?q=${p.phone}`, { token: admin })).body.items[0];
@@ -159,4 +157,52 @@ test('a patient account becomes a support agent on the same number; the old pati
   const agent = await t.login(p.phone);
   assert.equal((await t.call('GET', '/v1/support/tickets', { token: agent })).status, 200);
   assert.equal((await t.call('GET', '/v1/escalations', { token: agent })).status, 403);
+});
+
+test('several agents: claim, colleagues blocked, hand-over with note, internal notes, my conversations, delay alert', async () => {
+  const role = (await t.call('GET', '/v1/admin/roles', { token: admin })).body.items.find((r) => r.name === 'کارشناس پشتیبانی');
+  const mk = async (phone, name) => {
+    await t.call('POST', '/v1/admin/staff', { token: admin, body: { phone, full_name: name, role: 'operator', staff_role_id: role.id } });
+    return t.login(phone);
+  };
+  const a1 = await mk('09125558801', 'کارشناس یک');
+  const a2 = await mk('09125558802', 'کارشناس دو');
+  const p = await t.newPatient({ nationalId: randomNationalId() });
+  await t.call('POST', '/v1/support/messages', { token: p.token, body: { body: 'میخوام با کارشناس صحبت کنم' } });
+  const id = (await t.call('GET', '/v1/support/tickets?status=waiting', { token: a1 })).body.items.find((x) => x.user.phone === p.phone).id;
+
+  assert.equal((await t.call('POST', `/v1/support/tickets/${id}/claim`, { token: a1, body: {} })).status, 200);
+  const seen = (await t.call('GET', '/v1/support/tickets?status=waiting', { token: a2 })).body.items.find((x) => x.id === id);
+  assert.equal(seen.assignee.full_name, 'کارشناس یک');
+  const blocked = await t.call('POST', `/v1/support/tickets/${id}/reply`, { token: a2, body: { body: 'سلام' } });
+  assert.equal(blocked.body.code, 'claimed_by_other');
+  assert.match(blocked.body.message, /کارشناس یک/);
+  assert.equal((await t.call('POST', `/v1/support/tickets/${id}/claim`, { token: a2, body: {} })).body.code, 'claimed_by_other');
+  assert.equal((await t.call('GET', `/v1/support/tickets/${id}`, { token: a2 })).body.can_reply, false);
+  assert.equal((await t.call('GET', '/v1/support/tickets?status=mine', { token: a1 })).body.items[0].id, id);
+
+  // Internal note (the user never sees it) and hand-over.
+  await t.call('POST', `/v1/support/tickets/${id}/notes`, { token: a1, body: { body: 'احتمالاً مشکل پرداخت است' } });
+  const d1 = (await t.call('GET', `/v1/support/tickets/${id}`, { token: a1 })).body;
+  const to = d1.agents.find((x) => x.full_name === 'کارشناس دو');
+  assert.ok(to);
+  await t.call('POST', `/v1/support/tickets/${id}/transfer`, { token: a1, body: { to_user_id: to.id, note: 'لطفاً پرداخت را بررسی کنید' } });
+  const d2 = (await t.call('GET', `/v1/support/tickets/${id}`, { token: a2 })).body;
+  assert.equal(d2.assignee.me, true);
+  assert.deepEqual(d2.notes.map((n) => n.kind), ['claim', 'note', 'transfer']);
+  assert.ok((await t.call('GET', '/v1/notifications', { token: a2 })).body.items.some((n) => n.body.includes('به شما واگذار شد')));
+  const userSide = (await t.call('GET', '/v1/support', { token: p.token })).body;
+  assert.ok(!JSON.stringify(userSide).includes('احتمالاً مشکل پرداخت'));
+  assert.equal((await t.call('POST', `/v1/support/tickets/${id}/reply`, { token: a1, body: { body: 'سلام' } })).body.code, 'claimed_by_other');
+  // A supervisor (admin: support.report) can always step in.
+  assert.equal((await t.call('POST', `/v1/support/tickets/${id}/reply`, { token: admin, body: { body: 'سلام، در حال بررسی هستیم.' } })).status, 201);
+
+  // Waiting too long → supervisors and the agent on it are alerted, once per period.
+  await t.call('POST', '/v1/support/messages', { token: p.token, body: { body: 'هنوز درست نشده' } });
+  assert.equal((await t.call('PUT', '/v1/admin/settings', { token: admin, body: { support: { alert_minutes: 15 } } })).body.support.alert_minutes, 15);
+  t.app.domain.support.slaSweep(Date.now() + 16 * 60000);
+  t.app.domain.support.slaSweep(Date.now() + 17 * 60000); // not again within the period
+  const alerts = (await t.call('GET', '/v1/notifications', { token: admin })).body.items.filter((n) => n.body.startsWith('⏰') && n.body.includes('کارشناس دو'));
+  assert.equal(alerts.length, 1);
+  assert.ok((await t.call('GET', '/v1/notifications', { token: a2 })).body.items.some((n) => n.body.startsWith('⏰')));
 });

@@ -921,12 +921,14 @@ VIEWS['support-desk'] = async (id) => {
   const load = async () => {
     const r = await api('GET', `/v1/support/tickets?status=${status}`);
     const c = r.counts ?? {};
-    tabsBox.replaceChildren(...[['waiting', 'در انتظار پاسخ'], ['answered', 'پاسخ داده‌شده'], ['bot', 'در حال گفتگو با دستیار'], ['closed', 'بسته‌شده']]
+    tabsBox.replaceChildren(...[['mine', 'گفتگوهای من'], ['waiting', 'در انتظار پاسخ'], ['answered', 'پاسخ داده‌شده'], ['bot', 'در حال گفتگو با دستیار'], ['closed', 'بسته‌شده']]
       .map(([k, label]) => h('button', { class: `btn small ${status === k ? 'primary' : ''}`, onclick: () => { status = k; load(); } }, `${label} (${fa(c[k] ?? 0)})`)));
     list.replaceChildren(h('h2', {}, 'دستیار پشتیبان — گفتگوهای پشتیبانی'),
       r.items.length ? h('ul', { class: 'list' }, r.items.map((t) => h('li', { class: 'row' },
         h('span', { class: 'grow' }, h('b', {}, t.user.full_name || h('bdi', {}, t.user.phone)), ' ', h('span', { class: 'pill' }, LABELS.role[t.user.role]), h('br'),
-          h('span', { class: 'muted' }, t.topic ?? ''), t.last_body ? h('div', { class: 'muted small' }, t.last_body) : null),
+          h('span', { class: 'muted' }, t.topic ?? ''), t.last_body ? h('div', { class: 'muted small' }, t.last_body) : null,
+          t.status !== 'closed' ? h('div', {}, h('span', { class: `pill ${t.assignee ? (t.assignee.me ? 'ok' : 'warn') : ''}` },
+            t.assignee ? (t.assignee.me ? 'رسیدگی: شما' : `رسیدگی: ${t.assignee.full_name}`) : 'بدون مسئول')) : null),
         h('span', { class: 'muted' }, fmt.short(t.updated_at)), h('button', { class: 'btn small primary', onclick: () => route('support-desk', t.id) }, 'باز کردن'))))
         : h('div', { class: 'empty' }, 'گفتگویی در این وضعیت نیست.'));
   };
@@ -991,30 +993,59 @@ VIEWS['support-report'] = async () => {
 async function supportTicket(id) {
   const box = h('div');
   const reply = h('textarea', { rows: 4, maxlength: 4000, placeholder: 'پاسخ به کاربر…' });
+  const noteText = h('textarea', { rows: 2, maxlength: 2000, placeholder: 'یادداشت برای همکاران (کاربر نمی‌بیند)…' });
+  const post = (path, body = {}) => api('POST', `/v1/support/tickets/${id}/${path}`, body);
   const load = async () => {
     const t = await api('GET', `/v1/support/tickets/${id}`);
     const [label, tone] = SUPPORT_STATUS[t.status];
+    const open = t.status !== 'closed';
+    const mineNow = t.assignee?.me;
+    // Who is handling it, and the actions on that.
+    const handling = h('div', { class: `banner ${t.assignee ? (mineNow ? 'info' : 'warn') : ''} row`, style: 'flex-wrap:wrap;gap:8px' },
+      h('span', { class: 'grow' }, t.assignee
+        ? (mineNow ? '✋ رسیدگی به این گفتگو با شماست.' : `🔒 در حال رسیدگی توسط ${t.assignee.full_name}${t.supervisor ? ' — به‌عنوان سرپرست می‌توانید پاسخ دهید یا آن را برعهده بگیرید.' : ''}`)
+        : 'این گفتگو هنوز مسئول ندارد.'),
+      open && !mineNow && (!t.assignee || t.supervisor) ? h('button', { class: 'btn primary small', onclick: guard(async () => { await post('claim'); toast('رسیدگی را برعهده گرفتید'); load(); }) }, 'رسیدگی می‌کنم') : null,
+      open && t.assignee && (mineNow || t.supervisor) ? h('button', { class: 'btn small', onclick: guard(async () => { await post('release'); toast('به صف عمومی برگشت'); load(); }) }, 'برگرداندن به صف') : null);
+    const transferTo = h('select', {}, h('option', { value: '' }, '— انتخاب همکار —'), t.agents.map((a) => h('option', { value: a.id }, `${a.full_name} (${fa(a.open)} گفتگوی باز)`)));
+    const transferNote = h('input', { type: 'text', maxlength: 1000, placeholder: 'توضیح برای همکار (اختیاری)' });
     box.replaceChildren(
-      h('div', { class: 'card' }, h('div', { class: 'row' },
+      h('div', { class: 'card stack' }, h('div', { class: 'row' },
         h('h2', { class: 'grow' }, t.user.full_name || 'کاربر', ' ', h('bdi', { class: 'muted' }, t.user.phone)),
         h('span', { class: 'pill' }, LABELS.role[t.user.role]), h('span', { class: `pill ${tone}` }, label)),
       h('p', { class: 'muted' }, `موضوع: ${t.topic ?? '—'} · شروع: ${fmt.short(t.created_at)}`),
-      t.rating > 0 ? h('p', {}, h('b', {}, 'رضایت کاربر: '), h('span', { class: 'stars-read' }, '★'.repeat(t.rating), h('span', { class: 'muted' }, '★'.repeat(5 - t.rating))), t.rating_comment ? ` — «${t.rating_comment}»` : '') : null),
+      t.rating > 0 ? h('p', {}, h('b', {}, 'رضایت کاربر: '), h('span', { class: 'stars-read' }, '★'.repeat(t.rating), h('span', { class: 'muted' }, '★'.repeat(5 - t.rating))), t.rating_comment ? ` — «${t.rating_comment}»` : '') : null,
+      handling),
       h('div', { class: 'card chat', style: 'height:auto' }, h('div', { class: 'chat-log', style: 'max-height:440px' }, t.messages.map((m) => supportMsg(m, 'staff')))),
-      t.status !== 'closed' ? h('div', { class: 'card stack' },
+      open && t.can_reply ? h('div', { class: 'card stack' },
         t.suggestions.length ? h('div', {}, h('label', {}, 'پاسخ‌های آماده (از دانش‌نامه پشتیبانی) — برای درج بزنید:'),
           h('div', { class: 'row', style: 'flex-wrap:wrap;gap:6px' }, t.suggestions.map((sg) => h('button', { class: 'btn small', type: 'button', onclick: () => { reply.value = sg.text; reply.focus(); } }, sg.title)))) : null,
         h('label', {}, 'پاسخ کارشناس'), reply,
         h('div', { class: 'row', style: 'gap:8px' },
           h('button', { class: 'btn primary', onclick: guard(async () => {
             if (!reply.value.trim()) return toast('متن پاسخ را بنویسید', true);
-            await api('POST', `/v1/support/tickets/${id}/reply`, { body: reply.value.trim() });
+            await post('reply', { body: reply.value.trim() });
             reply.value = ''; toast('پاسخ ارسال شد و به کاربر اعلان شد'); load();
           }) }, 'ارسال پاسخ'),
           h('button', { class: 'btn', onclick: guard(async () => {
             if (!confirm('گفتگو بسته شود؟')) return;
-            await api('POST', `/v1/support/tickets/${id}/close`, {}); toast('گفتگو بسته شد'); route('support-desk');
-          }) }, 'بستن گفتگو'))) : null);
+            await post('close'); toast('گفتگو بسته شد'); route('support-desk');
+          }) }, 'بستن گفتگو'))) : null,
+      open && t.can_reply && t.agents.length ? h('div', { class: 'card stack' }, h('h3', {}, 'واگذاری به همکار'),
+        h('div', { class: 'grid2' }, transferTo, transferNote),
+        h('button', { class: 'btn small', onclick: guard(async () => {
+          if (!transferTo.value) return toast('همکار را انتخاب کنید', true);
+          await post('transfer', { to_user_id: transferTo.value, note: transferNote.value.trim() || undefined });
+          toast('گفتگو واگذار شد و به همکار اعلان شد'); route('support-desk');
+        }) }, 'واگذاری')) : null,
+      h('div', { class: 'card stack' }, h('h3', {}, '🗒 یادداشت‌های داخلی'), h('p', { class: 'muted small' }, 'فقط کارشناس‌های پشتیبانی این بخش را می‌بینند.'),
+        t.notes.length ? h('ul', { class: 'list' }, t.notes.map((n) => h('li', {}, h('b', {}, n.staff_name ?? '—'), h('span', { class: 'muted small' }, ` · ${fmt.short(n.created_at)}`), h('div', {}, n.body))))
+          : h('p', { class: 'muted' }, 'یادداشتی نیست.'),
+        noteText,
+        h('button', { class: 'btn small', onclick: guard(async () => {
+          if (!noteText.value.trim()) return;
+          await post('notes', { body: noteText.value.trim() }); noteText.value = ''; load();
+        }) }, 'افزودن یادداشت')));
     const lg = box.querySelector('.chat-log'); if (lg) lg.scrollTop = lg.scrollHeight;
   };
   $app.append(h('button', { class: 'btn small', style: 'margin-bottom:10px', onclick: () => route('support-desk') }, '→ بازگشت'), box);

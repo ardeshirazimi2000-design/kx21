@@ -374,6 +374,8 @@ export function installV2(x) {
     };
     durBoxes.forEach((b) => { b.onchange = syncDefault; });
     const joinEarly = h('select', {}, [0, 5, 10, 15, 20, 30].map((m) => h('option', { value: m, selected: m === (s.visit.join_early_min ?? 10) }, m ? `${fa(m)} دقیقه قبل` : 'سر ساعت')));
+    const supportAlert = h('select', {}, [...new Set([0, 10, 15, 30, 60, 120, s.support?.alert_minutes ?? 30])].sort((a, b) => a - b)
+      .map((n) => h('option', { value: n, selected: n === (s.support?.alert_minutes ?? 30) }, n ? `پس از ${fa(n)} دقیقه بی‌پاسخ ماندن` : 'هشدار نده')));
     const refundHours = h('select', {}, [...new Set([0, 2, 6, 12, 24, 48, 72, s.visit.cancel_refund_hours ?? 24])].sort((a, b) => a - b)
       .map((n) => h('option', { value: n, selected: n === (s.visit.cancel_refund_hours ?? 24) }, n ? `تا ${fa(n)} ساعت قبل از ویزیت` : 'تا زمان شروع ویزیت')));
     syncDefault();
@@ -384,12 +386,14 @@ export function installV2(x) {
       h('div', {}, h('label', {}, 'مدت پیش‌فرض'), durDefault),
       h('div', {}, h('label', {}, 'باز شدن اتاق ویزیت (نسبت به ساعت نوبت)'), joinEarly,
         h('p', { class: 'muted small' }, 'بیمار و پزشک از این زمان تا ۳۰ دقیقه بعد از پایان نوبت می‌توانند وارد اتاق ویزیت شوند. در همین زمان برای هر دو اعلان «اتاق ویزیت باز شد» ارسال می‌شود؛ یک ساعت قبل هم یادآوری ارسال می‌شود.')),
+      h('div', {}, h('label', {}, 'هشدار تأخیر پشتیبانی'), supportAlert,
+        h('p', { class: 'muted small' }, 'گفتگوی پشتیبانی که این مدت بی‌پاسخ بماند، به سرپرستان پشتیبانی (دارای دسترسی «گزارش عملکرد پشتیبانی») و کارشناس مسئول اعلان می‌شود.')),
       h('div', {}, h('label', {}, 'مهلت لغو یا جابه‌جایی با بازگشت وجه'), refundHours,
         h('p', { class: 'muted small' }, 'اگر بیمار تا این زمان نوبت پرداخت‌شده را لغو کند، هزینه بازگردانده می‌شود؛ بعد از آن بازگردانده نمی‌شود. اگر پزشک یا کلینیک نوبت را لغو کند، بیمار بین انتخاب زمان دیگر (بدون پرداخت مجدد) و بازگشت کامل وجه انتخاب می‌کند.')),
       h('button', { class: 'btn primary', onclick: guard(async () => {
         const durations = durBoxes.filter((b) => b.checked).map((b) => Number(b.value));
         if (!durations.length) { toast('حداقل یک مدت را انتخاب کنید'); return; }
-        await api('PUT', '/v1/admin/settings', { visit: { durations, default: Number(durDefault.value), join_early_min: Number(joinEarly.value), cancel_refund_hours: Number(refundHours.value) } });
+        await api('PUT', '/v1/admin/settings', { visit: { durations, default: Number(durDefault.value), join_early_min: Number(joinEarly.value), cancel_refund_hours: Number(refundHours.value) }, support: { alert_minutes: Number(supportAlert.value) } });
         toast('مدت زمان ویزیت ذخیره شد');
       }) }, 'ذخیره مدت ویزیت')));
     const inputs = Object.fromEntries(Object.keys(s.tariffs).map((k) => [k, h('input', { type: 'number', min: 0, step: 1000, value: Math.round(s.tariffs[k] / 10) })]));

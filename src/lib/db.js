@@ -250,6 +250,16 @@ CREATE TABLE IF NOT EXISTS support_messages (
   created_at  TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_support_msgs ON support_messages (ticket_id, created_at);
+-- Notes between support agents (claim, hand-over, remarks); never shown to the user.
+CREATE TABLE IF NOT EXISTS support_notes (
+  id          TEXT PRIMARY KEY,
+  ticket_id   TEXT NOT NULL REFERENCES support_tickets(id),
+  staff_id    TEXT NOT NULL REFERENCES users(id),
+  kind        TEXT NOT NULL DEFAULT 'note',
+  body        TEXT NOT NULL,
+  created_at  TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_support_notes ON support_notes (ticket_id, created_at);
 
 CREATE TABLE IF NOT EXISTS notifications (
   id          TEXT PRIMARY KEY,
@@ -531,7 +541,8 @@ const COLUMNS = {
     ['refund_policy', 'TEXT']],
   consultations: [['doctor_joined_at', 'TEXT']],
   // Satisfaction with the support team's answers (1–5) and who closed the conversation.
-  support_tickets: [['rating', 'INTEGER'], ['rating_comment', 'TEXT'], ['rated_at', 'TEXT'], ['closed_by', 'TEXT']],
+  support_tickets: [['rating', 'INTEGER'], ['rating_comment', 'TEXT'], ['rated_at', 'TEXT'], ['closed_by', 'TEXT'],
+    ['claimed_at', 'TEXT'], ['last_alert_at', 'TEXT']], // who handles it (assigned_to) and the delay alert
   // blocked_at: a free slot switched off by the doctor (not offered); removed_at: deleted by the
   // doctor but kept because past (e.g. cancelled) visits refer to it.
   slots: [['blocked_at', 'TEXT'], ['removed_at', 'TEXT']],
