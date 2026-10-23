@@ -476,6 +476,66 @@ async function patientHome(me) {
   }
 }
 
+// First launch only: two animated introduction pages before the start screen (swipe, dots,
+// «رد شدن»). Texts are the app's own, so they stay sharp and accurate on every screen size.
+const INTRO = [
+  {
+    visual: () => h('div', { class: 'intro-phone' }, h('img', { src: 'intro/home.webp', alt: 'صفحه اول درمان پلاس', width: 390, height: 844 })),
+    title: 'همیشه در کنار شما', sub: 'برای سلامت بهتر، آسان‌تر',
+    cards: [
+      ['calendar', 'نوبت‌دهی هوشمند', 'انتخاب پزشک و زمان، به‌سادگی و در چند ثانیه'],
+      ['assistant', 'دستیار هوشمند', 'بررسی علائم و پیشنهاد تخصص مناسب'],
+      ['support', 'پشتیبانی همیشه در دسترس', 'دستیار شبانه‌روزی؛ کارشناس در ساعات کاری'],
+    ],
+  },
+  {
+    visual: () => h('img', { class: 'intro-photo', src: 'intro/visit.webp', alt: 'ویزیت تصویری با پزشک', width: 515, height: 900 }),
+    title: 'مشاوره پزشکی آنلاین', sub: 'سریع، مطمئن، در دسترس',
+    list: [
+      ['stethoscope', 'مشاوره با پزشکان دارای مجوز نظام پزشکی'],
+      ['clock', 'دسترسی آسان، از هر جا'],
+      ['shield', 'امنیت و محرمانگی اطلاعات شما'],
+      ['phone', 'از طریق موبایل و در چند کلیک'],
+    ],
+  },
+];
+function showIntro() {
+  if (store.get('intro_seen')) return;
+  let i = 0;
+  const done = () => { store.set('intro_seen', '1'); box.classList.add('leaving'); setTimeout(() => box.remove(), 350); };
+  const slides = INTRO.map((s) => h('section', { class: 'intro-slide' },
+    h('div', { class: 'intro-text' },
+      h('img', { class: 'intro-logo anim', src: 'brand/mark.svg', alt: '', width: 84, height: 84, style: '--i:0' }),
+      h('div', { class: 'intro-brand anim', style: '--i:1' }, h('b', {}, 'درمان'), ' ', h('i', {}, 'پلاس')),
+      h('div', { class: 'intro-latin anim', style: '--i:1' }, 'DARMAN PLUS'),
+      h('h2', { class: 'anim', style: '--i:2' }, s.title), h('p', { class: 'intro-sub anim', style: '--i:2' }, s.sub),
+      s.cards ? h('div', { class: 'intro-cards' }, s.cards.map(([ic, t, d], k) => h('div', { class: 'intro-card anim', style: `--i:${3 + k}` },
+        h('span', { class: 'intro-ic' }, icon(ic, 30)), h('div', {}, h('b', {}, t), h('span', {}, d))))) : null,
+      s.list ? h('ul', { class: 'intro-list' }, s.list.map(([ic, t], k) => h('li', { class: 'anim', style: `--i:${3 + k}` }, h('span', { class: 'intro-ic sm' }, icon(ic, 24)), t))) : null),
+    h('div', { class: 'intro-visual anim', style: '--i:1' }, s.visual())));
+  const track = h('div', { class: 'intro-track' }, slides);
+  const dots = h('div', { class: 'intro-dots' }, INTRO.map((_, k) => h('button', { type: 'button', 'aria-label': `صفحه ${fa(k + 1)}`, onclick: () => go(k) })));
+  const next = h('button', { class: 'intro-next', type: 'button', onclick: () => (i < INTRO.length - 1 ? go(i + 1) : done()) });
+  const go = (k) => {
+    i = Math.max(0, Math.min(INTRO.length - 1, k));
+    track.style.transform = `translateX(${i * 100}%)`; // RTL: the next page comes in from the left
+    slides.forEach((sl, k2) => sl.classList.toggle('active', k2 === i));
+    [...dots.children].forEach((d, k2) => d.setAttribute('aria-current', k2 === i ? 'true' : 'false'));
+    next.replaceChildren(i < INTRO.length - 1 ? 'بعدی' : 'همین حالا شروع کنید', ' ', h('span', { 'aria-hidden': 'true' }, '‹'));
+  };
+  // Swipe: in a right-to-left app the next page is reached by swiping to the right.
+  let x0 = null;
+  track.addEventListener('pointerdown', (e) => { x0 = e.clientX; });
+  track.addEventListener('pointerup', (e) => { if (x0 == null) return; const dx = e.clientX - x0; x0 = null; if (Math.abs(dx) > 50) go(i + (dx > 0 ? 1 : -1)); });
+  const box = h('div', { class: 'intro', role: 'dialog', 'aria-modal': 'true', 'aria-label': 'معرفی درمان پلاس' },
+    h('button', { class: 'intro-skip', type: 'button', onclick: done }, 'رد شدن'),
+    h('div', { class: 'intro-viewport' }, track),
+    h('div', { class: 'intro-bar' }, dots, next));
+  box.addEventListener('keydown', (e) => { if (e.key === 'ArrowLeft') go(i + 1); if (e.key === 'ArrowRight') go(i - 1); if (e.key === 'Escape') done(); });
+  document.body.append(box);
+  requestAnimationFrame(() => go(0));
+}
+
 VIEWS.login = () => {
   let phone = '';
   let role = null; // 'patient' | 'doctor' — chosen on the start screen
@@ -632,6 +692,7 @@ VIEWS.login = () => {
 
   const done = (r) => { setSession(r); route('home'); };
   stepRole();
+  showIntro();
   $app.append(box);
 };
 

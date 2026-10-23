@@ -41,7 +41,7 @@ import { createSms } from './lib/sms.js';
 const PUBLIC_DIR = fileURLToPath(new URL('../public/', import.meta.url));
 const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8',
   '.svg': 'image/svg+xml', '.json': 'application/json', '.ico': 'image/x-icon', '.png': 'image/png',
-  '.webmanifest': 'application/manifest+json', '.woff2': 'font/woff2' };
+  '.webmanifest': 'application/manifest+json', '.woff2': 'font/woff2', '.webp': 'image/webp' };
 
 export function loadConfig(env = process.env) {
   const devMode = env.NODE_ENV !== 'production';

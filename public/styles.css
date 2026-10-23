@@ -575,3 +575,74 @@ body.viewer-open { overflow: hidden; }
 @media (pointer: coarse) { input, select, textarea { font-size: 16px; } }
 .chat-input input { min-width: 0; }
 .stars-lg { justify-content: center; } .stars-lg .star { font-size: 42px; }
+
+/* First-launch introduction (two animated pages) */
+.intro { position: fixed; inset: 0; z-index: 2000; color: #eaf2ff; display: flex; flex-direction: column; overflow: hidden;
+  background: radial-gradient(circle at 75% 12%, rgba(46, 120, 255, .45), transparent 45%), radial-gradient(circle at 10% 90%, rgba(22, 199, 154, .18), transparent 40%), linear-gradient(165deg, #061a4a 0%, #0a2a7a 55%, #04133a 100%);
+  animation: intro-in .35s ease-out; }
+.intro.leaving { animation: intro-out .35s ease-in forwards; }
+@keyframes intro-in { from { opacity: 0; } }
+@keyframes intro-out { to { opacity: 0; transform: scale(1.03); } }
+.intro-skip { position: absolute; top: max(14px, env(safe-area-inset-top)); inset-inline-start: 16px; z-index: 2; background: rgba(255,255,255,.1); color: #dfe9ff; border: 1px solid rgba(255,255,255,.18); border-radius: 999px; padding: 6px 16px; font: inherit; cursor: pointer; }
+.intro-viewport { flex: 1; overflow: hidden; }
+.intro-track { display: flex; height: 100%; transition: transform .5s cubic-bezier(.2,.8,.2,1); touch-action: pan-y; }
+.intro-slide { flex: 0 0 100%; height: 100%; display: flex; flex-direction: column-reverse; align-items: center; justify-content: flex-end; gap: 10px; padding: calc(56px + env(safe-area-inset-top)) 20px 8px; overflow-y: auto; }
+.intro-visual { flex: none; height: 34vh; display: flex; align-items: center; justify-content: center; }
+.intro-phone { height: 100%; aspect-ratio: 390 / 844; border-radius: clamp(14px, 3.4vh, 30px); border: clamp(4px, .8vh, 7px) solid #0b1124; overflow: hidden; background: #0b1124;
+  box-shadow: 0 0 0 1px rgba(140,180,255,.35), 0 20px 50px rgba(0,0,0,.45), 0 0 60px rgba(60,140,255,.35); transform: rotate(-4deg); }
+.intro-phone img { width: 100%; height: 100%; object-fit: cover; object-position: top; display: block; }
+.intro-photo { height: 100%; width: auto; -webkit-mask-image: radial-gradient(ellipse 75% 70% at 50% 45%, #000 70%, transparent 100%); mask-image: radial-gradient(ellipse 75% 70% at 50% 45%, #000 70%, transparent 100%); }
+.intro-slide.active .intro-visual { animation: intro-float 6s ease-in-out .8s infinite; }
+@keyframes intro-float { 50% { transform: translateY(-8px); } }
+.intro-text { width: 100%; max-width: 460px; text-align: center; }
+.intro-logo { width: 64px; height: 64px; filter: drop-shadow(0 6px 18px rgba(46,160,255,.5)); }
+.intro-brand { font-size: 34px; font-weight: 800; line-height: 1.3; }
+.intro-brand b { color: #fff; } .intro-brand i { font-style: normal; color: #2ee6a6; }
+.intro-latin { letter-spacing: .5em; font-size: 12px; color: #8fb4ff; direction: ltr; margin-bottom: 6px; }
+.intro h2 { font-size: 24px; margin: 4px 0 0; color: #bcd6ff; }
+.intro-sub { margin: 0 0 12px; color: #a8c4f0; }
+.intro-cards { display: flex; flex-direction: column; gap: 10px; text-align: start; }
+.intro-card { display: flex; align-items: center; gap: 12px; padding: 10px 12px; border-radius: 16px; background: rgba(255,255,255,.06); border: 1px solid rgba(120,170,255,.28); backdrop-filter: blur(6px); }
+.intro-card b { display: block; color: #fff; } .intro-card span { color: #b6cbee; font-size: 14px; }
+.intro-ic { flex: none; width: 52px; height: 52px; border-radius: 14px; display: grid; place-items: center; color: #fff;
+  background: linear-gradient(145deg, #2f8bff, #1452d6); box-shadow: 0 6px 18px rgba(30,110,255,.45), inset 0 1px 0 rgba(255,255,255,.25); }
+.intro-ic.sm { width: 42px; height: 42px; border-radius: 12px; background: rgba(47,139,255,.18); border: 1px solid rgba(120,170,255,.35); box-shadow: none; }
+.intro-list { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 10px; text-align: start; }
+.intro-list li { display: flex; align-items: center; gap: 12px; color: #dce8ff; }
+.intro-bar { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 20px calc(16px + env(safe-area-inset-bottom)); }
+.intro-dots { display: flex; gap: 8px; }
+.intro-dots button { width: 9px; height: 9px; border-radius: 99px; border: 0; padding: 0; background: rgba(255,255,255,.3); cursor: pointer; transition: width .3s, background .3s; }
+.intro-dots button[aria-current="true"] { width: 26px; background: #2ee6a6; }
+.intro-next { border: 0; border-radius: 999px; padding: 12px 22px; font: inherit; font-weight: 700; cursor: pointer; color: #062a3a;
+  background: linear-gradient(90deg, #2ee6a6, #1ccfd6); box-shadow: 0 8px 24px rgba(46,230,166,.35); }
+.intro .anim { opacity: 0; transform: translateY(14px); }
+.intro-slide.active .anim { animation: intro-up .6s cubic-bezier(.2,.8,.2,1) forwards; animation-delay: calc(var(--i, 0) * 110ms + 120ms); }
+@keyframes intro-up { to { opacity: 1; transform: none; } }
+@media (min-width: 820px) {
+  .intro-slide { flex-direction: row; justify-content: center; gap: 48px; padding: 40px; }
+  .intro-visual { height: 74vh; }
+  .intro-text { text-align: start; }
+  .intro-logo { width: 84px; height: 84px; }
+  .intro-brand { font-size: 46px; }
+  .intro-bar { justify-content: center; gap: 40px; }
+}
+@media (max-width: 819px) {
+  .intro-slide { gap: 8px; padding-top: calc(50px + env(safe-area-inset-top)); justify-content: center; }
+  .intro-visual { height: 30vh; }
+  .intro-logo { display: none; }
+  .intro-brand { font-size: 28px; }
+  .intro-latin { font-size: 10px; margin-bottom: 2px; }
+  .intro h2 { font-size: 20px; }
+  .intro-sub { margin-bottom: 8px; font-size: 14px; }
+  .intro-cards, .intro-list { gap: 8px; }
+  .intro-card { padding: 8px 10px; gap: 10px; }
+  .intro-card span { font-size: 13px; }
+  .intro-ic { width: 42px; height: 42px; border-radius: 12px; }
+  .intro-ic.sm { width: 36px; height: 36px; }
+  .intro-list li { font-size: 14px; }
+}
+@media (max-height: 700px) and (max-width: 819px) { .intro-visual { height: 24vh; } .intro-latin { display: none; } }
+.intro-next:focus-visible, .intro-skip:focus-visible, .intro-dots button:focus-visible { outline: 2px solid #fff; outline-offset: 3px; }
+@media (prefers-reduced-motion: reduce) {
+  .intro, .intro-track, .intro .anim, .intro-slide.active .anim, .intro-slide.active .intro-visual { animation: none !important; transition: none !important; opacity: 1; transform: none; }
+}
