@@ -1528,10 +1528,11 @@ VIEWS.inbox = async () => {
   if (r.items[0]) store.set(seenKey(), r.items[0].created_at);
   badge.count = 0; paintBadge();
   $app.append(notifyPermissionCard());
-  const icon = { sms: '✉️ پیامک', email: '📧 ایمیل', push: '🔔 اعلان' };
+  // «پیامک» only for messages that really went out as SMS; the rest are in-app notifications.
+  const label = (n) => (n.channel === 'sms' && n.status === 'sent' ? ['✉️ پیامک', 'info'] : n.channel === 'sms' && n.status === 'failed' ? ['✉️ پیامک ناموفق', 'warn'] : n.channel === 'email' ? ['📧 ایمیل', ''] : ['🔔 اعلان', '']);
   $app.append(h('div', { class: 'card' }, h('h2', {}, 'پیام‌ها و اعلان‌ها'),
-    h('p', { class: 'muted' }, 'در محیط آزمایشی، پیامک‌ها به‌جای ارسال واقعی اینجا نمایش داده می‌شوند.'),
-    r.items.length ? h('ul', { class: 'list' }, r.items.map((n) => h('li', {}, h('span', { class: 'pill' }, icon[n.channel]), ' ', n.body, h('br'), h('span', { class: 'muted' }, fmt.short(n.created_at)))))
+    config.dev_mode ? h('p', { class: 'muted' }, 'محیط آزمایشی: پیامک‌ها ارسال نمی‌شوند و فقط اینجا نمایش داده می‌شوند.') : null,
+    r.items.length ? h('ul', { class: 'list' }, r.items.map((n) => { const [t, c] = label(n); return h('li', {}, h('span', { class: `pill ${c}` }, t), ' ', n.body, h('br'), h('span', { class: 'muted' }, fmt.short(n.created_at))); }))
       : h('div', { class: 'empty' }, 'پیامی نیست.')));
 };
 
