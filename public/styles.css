@@ -553,3 +553,6 @@ body.viewer-open { overflow: hidden; }
 .grid4 { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; }
 .stat-tile { background: var(--surface-2); border-radius: 12px; padding: 10px 12px; }
 .stat-tile .stat { font-size: 20px; font-weight: 700; }
+/* iPhone zooms the page into any field with text smaller than 16px and stays zoomed (page looks cut off). */
+@media (pointer: coarse) { input, select, textarea { font-size: 16px; } }
+.chat-input input { min-width: 0; }
