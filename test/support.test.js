@@ -84,12 +84,14 @@ test('support agents: ready-made limited role, ratings after closing, performanc
   const p = await t.newPatient({ nationalId: randomNationalId() });
   await t.call('POST', '/v1/support/messages', { token: p.token, body: { body: 'میخوام با کارشناس صحبت کنم' } });
   const tk = (await t.call('GET', '/v1/support/tickets?status=waiting', { token: agent })).body.items.find((x) => x.user.phone === p.phone);
+  assert.equal((await t.call('POST', `/v1/support/tickets/${tk.id}/rate`, { token: p.token, body: { rating: 5 } })).body.code, 'no_staff_answer');
   await t.call('POST', `/v1/support/tickets/${tk.id}/reply`, { token: agent, body: { body: 'سلام، مشکل حساب شما برطرف شد.' } });
   const desk = await t.call('GET', `/v1/support/tickets/${tk.id}`, { token: agent });
   assert.equal(desk.body.messages.find((m) => m.sender === 'staff').staff_name, 'مینا کارشناس');
   const mine = await t.call('GET', '/v1/support', { token: p.token });
   assert.equal(mine.body.messages.find((m) => m.sender === 'staff').staff_name, undefined);
-  assert.equal((await t.call('POST', `/v1/support/tickets/${tk.id}/rate`, { token: p.token, body: { rating: 5 } })).body.code, 'not_closed');
+  // Offered as soon as the agent has answered.
+  assert.equal(mine.body.rate.id, tk.id);
   await t.call('POST', `/v1/support/tickets/${tk.id}/close`, { token: agent, body: {} });
   const after = await t.call('GET', '/v1/support', { token: p.token });
   assert.equal(after.body.rate.id, tk.id);

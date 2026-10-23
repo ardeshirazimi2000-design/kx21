@@ -126,7 +126,8 @@ export function register(router, { db, platform, domain, limiter, config }) {
 
   const state = (ctx) => {
     const t = openTicketOf(ctx);
-    return { ticket: t ? ticketView(t) : null, messages: t ? messagesOf(t.id) : [], topics: topicsFor(ctx.user.role), rate: t ? null : toRate(ctx) };
+    return { ticket: t ? ticketView(t) : null, messages: t ? messagesOf(t.id) : [], topics: topicsFor(ctx.user.role), // Rating is offered as soon as an agent has answered (and again after closing, if skipped).
+      rate: t ? (t.status === 'answered' && t.rating == null ? { id: t.id, topic: t.topic } : null) : toRate(ctx) };
   };
 
   router.get('/v1/support', async (ctx) => {
@@ -264,7 +265,6 @@ export function register(router, { db, platform, domain, limiter, config }) {
     const t = loadOwn(ctx);
     const rating = Number(ctx.body.rating);
     if (!Number.isInteger(rating) || rating < 1 || rating > 5) throw badRequest('امتیاز باید بین ۱ تا ۵ باشد');
-    if (t.status !== 'closed') throw conflict('امتیاز پس از بسته شدن گفتگو ثبت می‌شود', 'not_closed');
     if (t.rating != null) throw conflict('برای این گفتگو قبلاً امتیاز ثبت شده است', 'already_rated');
     if (!db.get(`SELECT 1 FROM support_messages WHERE ticket_id = ? AND sender = 'staff'`, t.id)) throw conflict('این گفتگو پاسخ کارشناس نداشته است', 'no_staff_answer');
     const comment = String(ctx.body.comment ?? '').trim().slice(0, 500) || null;
