@@ -60,7 +60,7 @@ export function register(router, { db, platform, domain, limiter, config }) {
   // The latest conversation the support team answered, closed and not rated yet.
   const toRate = (ctx) => db.get(
     `SELECT t.id, t.topic FROM support_tickets t WHERE t.tenant_id = ? AND t.user_id = ? AND t.status = 'closed' AND t.rating IS NULL AND t.closed_at > ?
-       AND EXISTS (SELECT 1 FROM support_messages m WHERE m.ticket_id = t.id AND m.sender = 'staff') ORDER BY t.closed_at DESC LIMIT 1`,
+       ORDER BY t.closed_at DESC LIMIT 1`,
     ctx.tenantId, ctx.user.sub, new Date(Date.now() - RATE_DAYS * 864e5).toISOString(),
   ) ?? null;
   const openTicketOf = (ctx) => db.get(
@@ -266,7 +266,10 @@ export function register(router, { db, platform, domain, limiter, config }) {
     const rating = Number(ctx.body.rating);
     if (!Number.isInteger(rating) || rating < 1 || rating > 5) throw badRequest('امتیاز باید بین ۱ تا ۵ باشد');
     if (t.rating != null) throw conflict('برای این گفتگو قبلاً امتیاز ثبت شده است', 'already_rated');
-    if (!db.get(`SELECT 1 FROM support_messages WHERE ticket_id = ? AND sender = 'staff'`, t.id)) throw conflict('این گفتگو پاسخ کارشناس نداشته است', 'no_staff_answer');
+    // An open conversation can be rated once an agent has answered; any conversation once it is closed.
+    if (t.status !== 'closed' && !db.get(`SELECT 1 FROM support_messages WHERE ticket_id = ? AND sender = 'staff'`, t.id)) {
+      throw conflict('امتیاز پس از پاسخ کارشناس یا بستن گفتگو ثبت می‌شود', 'not_ready');
+    }
     const comment = String(ctx.body.comment ?? '').trim().slice(0, 500) || null;
     if (comment) domain.moderate(ctx, comment, 'rating');
     db.run('UPDATE support_tickets SET rating = ?, rating_comment = ?, rated_at = ? WHERE id = ?', rating, comment, nowIso(), t.id);
@@ -342,6 +345,12 @@ export function register(router, { db, platform, domain, limiter, config }) {
           solved_by_assistant: T(`SELECT COUNT(*) AS n FROM support_tickets WHERE tenant_id = ? AND status = 'closed' AND escalated_at IS NULL AND closed_at >= ? AND closed_at <= ?`),
           waiting_now: db.get(`SELECT COUNT(*) AS n FROM support_tickets WHERE tenant_id = ? AND status = 'waiting'`, ctx.tenantId).n,
           ratings: rated.n, avg_rating: rated.avg ? Math.round(rated.avg * 10) / 10 : null,
+          // Conversations the assistant handled alone vs. those a support agent answered.
+          ...Object.fromEntries(['assistant', 'agents'].map((k) => {
+            const r = db.get(`SELECT COUNT(*) AS n, AVG(rating) AS avg FROM support_tickets t WHERE t.tenant_id = ? AND t.rating > 0 AND t.rated_at >= ? AND t.rated_at <= ?
+              AND ${k === 'agents' ? '' : 'NOT '}EXISTS (SELECT 1 FROM support_messages m WHERE m.ticket_id = t.id AND m.sender = 'staff')`, ctx.tenantId, range.from, range.to);
+            return [`avg_rating_${k}`, r.avg ? Math.round(r.avg * 10) / 10 : null];
+          })),
         },
         agents: agentStats(ctx.tenantId, range),
         ratings: recentRatings(ctx.tenantId, range),

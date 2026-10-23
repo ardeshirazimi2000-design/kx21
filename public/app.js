@@ -812,6 +812,37 @@ const SUPPORT_STATUS = { bot: ['دستیار پشتیبانی', 'info'], waiting
 const supportMsg = (m, viewer = 'user') => h('div', { class: `msg ${m.sender === 'user' ? (viewer === 'user' ? 'me' : 'bot') : m.sender === 'staff' ? (viewer === 'user' ? 'operator' : 'me') : m.sender === 'bot' ? 'bot' : 'system'}` },
   h('span', { class: 'who' }, { user: viewer === 'user' ? 'شما' : 'کاربر', bot: 'دستیار پشتیبانی', staff: m.staff_name ? `کارشناس پشتیبانی — ${m.staff_name}` : 'کارشناس پشتیبانی', system: '' }[m.sender]), m.body);
 
+// After «مشکلم حل شد»: a rating window (1–5 stars and an optional comment).
+function rateDialog(r, after = () => {}) {
+  let stars = 0;
+  const row = h('div', { class: 'stars stars-lg', role: 'radiogroup', 'aria-label': 'امتیاز' });
+  const words = ['', 'خیلی ناراضی', 'ناراضی', 'متوسط', 'راضی', 'خیلی راضی'];
+  const hint = h('div', { class: 'muted', style: 'min-height:1.6em;text-align:center' });
+  const paintStars = () => {
+    row.replaceChildren(...[1, 2, 3, 4, 5].map((n) => h('button', { type: 'button', class: `star ${n <= stars ? 'on' : ''}`, 'aria-label': `${fa(n)} از ۵`, onclick: () => { stars = n; paintStars(); } }, '★')));
+    hint.textContent = words[stars];
+  };
+  paintStars();
+  const comment = h('textarea', { rows: 2, maxlength: 500, placeholder: 'نظر یا پیشنهاد شما (اختیاری)' });
+  const box = h('div', { class: 'wizard-overlay', role: 'dialog', 'aria-modal': 'true' }, h('div', { class: 'card pay-box stack', style: 'text-align:center' },
+    h('div', { style: 'font-size:40px' }, '🙏'),
+    h('h2', {}, 'گفتگو بسته شد'),
+    h('p', {}, 'از پشتیبانی درمان پلاس چقدر راضی بودید؟'),
+    r.topic ? h('div', { class: 'muted small' }, `موضوع: ${r.topic}`) : null,
+    row, hint, comment,
+    h('div', { class: 'row', style: 'gap:8px;justify-content:center' },
+      h('button', { class: 'btn primary', type: 'button', onclick: guard(async () => {
+        if (!stars) return toast('یک تا پنج ستاره انتخاب کنید', true);
+        const s = await api('POST', `/v1/support/tickets/${r.id}/rate`, { rating: stars, comment: comment.value.trim() || undefined });
+        box.remove(); toast('سپاس از نظر شما 🌟'); after(s);
+      }) }, 'ثبت امتیاز'),
+      h('button', { class: 'btn', type: 'button', onclick: guard(async () => {
+        const s = await api('POST', `/v1/support/tickets/${r.id}/rate/skip`, {});
+        box.remove(); after(s);
+      }) }, 'بعداً نه'))));
+  document.body.append(box);
+}
+
 VIEWS.support = async () => {
   const log = h('div', { class: 'chat-log', 'aria-live': 'polite' });
   const quick = h('div', { class: 'quick' });
@@ -859,7 +890,11 @@ VIEWS.support = async () => {
   const act = async (a) => {
     if (a.type === 'topic') paint(await api('POST', '/v1/support/messages', { topic: a.id }));
     else if (a.type === 'escalate') paint(await api('POST', '/v1/support/escalate', {}));
-    else if (a.type === 'close') { paint(await api('POST', '/v1/support/close', {})); toast('گفتگو بسته شد'); }
+    else if (a.type === 'close') {
+      const s2 = await api('POST', '/v1/support/close', {});
+      paint({ ...s2, rate: null });
+      if (s2.rate) rateDialog(s2.rate, paint); else toast('گفتگو بسته شد');
+    }
   };
   const send = once(async () => {
     const text = input.value.trim();
@@ -874,7 +909,7 @@ VIEWS.support = async () => {
   h('p', { class: 'muted small', style: 'text-align:center' }, 'برای پرسش‌های پزشکی از «دستیار هوشمند» یا ویزیت با پزشک کمک بگیرید. ', legalLink('شیوه رسیدگی به شکایات', 'support')));
   paint(await api('GET', '/v1/support'));
   // While a person is involved, new answers show up by themselves.
-  every(10_000, async () => { if (current.view === 'support') paint(await api('GET', '/v1/support').catch(() => ({ ticket: null, messages: [], topics: [] }))); });
+  every(10_000, async () => { if (current.view === 'support' && !document.querySelector('.wizard-overlay')) paint(await api('GET', '/v1/support').catch(() => ({ ticket: null, messages: [], topics: [] }))); });
 };
 
 // Support desk (دستیار پشتیبان): staff with support.handle answer the conversations handed over.
@@ -923,7 +958,9 @@ VIEWS['support-report'] = async () => {
       h('div', { class: 'card' }, h('h3', {}, 'خلاصه'), h('div', { class: 'grid4' },
         statTile('گفتگوهای پشتیبانی', fa(T.conversations)), statTile('حل‌شده توسط دستیار', fa(T.solved_by_assistant)),
         statTile('ارجاع به کارشناس', fa(T.escalated)), statTile('در انتظار پاسخ (اکنون)', fa(T.waiting_now)),
-        statTile('میانگین رضایت', T.avg_rating == null ? '—' : `${fa(T.avg_rating)} از ۵`), statTile('تعداد نظرها', fa(T.ratings)))),
+        statTile('میانگین رضایت', T.avg_rating == null ? '—' : `${fa(T.avg_rating)} از ۵`), statTile('تعداد نظرها', fa(T.ratings)),
+        statTile('رضایت از پاسخ کارشناسان', T.avg_rating_agents == null ? '—' : `${fa(T.avg_rating_agents)} از ۵`),
+        statTile('رضایت از دستیار خودکار', T.avg_rating_assistant == null ? '—' : `${fa(T.avg_rating_assistant)} از ۵`))),
       h('div', { class: 'card' }, h('h3', {}, 'عملکرد کارشناسان'),
         r.agents.length ? h('div', { class: 'table-wrap' }, h('table', {},
           h('thead', {}, h('tr', {}, ['کارشناس', 'پاسخ‌ها', 'گفتگوها', 'بسته‌شده', 'زمان اولین پاسخ', 'میانگین رضایت', 'راضی / ناراضی'].map((c) => h('th', {}, c)))),
@@ -936,7 +973,7 @@ VIEWS['support-report'] = async () => {
       h('div', { class: 'card' }, h('h3', {}, 'نظرهای کاربران'),
         r.ratings.length ? h('ul', { class: 'list' }, r.ratings.map((x) => h('li', {},
           h('span', { class: 'stars-read' }, '★'.repeat(x.rating), h('span', { class: 'muted' }, '★'.repeat(5 - x.rating))), ' ',
-          h('b', {}, x.user_name || 'کاربر'), h('span', { class: 'muted' }, ` · کارشناس: ${x.agent_name ?? '—'} · ${fmt.short(x.rated_at)}`),
+          h('b', {}, x.user_name || 'کاربر'), h('span', { class: 'muted' }, ` · ${x.agent_name ? `کارشناس: ${x.agent_name}` : 'پاسخ: دستیار خودکار'} · ${fmt.short(x.rated_at)}`),
           h('div', { class: 'muted small' }, `موضوع: ${x.topic ?? '—'}`), x.rating_comment ? h('div', {}, `«${x.rating_comment}»`) : null)))
           : h('p', { class: 'muted' }, 'نظری ثبت نشده است.')),
       h('div', { class: 'card' }, h('h3', {}, 'پیام‌های ردشده (نامناسب)'),

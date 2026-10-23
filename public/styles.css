@@ -556,3 +556,4 @@ body.viewer-open { overflow: hidden; }
 /* iPhone zooms the page into any field with text smaller than 16px and stays zoomed (page looks cut off). */
 @media (pointer: coarse) { input, select, textarea { font-size: 16px; } }
 .chat-input input { min-width: 0; }
+.stars-lg { justify-content: center; } .stars-lg .star { font-size: 42px; }
