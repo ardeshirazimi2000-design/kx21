@@ -10,6 +10,7 @@ import { requireUser } from './auth.js';
 import { SPECIALTIES } from './patient.js';
 import { getVisitSettings, JOIN_LATE_MIN } from '../lib/visit-settings.js';
 import { DOCTOR_BOOKABLE_SQL, doctorBookable } from '../lib/contract-text.js';
+import { visitIcs } from '../lib/ics.js';
 
 const CHANNELS = ['video', 'audio', 'chat'];
 const MAX_SLOTS_PER_REQUEST = 64;
@@ -341,7 +342,7 @@ export function createAppointmentDomain({ db, platform, config = {}, patientDoma
   return { checkAvailability, book, cancel, requestRefund, appointmentView, remind, joinWindow, dayQueue, queueFor, queueNotify, tehranDay };
 }
 
-export function register(router, { db, platform, domain }) {
+export function register(router, { db, platform, domain, config }) {
   const { checkAvailability, book, cancel, requestRefund, appointmentView, dayQueue } = domain.appointment;
 
   const loadForActor = (ctx, id) => {
@@ -514,6 +515,49 @@ export function register(router, { db, platform, domain }) {
       return { ...x, patient_name: pu?.full_name ?? null };
     });
     return { body: { items } };
+  });
+
+  // «افزودن به تقویم گوشی»: a signed link (opened outside the app, without a login header) to a
+  // calendar file with reminders 60 and 10 minutes before the visit.
+  const CAL_TTL_S = 30 * 864e2;
+  router.post('/v1/appointments/:id/calendar-link', async (ctx) => {
+    requireUser(ctx);
+    const a = loadForActor(ctx, ctx.params.id);
+    if (!['pending', 'confirmed'].includes(a.status)) throw conflict('این نوبت فعال نیست', 'invalid_status');
+    const exp = Math.floor(Date.now() / 1000) + CAL_TTL_S;
+    const who = ctx.user.role === 'doctor' ? 'd' : 'p';
+    return { body: { url: `/v1/appointments/${a.id}/calendar.ics?for=${who}&exp=${exp}&sig=${domain.files.sign(`cal:${a.id}:${who}`, exp)}` } };
+  });
+  router.get('/v1/appointments/:id/calendar.ics', async (ctx) => {
+    const id = requireUuid(ctx.params.id, 'id');
+    const who = ctx.query.for === 'd' ? 'd' : 'p';
+    const exp = Number(ctx.query.exp);
+    const sig = String(ctx.query.sig ?? '');
+    const good = domain.files.sign(`cal:${id}:${who}`, exp);
+    if (!(exp > Date.now() / 1000) || sig !== good) throw new ApiError(403, 'invalid_signature', 'لینک تقویم منقضی یا نامعتبر است');
+    const a = db.get('SELECT * FROM appointments WHERE id = ?', id);
+    if (!a) throw notFound('نوبت');
+    const slot = db.get('SELECT starts_at, ends_at FROM slots WHERE id = ?', a.slot_id);
+    const doc = db.get('SELECT u.full_name FROM doctors d JOIN users u ON u.id = d.user_id WHERE d.id = ?', a.doctor_id)?.full_name ?? 'پزشک';
+    const pat = db.get('SELECT u.full_name FROM patients p JOIN users u ON u.id = p.user_id WHERE p.id = ?', a.patient_id)?.full_name ?? 'بیمار';
+    const base = config.publicBaseUrl || `https://${ctx.req.headers['x-forwarded-host'] ?? ctx.req.headers.host}`;
+    const url = `${base}/#appointments`;
+    const kind = { video: 'ویدیویی', audio: 'صوتی', chat: 'متنی' }[a.channel] ?? '';
+    const body = visitIcs({
+      id: a.id, startsAt: slot.starts_at, endsAt: slot.ends_at,
+      title: who === 'd' ? `ویزیت ${kind} با ${pat} — درمان پلاس` : `ویزیت ${kind} با ${doc} — درمان پلاس`,
+      description: who === 'd'
+        ? `ویزیت آنلاین ${pat}. برای ورود به اتاق ویزیت، درمان پلاس را باز کنید و از «نوبت‌ها» وارد شوید: ${url}`
+        : `ویزیت آنلاین با ${doc}. چند دقیقه پیش از زمان نوبت، درمان پلاس را باز کنید و از «نوبت‌ها» وارد اتاق ویزیت شوید: ${url}`,
+      url,
+    });
+    ctx.res.writeHead(200, {
+      'Content-Type': 'text/calendar; charset=utf-8',
+      'Content-Disposition': `attachment; filename="darman-plus-visit.ics"`,
+      'Cache-Control': 'private, no-store',
+    });
+    ctx.res.end(body);
+    return null;
   });
 
   // The patient did not come: the doctor closes the visit so the queue moves on.

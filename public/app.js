@@ -471,7 +471,7 @@ async function patientHome(me) {
           h('b', {}, a.doctor?.full_name ?? ''), ' ', h('span', { class: 'muted' }, a.doctor?.specialty_label ?? ''), h('br'),
           h('span', {}, fmt.dt(a.starts_at)), ' · ', h('span', { class: 'muted' }, LABELS.channel[a.channel])),
         a.status === 'confirmed'
-          ? joinButton(a)
+          ? h('div', { class: 'stack', style: 'gap:6px' }, joinButton(a), Date.parse(a.starts_at) > serverNow() ? calendarButton(a) : null)
           : h('button', { class: 'btn small', onclick: () => route('appointments') }, 'مشاهده'))));
   }
 }
@@ -884,11 +884,11 @@ VIEWS.book = async (arg) => {
         if (a.status === 'pending' && a.payment) {
           toast('نوبت به‌طور موقت رزرو شد؛ پرداخت را انجام دهید');
           route('appointments');
-          V2.pay(a.payment.id, { title: 'پرداخت هزینه ویزیت', onPaid: () => route('appointments') });
+          V2.pay(a.payment.id, { title: 'پرداخت هزینه ویزیت', onPaid: () => { route('appointments'); suggestCalendar(a); } });
           return;
         }
-        toast('نوبت شما ثبت شد ✅');
         route('appointments');
+        suggestCalendar(a);
       } catch (err) {
         if (err.code === 'slot_taken') { toast('این زمان همین الان رزرو شد؛ زمان دیگری انتخاب کنید', true); load(); return; }
         throw err;
@@ -1280,10 +1280,36 @@ function cancelAppointment(a, role, after = () => route(current.view)) {
   reason.focus();
 }
 
+// «افزودن به تقویم گوشی»: the phone's own calendar reminds 60 and 10 minutes before the visit,
+// even with the app closed — no SMS needed. Opened outside the app so the calendar can take it.
+async function addToCalendar(a) {
+  const r = await api('POST', `/v1/appointments/${a.id}/calendar-link`, {});
+  const url = apiUrl(r.url);
+  if (IS_NATIVE) { location.href = url; return; }
+  const link = h('a', { href: url, download: 'darman-plus-visit.ics' });
+  document.body.append(link); link.click(); link.remove();
+  toast('فایل تقویم دریافت شد؛ آن را باز کنید و «افزودن» را بزنید');
+}
+const calendarButton = (a) => h('button', { class: 'btn small', type: 'button', onclick: guard(() => addToCalendar(a)) }, icon('calendar', 16), ' افزودن به تقویم');
+// After booking: a reminder to put the visit in the phone's calendar.
+function suggestCalendar(a) {
+  if (!a?.id) return;
+  const box = h('div', { class: 'wizard-overlay', role: 'dialog', 'aria-modal': 'true' }, h('div', { class: 'card pay-box stack', style: 'text-align:center' },
+    h('div', { style: 'display:flex;justify-content:center' }, h('span', { class: 'svc-ic tone-blue' }, icon('calendar', 32))),
+    h('h2', {}, 'نوبت شما ثبت شد'),
+    a.starts_at ? h('p', {}, h('b', {}, fmt.dt(a.starts_at))) : null,
+    h('p', { class: 'muted' }, 'برای اینکه ویزیت را از دست ندهید، نوبت را به تقویم گوشی اضافه کنید؛ تقویم گوشی یک ساعت و ۱۰ دقیقه پیش از ویزیت یادآوری می‌کند، حتی اگر برنامه بسته باشد.'),
+    h('div', { class: 'row', style: 'gap:8px;justify-content:center' },
+      h('button', { class: 'btn primary', type: 'button', onclick: guard(async () => { await addToCalendar(a); box.remove(); }) }, 'افزودن به تقویم گوشی'),
+      h('button', { class: 'btn', type: 'button', onclick: () => box.remove() }, 'بعداً'))));
+  document.body.append(box);
+}
+
 function appointmentItem(a, role) {
   const actions = [];
   if (a.status === 'confirmed') {
     actions.push(joinButton(a));
+    if (Date.parse(a.starts_at) > serverNow()) actions.push(calendarButton(a));
     actions.push(h('button', { class: 'btn danger small', onclick: () => cancelAppointment(a, role) }, 'لغو نوبت'));
   }
   if (a.status === 'pending' && role === 'doctor') actions.push(h('button', { class: 'btn danger small', onclick: () => cancelAppointment(a, role) }, 'لغو نوبت'));
@@ -1872,8 +1898,8 @@ V2.bookSlot = (slot) => {
         const a = await api('POST', '/v1/appointments', { doctor_id: slot.doctor_id, slot_id: slot.id, channel: channel.value }, { 'Idempotency-Key': key });
         box.remove();
         route('appointments');
-        if (a.status === 'pending' && a.payment) V2.pay(a.payment.id, { title: 'پرداخت هزینه ویزیت', onPaid: () => route('appointments') });
-        else toast('نوبت شما ثبت شد ✅');
+        if (a.status === 'pending' && a.payment) V2.pay(a.payment.id, { title: 'پرداخت هزینه ویزیت', onPaid: () => { route('appointments'); suggestCalendar(a); } });
+        else suggestCalendar(a);
       }) }, 'تأیید و رزرو'),
       h('button', { class: 'btn', onclick: () => box.remove() }, 'انصراف'))));
   document.body.append(box);

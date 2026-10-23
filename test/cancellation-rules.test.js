@@ -76,3 +76,25 @@ test('patient cancels in time → refund; late → no refund (earned); doctor ca
   assert.equal(refund.body.refund_policy, 'credit_refund');
   assert.equal(await payStatus(p, a3.payment.id), 'refund_required');
 });
+
+test('«add to calendar»: signed link to a calendar file with reminders; tampered link refused', async () => {
+  const p = await t.newPatient({ nationalId: randomNationalId() });
+  const [slot] = await slotsOf(p, 'cardiology');
+  const a = (await t.call('POST', '/v1/appointments', { token: p.token, headers: { 'Idempotency-Key': 'cal-1' }, body: { doctor_id: slot.doctor_id, slot_id: slot.id, channel: 'video' } })).body;
+  const link = await t.call('POST', `/v1/appointments/${a.id}/calendar-link`, { token: p.token, body: {} });
+  assert.match(link.body.url, /calendar\.ics\?for=p&exp=\d+&sig=/);
+  const res = await fetch(t.base + link.body.url);
+  assert.equal(res.status, 200);
+  assert.match(res.headers.get('content-type'), /text\/calendar/);
+  const ics = await res.text();
+  assert.match(ics, /^BEGIN:VCALENDAR\r\n/);
+  assert.match(ics, /TRIGGER:-PT60M/);
+  assert.match(ics, /TRIGGER:-PT10M/);
+  assert.ok(ics.split('\r\n').every((l) => Buffer.byteLength(l) <= 75));
+  const start = new Date(slot.starts_at).toISOString().replace(/[-:]/g, '').replace(/\.\d{3}/, '');
+  assert.ok(ics.includes(`DTSTART:${start}`));
+  assert.equal((await fetch(t.base + link.body.url.replace('for=p', 'for=d'))).status, 403);
+  // Not someone else's visit.
+  const other = await t.newPatient({ nationalId: randomNationalId() });
+  assert.equal((await t.call('POST', `/v1/appointments/${a.id}/calendar-link`, { token: other.token, body: {} })).status, 404);
+});
