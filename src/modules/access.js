@@ -14,13 +14,14 @@ export const PERMISSIONS = {
   'accounting.payout': 'ثبت تسویه با پزشکان',
   'drug_catalog.manage': 'مدیریت فهرست رسمی داروها',
   'escalations.handle': 'رسیدگی به ارجاع‌ها و اورژانس‌ها',
+  'support.handle': 'پاسخگویی در دستیار پشتیبان (پشتیبانی و شکایات)',
   'stats.view': 'مشاهده آمار',
   'audit.view': 'لاگ ممیزی',
   'activity.view': 'سابقه ورود و فعالیت کاربران',
   'users.manage': 'مدیریت کاربران، نقش‌ها و دسترسی‌ها',
 };
 const ALL = Object.keys(PERMISSIONS);
-const OPERATOR_DEFAULT = ['escalations.handle', 'stats.view'];
+const OPERATOR_DEFAULT = ['escalations.handle', 'support.handle', 'stats.view'];
 
 export function createAccess({ db }) {
   function permissionsOf(userId) {

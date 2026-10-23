@@ -194,6 +194,33 @@ CREATE TABLE IF NOT EXISTS escalations (
   resolved_at  TEXT
 );
 
+-- Support: one conversation per request; the support assistant answers first, a support agent
+-- (permission support.handle) takes over when asked or when the assistant cannot help.
+CREATE TABLE IF NOT EXISTS support_tickets (
+  id           TEXT PRIMARY KEY,
+  tenant_id    TEXT NOT NULL,
+  user_id      TEXT NOT NULL REFERENCES users(id),
+  status       TEXT NOT NULL DEFAULT 'bot' CHECK (status IN ('bot','waiting','answered','closed')),
+  topic        TEXT,
+  assigned_to  TEXT REFERENCES users(id),
+  created_at   TEXT NOT NULL,
+  updated_at   TEXT NOT NULL,
+  escalated_at TEXT,
+  closed_at    TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_support_user ON support_tickets (tenant_id, user_id, status);
+CREATE INDEX IF NOT EXISTS idx_support_status ON support_tickets (tenant_id, status, updated_at);
+CREATE TABLE IF NOT EXISTS support_messages (
+  id          TEXT PRIMARY KEY,
+  ticket_id   TEXT NOT NULL REFERENCES support_tickets(id),
+  sender      TEXT NOT NULL CHECK (sender IN ('user','bot','staff','system')),
+  staff_id    TEXT REFERENCES users(id),
+  body        TEXT NOT NULL,
+  actions     TEXT,
+  created_at  TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_support_msgs ON support_messages (ticket_id, created_at);
+
 CREATE TABLE IF NOT EXISTS notifications (
   id          TEXT PRIMARY KEY,
   tenant_id   TEXT NOT NULL,

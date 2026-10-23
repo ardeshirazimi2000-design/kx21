@@ -164,22 +164,22 @@ function installButton() {
 // ---------------- router ----------------
 let current = { view: null, cleanup: [] };
 const TABS = {
-  patient: [['assistant', 'دستیار هوشمند'], ['doctors', 'پزشکان'], ['book', 'رزرو نوبت'], ['appointments', 'نوبت‌های من'], ['records', 'مدارک پزشکی'], ['prescriptions', 'نسخه‌ها'], ['inbox', 'پیام‌ها'], ['profile', 'پروفایل و حریم خصوصی']],
-  doctor: [['doctor-appointments', 'نوبت‌ها'], ['calendar', 'تقویم'], ['doctor-rx', 'نسخه‌ها'], ['doctor-profile', 'پروفایل و مدارک'], ['inbox', 'اعلان‌ها']],
-  doctor_pending: [['doctor-profile', 'پروفایل و مدارک'], ['inbox', 'اعلان‌ها']],
+  patient: [['assistant', 'دستیار هوشمند'], ['doctors', 'پزشکان'], ['book', 'رزرو نوبت'], ['appointments', 'نوبت‌های من'], ['records', 'مدارک پزشکی'], ['prescriptions', 'نسخه‌ها'], ['inbox', 'پیام‌ها'], ['support', 'پشتیبانی'], ['profile', 'پروفایل و حریم خصوصی']],
+  doctor: [['doctor-appointments', 'نوبت‌ها'], ['calendar', 'تقویم'], ['doctor-rx', 'نسخه‌ها'], ['doctor-profile', 'پروفایل و مدارک'], ['inbox', 'اعلان‌ها'], ['support', 'پشتیبانی']],
+  doctor_pending: [['doctor-profile', 'پروفایل و مدارک'], ['inbox', 'اعلان‌ها'], ['support', 'پشتیبانی']],
   // Staff tabs are shown by permission (see TAB_PERMS); operator and admin share the same list.
-  operator: [['escalations', 'درخواست‌های ارجاع'], ['stats', 'آمار']],
-  admin: [['admin-doctors', 'تأیید پزشکان'], ['settings', 'تنظیمات سیستم'], ['drug-catalog', 'فهرست داروها'], ['payments', 'پرداخت‌ها'], ['accounting', 'حسابداری'], ['escalations', 'درخواست‌های ارجاع'], ['stats', 'آمار'], ['audit', 'لاگ ممیزی'], ['activity', 'سابقه ورود و فعالیت'], ['staff', 'کاربران و نقش‌ها']],
+  operator: [['support-desk', 'دستیار پشتیبان'], ['escalations', 'درخواست‌های ارجاع'], ['stats', 'آمار']],
+  admin: [['admin-doctors', 'تأیید پزشکان'], ['settings', 'تنظیمات سیستم'], ['drug-catalog', 'فهرست داروها'], ['payments', 'پرداخت‌ها'], ['accounting', 'حسابداری'], ['support-desk', 'دستیار پشتیبان'], ['escalations', 'درخواست‌های ارجاع'], ['stats', 'آمار'], ['audit', 'لاگ ممیزی'], ['activity', 'سابقه ورود و فعالیت'], ['staff', 'کاربران و نقش‌ها']],
 };
 TABS.doctor.splice(4, 0, ['doctor-accounting', 'حسابداری من']);
 for (const k of ['patient', 'doctor', 'doctor_pending']) TABS[k].push(['my-activity', 'سابقه ورود']);
 const TAB_PERMS = {
   'admin-doctors': 'doctors.review', settings: 'tariffs.manage', 'drug-catalog': 'drug_catalog.manage', payments: 'payments.view',
-  accounting: 'accounting.view', escalations: 'escalations.handle', stats: 'stats.view', audit: 'audit.view', activity: 'activity.view', staff: 'users.manage',
+  accounting: 'accounting.view', 'support-desk': 'support.handle', escalations: 'escalations.handle', stats: 'stats.view', audit: 'audit.view', activity: 'activity.view', staff: 'users.manage',
 };
 function tabsFor(u) {
   if (['admin', 'operator'].includes(u.role)) {
-    const perms = u.permissions ?? (u.role === 'admin' ? Object.values(TAB_PERMS) : ['escalations.handle', 'stats.view']);
+    const perms = u.permissions ?? (u.role === 'admin' ? Object.values(TAB_PERMS) : ['escalations.handle', 'support.handle', 'stats.view']);
     return [...TABS.admin.filter(([id]) => perms.includes(TAB_PERMS[id])), ['my-activity', 'سابقه ورود من']];
   }
   return TABS[u.role === 'doctor' && u.doctor_status && u.doctor_status !== 'approved' ? 'doctor_pending' : u.role] ?? [];
@@ -191,7 +191,7 @@ const TAB_ICONS = {
   prescriptions: 'rx', inbox: 'bell', profile: 'user', 'my-activity': 'history',
   'doctor-appointments': 'stethoscope', calendar: 'calendar', 'doctor-rx': 'rx', 'doctor-profile': 'idcard', 'doctor-accounting': 'wallet',
   'admin-doctors': 'approve', settings: 'settings', 'drug-catalog': 'catalog', payments: 'card', accounting: 'wallet',
-  escalations: 'alert', stats: 'chart', audit: 'shield', activity: 'history', staff: 'team', 'staff-create': 'team',
+  escalations: 'alert', support: 'support', 'support-desk': 'support', stats: 'chart', audit: 'shield', activity: 'history', staff: 'team', 'staff-create': 'team',
 };
 // Phones: a bottom bar with five sections for patients and doctors (the rest is on the home
 // screen and in the top bar). Staff have many sections: a menu (side menu on wide screens).
@@ -200,7 +200,7 @@ const BOTTOM_NAV = {
   doctor: [['doctor-appointments', 'نوبت‌ها'], ['calendar', 'تقویم'], ['doctor-rx', 'نسخه‌ها'], ['doctor-accounting', 'حسابداری'], ['doctor-profile', 'پروفایل']],
 };
 // Pages reached from the home screen highlight the bar item they belong to.
-const NAV_PARENT = { doctors: 'home', book: 'home', prescriptions: 'records', summary: 'appointments', room: 'appointments', 'my-activity': 'profile', inbox: 'home' };
+const NAV_PARENT = { doctors: 'home', book: 'home', prescriptions: 'records', summary: 'appointments', room: 'appointments', 'my-activity': 'profile', inbox: 'home', support: 'home' };
 const isStaff = (u) => ['admin', 'operator'].includes(u?.role);
 function navFor(u) {
   if (u.role === 'patient') return BOTTOM_NAV.patient;
@@ -271,6 +271,7 @@ function renderChrome() {
     icon('bell', 22), h('span', { class: 'count', id: 'bell-count', hidden: true }));
   $user.append(
     h('span', { class: 'who' }, `${u.full_name || fa(u.phone)} · ${LABELS.role[u.role]}`),
+    isStaff(u) ? null : h('button', { class: 'icon-btn', type: 'button', title: 'پشتیبانی', 'aria-label': 'پشتیبانی', onclick: () => route('support') }, icon('support', 22)),
     bell,
     h('button', { class: 'icon-btn', type: 'button', title: 'خروج', 'aria-label': 'خروج', onclick: logout }, icon('logout', 22)),
   );
@@ -351,7 +352,8 @@ async function patientHome(me) {
         tile('doctors', 'پزشکان', 'navy'),
         tile('prescriptions', 'نسخه‌ها', 'violet'),
         tile('records', 'مدارک پزشکی', 'amber'),
-        tile('inbox', 'پیام‌ها', 'rose'))),
+        tile('inbox', 'پیام‌ها', 'rose'),
+        tile('support', 'پشتیبانی', 'teal'))),
     h('p', { class: 'muted', style: 'text-align:center' }, 'درمان پلاس — ', siteLink(), ' · ', legalLink()),
   );
   // The next confirmed visit, if any, right on the home screen.
@@ -802,6 +804,113 @@ VIEWS.book = async (arg) => {
     h('p', { class: 'muted grow' }, 'نمی‌دانید کدام تخصص؟ از «دستیار هوشمند» بخواهید علائم‌تان را بررسی کند.')), confirmBox, out);
   load();
 };
+
+// ---------- support ----------
+// The support assistant answers questions about using the system; the conversation can be handed to
+// the support team, whose answers appear here too.
+const SUPPORT_STATUS = { bot: ['دستیار پشتیبانی', 'info'], waiting: ['در انتظار پاسخ کارشناس', 'warn'], answered: ['کارشناس پاسخ داد', 'ok'], closed: ['بسته‌شده', ''] };
+const supportMsg = (m, viewer = 'user') => h('div', { class: `msg ${m.sender === 'user' ? (viewer === 'user' ? 'me' : 'bot') : m.sender === 'staff' ? (viewer === 'user' ? 'operator' : 'me') : m.sender === 'bot' ? 'bot' : 'system'}` },
+  h('span', { class: 'who' }, { user: viewer === 'user' ? 'شما' : 'کاربر', bot: 'دستیار پشتیبانی', staff: 'کارشناس پشتیبانی', system: '' }[m.sender]), m.body);
+
+VIEWS.support = async () => {
+  const log = h('div', { class: 'chat-log', 'aria-live': 'polite' });
+  const quick = h('div', { class: 'quick' });
+  const pill = h('span', { class: 'pill' });
+  const input = h('input', { type: 'text', maxlength: 2000, placeholder: 'پرسش خود را درباره کار با سامانه بنویسید…' });
+  let last = '';
+  const paint = (s) => {
+    const [label, tone] = SUPPORT_STATUS[s.ticket?.status ?? 'bot'];
+    pill.className = `pill ${tone}`; pill.textContent = label;
+    const sig = JSON.stringify([s.ticket?.status, s.messages.length]);
+    if (sig === last) return;
+    last = sig;
+    log.replaceChildren(
+      h('div', { class: 'msg bot' }, h('span', { class: 'who' }, 'دستیار پشتیبانی'),
+        'سلام! من دستیار پشتیبانی درمان پلاس هستم و به پرسش‌های شما درباره کار با سامانه پاسخ می‌دهم: ثبت‌نام و ورود، نوبت، پرداخت و لغو، اتاق ویزیت، مدارک و … . هر زمان بخواهید، گفتگو را به کارشناس پشتیبانی ارجاع می‌دهم.'),
+      ...s.messages.map((m) => supportMsg(m)));
+    // Buttons of the assistant's latest message (or the topics, at the start).
+    const lastMsg = s.messages.at(-1);
+    const acts = !s.ticket ? s.topics.slice(0, 8).map((t) => ({ type: 'topic', label: t.title, id: t.id }))
+      : lastMsg?.sender === 'bot' ? lastMsg.actions : s.ticket.status === 'bot' ? [{ type: 'escalate', label: 'گفتگو با کارشناس پشتیبانی' }]
+        : [{ type: 'close', label: 'مشکلم حل شد — بستن گفتگو' }];
+    quick.replaceChildren(...acts.map((a) => h('button', { class: `btn small ${a.type === 'escalate' ? 'primary' : ''}`, type: 'button', onclick: guard(() => act(a)) }, a.label)));
+    log.scrollTop = log.scrollHeight;
+  };
+  const act = async (a) => {
+    if (a.type === 'topic') paint(await api('POST', '/v1/support/messages', { topic: a.id }));
+    else if (a.type === 'escalate') paint(await api('POST', '/v1/support/escalate', {}));
+    else if (a.type === 'close') { paint(await api('POST', '/v1/support/close', {})); toast('گفتگو بسته شد'); }
+  };
+  const send = once(async () => {
+    const text = input.value.trim();
+    if (!text) return;
+    input.value = '';
+    paint(await api('POST', '/v1/support/messages', { body: text }));
+  });
+  $app.append(h('div', { class: 'card chat' },
+    h('div', { class: 'chat-head' }, h('span', { class: 'svc-ic tone-teal' }, icon('support', 24)), h('b', { class: 'grow' }, 'پشتیبانی درمان پلاس'), pill),
+    log, quick,
+    h('form', { class: 'chat-input', onsubmit: send }, input, h('button', { class: 'btn primary' }, 'ارسال'))),
+  h('p', { class: 'muted small', style: 'text-align:center' }, 'برای پرسش‌های پزشکی از «دستیار هوشمند» یا ویزیت با پزشک کمک بگیرید. ', legalLink('شیوه رسیدگی به شکایات', 'support')));
+  paint(await api('GET', '/v1/support'));
+  // While a person is involved, new answers show up by themselves.
+  every(10_000, async () => { if (current.view === 'support') paint(await api('GET', '/v1/support').catch(() => ({ ticket: null, messages: [], topics: [] }))); });
+};
+
+// Support desk (دستیار پشتیبان): staff with support.handle answer the conversations handed over.
+VIEWS['support-desk'] = async (id) => {
+  if (id) return supportTicket(id);
+  let status = 'waiting';
+  const tabsBox = h('div', { class: 'row', style: 'margin-bottom:10px;flex-wrap:wrap;gap:6px' });
+  const list = h('div', { class: 'card' });
+  const load = async () => {
+    const r = await api('GET', `/v1/support/tickets?status=${status}`);
+    const c = r.counts ?? {};
+    tabsBox.replaceChildren(...[['waiting', 'در انتظار پاسخ'], ['answered', 'پاسخ داده‌شده'], ['bot', 'در حال گفتگو با دستیار'], ['closed', 'بسته‌شده']]
+      .map(([k, label]) => h('button', { class: `btn small ${status === k ? 'primary' : ''}`, onclick: () => { status = k; load(); } }, `${label} (${fa(c[k] ?? 0)})`)));
+    list.replaceChildren(h('h2', {}, 'دستیار پشتیبان — گفتگوهای پشتیبانی'),
+      r.items.length ? h('ul', { class: 'list' }, r.items.map((t) => h('li', { class: 'row' },
+        h('span', { class: 'grow' }, h('b', {}, t.user.full_name || h('bdi', {}, t.user.phone)), ' ', h('span', { class: 'pill' }, LABELS.role[t.user.role]), h('br'),
+          h('span', { class: 'muted' }, t.topic ?? ''), t.last_body ? h('div', { class: 'muted small' }, t.last_body) : null),
+        h('span', { class: 'muted' }, fmt.short(t.updated_at)), h('button', { class: 'btn small primary', onclick: () => route('support-desk', t.id) }, 'باز کردن'))))
+        : h('div', { class: 'empty' }, 'گفتگویی در این وضعیت نیست.'));
+  };
+  $app.append(tabsBox, list);
+  await load();
+  every(15_000, () => load().catch(() => {}));
+};
+
+async function supportTicket(id) {
+  const box = h('div');
+  const reply = h('textarea', { rows: 4, maxlength: 4000, placeholder: 'پاسخ به کاربر…' });
+  const load = async () => {
+    const t = await api('GET', `/v1/support/tickets/${id}`);
+    const [label, tone] = SUPPORT_STATUS[t.status];
+    box.replaceChildren(
+      h('div', { class: 'card' }, h('div', { class: 'row' },
+        h('h2', { class: 'grow' }, t.user.full_name || 'کاربر', ' ', h('bdi', { class: 'muted' }, t.user.phone)),
+        h('span', { class: 'pill' }, LABELS.role[t.user.role]), h('span', { class: `pill ${tone}` }, label)),
+      h('p', { class: 'muted' }, `موضوع: ${t.topic ?? '—'} · شروع: ${fmt.short(t.created_at)}`)),
+      h('div', { class: 'card chat', style: 'height:auto' }, h('div', { class: 'chat-log', style: 'max-height:440px' }, t.messages.map((m) => supportMsg(m, 'staff')))),
+      t.status !== 'closed' ? h('div', { class: 'card stack' },
+        t.suggestions.length ? h('div', {}, h('label', {}, 'پاسخ‌های آماده (از دانش‌نامه پشتیبانی) — برای درج بزنید:'),
+          h('div', { class: 'row', style: 'flex-wrap:wrap;gap:6px' }, t.suggestions.map((sg) => h('button', { class: 'btn small', type: 'button', onclick: () => { reply.value = sg.text; reply.focus(); } }, sg.title)))) : null,
+        h('label', {}, 'پاسخ کارشناس'), reply,
+        h('div', { class: 'row', style: 'gap:8px' },
+          h('button', { class: 'btn primary', onclick: guard(async () => {
+            if (!reply.value.trim()) return toast('متن پاسخ را بنویسید', true);
+            await api('POST', `/v1/support/tickets/${id}/reply`, { body: reply.value.trim() });
+            reply.value = ''; toast('پاسخ ارسال شد و به کاربر اعلان شد'); load();
+          }) }, 'ارسال پاسخ'),
+          h('button', { class: 'btn', onclick: guard(async () => {
+            if (!confirm('گفتگو بسته شود؟')) return;
+            await api('POST', `/v1/support/tickets/${id}/close`, {}); toast('گفتگو بسته شد'); route('support-desk');
+          }) }, 'بستن گفتگو'))) : null);
+    const lg = box.querySelector('.chat-log'); if (lg) lg.scrollTop = lg.scrollHeight;
+  };
+  $app.append(h('button', { class: 'btn small', style: 'margin-bottom:10px', onclick: () => route('support-desk') }, '→ بازگشت'), box);
+  await load();
+}
 
 // ---------- legal documents (public) ----------
 function legalBody(d) {
