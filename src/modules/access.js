@@ -155,6 +155,29 @@ export function register(router, { db, platform, domain }) {
     return { body: userView(db.get('SELECT * FROM users WHERE id = ?', u.id)) };
   });
 
+  // A person who registered as a patient becomes staff (e.g. a support agent) on the same number.
+  // Their patient history stays in the system; with the new role they use the staff side only.
+  router.post('/v1/admin/users/:id/convert-to-staff', async (ctx) => {
+    access.require(ctx, 'users.manage');
+    const u = loadUser(ctx, ctx.params.id);
+    if (u.role !== 'patient') throw conflict('فقط حساب بیمار قابل تبدیل به کادر است', 'not_patient');
+    const role = ctx.body.role === 'admin' ? 'admin' : 'operator';
+    const rid = ctx.body.staff_role_id ? requireUuid(ctx.body.staff_role_id, 'staff_role_id') : null;
+    if (rid && !db.get('SELECT 1 FROM staff_roles WHERE id = ? AND tenant_id = ?', rid, ctx.tenantId)) throw notFound('نقش');
+    const p = db.get('SELECT id FROM patients WHERE user_id = ?', u.id);
+    const history = p ? {
+      appointments: db.get('SELECT COUNT(*) AS n FROM appointments WHERE patient_id = ?', p.id).n,
+      records: db.get('SELECT COUNT(*) AS n FROM medical_records WHERE patient_id = ?', p.id).n,
+    } : { appointments: 0, records: 0 };
+    if ((history.appointments || history.records) && ctx.body.confirm !== true) {
+      throw conflict(`این بیمار ${history.appointments} نوبت و ${history.records} مدرک پزشکی دارد. پس از تبدیل، با این شماره دیگر نمی‌تواند به‌عنوان بیمار از سامانه استفاده کند (سوابق حذف نمی‌شود). برای ادامه تأیید کنید.`, 'patient_has_history');
+    }
+    db.run('UPDATE users SET role = ?, staff_role_id = ? WHERE id = ?', role, rid, u.id);
+    platform.audit(ctx, 'user.convert_to_staff', `user:${u.id}`, { from: 'patient', to: role, staff_role_id: rid, history });
+    platform.notify(ctx, { userId: u.id, channel: 'sms', target: u.phone, body: 'حساب شما در درمان پلاس به حساب کادر تبدیل شد. از گزینه «ثبت‌نام و ورود پزشکان» وارد شوید.' });
+    return { body: userView(db.get('SELECT * FROM users WHERE id = ?', u.id)) };
+  });
+
   for (const [path, disable] of [['disable', true], ['enable', false]]) {
     router.post(`/v1/admin/users/:id/${path}`, async (ctx) => {
       access.require(ctx, 'users.manage');

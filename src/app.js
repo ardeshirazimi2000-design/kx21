@@ -232,9 +232,12 @@ export function createApp(overrides = {}) {
         tenantId: headerTenant || config.defaultTenant, user: null, body: {},
       };
       auth.authenticate(ctx, keys);
-      // A disabled account loses access immediately, not when its token expires.
-      if (ctx.user && db.get('SELECT 1 FROM users WHERE id = ? AND (disabled_at IS NOT NULL OR deleted_at IS NOT NULL)', ctx.user.sub)) {
-        throw new ApiError(401, 'account_disabled', 'این حساب غیرفعال شده است');
+      // A disabled account loses access immediately, not when its token expires; so does a token
+      // issued before the account's role was changed (e.g. a patient account made a support agent).
+      if (ctx.user) {
+        const acc = db.get('SELECT role, disabled_at, deleted_at FROM users WHERE id = ?', ctx.user.sub);
+        if (!acc || acc.disabled_at || acc.deleted_at) throw new ApiError(401, 'account_disabled', 'این حساب غیرفعال شده است');
+        if (acc.role !== ctx.user.role) throw new ApiError(401, 'role_changed', 'نقش حساب شما تغییر کرده است؛ دوباره وارد شوید');
       }
       if (ctx.user && headerTenant && headerTenant !== ctx.user.tid) throw new ApiError(403, 'tenant_mismatch', 'tenant نامعتبر است');
       if (ctx.user) limiter.hit(`user:${ctx.user.sub}`, 300, 60_000);

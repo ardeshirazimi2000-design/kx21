@@ -569,6 +569,7 @@ export function installV2(x) {
             h('span', { class: 'pill' }, ROLE_FA[u.role]), u.disabled ? h('span', { class: 'pill danger' }, 'غیرفعال') : null),
           h('div', { class: 'muted small' }, `آخرین ورود: ${u.last_login_at ? fmt.short(u.last_login_at) : '—'}${u.last_login_ip ? ` (${u.last_login_ip})` : ''} · عضویت: ${fmt.short(u.created_at)}`),
           h('div', { class: 'row' }, sr,
+            u.role === 'patient' && supportRole ? h('button', { class: 'btn small', onclick: guard(() => convert(u)) }, 'تبدیل به کارشناس پشتیبانی') : null,
             h('button', { class: 'btn small', onclick: () => route('activity', u.id) }, 'سابقه ورود و فعالیت'),
             u.disabled
               ? h('button', { class: 'btn small', onclick: guard(async () => { await api('POST', `/v1/admin/users/${u.id}/enable`, {}); toast('فعال شد'); loadUsers(); }) }, 'فعال‌سازی')
@@ -579,6 +580,19 @@ export function installV2(x) {
               }) }, 'غیرفعال‌سازی')));
       })));
     });
+    // A patient account becomes a support agent on the same number (patient history is kept).
+    const supportRole = roles.items.find((r2) => r2.name === 'کارشناس پشتیبانی');
+    async function convert(u, confirmHistory = false) {
+      if (!confirmHistory && !confirm(`حساب «${u.full_name ?? u.phone}» از بیمار به «کارشناس پشتیبانی» تبدیل شود؟\nپس از آن با همین شماره از گزینه «ورود پزشکان» وارد می‌شود و فقط به دستیار پشتیبان دسترسی دارد.`)) return;
+      try {
+        await api('POST', `/v1/admin/users/${u.id}/convert-to-staff`, { role: 'operator', staff_role_id: supportRole.id, confirm: confirmHistory });
+      } catch (e) {
+        if (e.code === 'patient_has_history' && confirm(e.message)) return convert(u, true);
+        if (e.code === 'patient_has_history') return;
+        throw e;
+      }
+      toast('حساب به کارشناس پشتیبانی تبدیل شد'); loadUsers();
+    }
     q.oninput = () => { clearTimeout(q.t); q.t = setTimeout(loadUsers, 300); };
     roleSel.onchange = loadUsers;
 

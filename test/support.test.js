@@ -136,3 +136,27 @@ test('inappropriate messages are rejected and logged; repeated abuse pauses send
   const rep = await t.call('GET', '/v1/support/report', { token: admin });
   assert.ok(rep.body.moderation.filter((m) => m.phone === p.phone).length >= 5);
 });
+
+test('a patient account becomes a support agent on the same number; the old patient token stops working', async () => {
+  const admin = await t.login(DEMO_ACCOUNTS.admin.phone);
+  const role = (await t.call('GET', '/v1/admin/roles', { token: admin })).body.items.find((r) => r.name === 'کارشناس پشتیبانی');
+  const p = await t.newPatient({ nationalId: randomNationalId() });
+  const u = (await t.call('GET', `/v1/admin/users?q=${p.phone}`, { token: admin })).body.items[0];
+  const doc = await t.login(DEMO_ACCOUNTS.doctors[2].phone);
+  assert.equal((await t.call('POST', `/v1/admin/users/${(await t.call('GET', `/v1/admin/users?q=${DEMO_ACCOUNTS.doctors[2].phone}`, { token: admin })).body.items[0].id}/convert-to-staff`, { token: admin, body: { staff_role_id: role.id } })).body.code, 'not_patient');
+  assert.ok(doc);
+  // With visit history the admin must confirm.
+  const [slot] = (await t.call('GET', '/v1/slots?limit=1', { token: p.token })).body.items;
+  await t.call('POST', '/v1/appointments', { token: p.token, headers: { 'Idempotency-Key': 'cv-1' }, body: { doctor_id: slot.doctor_id, slot_id: slot.id, channel: 'video' } });
+  const ask = await t.call('POST', `/v1/admin/users/${u.id}/convert-to-staff`, { token: admin, body: { staff_role_id: role.id } });
+  assert.equal(ask.body.code, 'patient_has_history');
+  const ok = await t.call('POST', `/v1/admin/users/${u.id}/convert-to-staff`, { token: admin, body: { staff_role_id: role.id, confirm: true } });
+  assert.equal(ok.body.role, 'operator');
+  assert.equal(ok.body.staff_role.name, 'کارشناس پشتیبانی');
+  const stale = await t.call('GET', '/v1/support', { token: p.token });
+  assert.equal(stale.status, 401);
+  assert.equal(stale.body.code, 'role_changed');
+  const agent = await t.login(p.phone);
+  assert.equal((await t.call('GET', '/v1/support/tickets', { token: agent })).status, 200);
+  assert.equal((await t.call('GET', '/v1/escalations', { token: agent })).status, 403);
+});
