@@ -41,6 +41,8 @@
     <!-- Permissions -->
 
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- Short vibration with notification sounds -->
+    <uses-permission android:name="android.permission.VIBRATE" />
     <!-- Bluetooth LE medical devices (blood-pressure monitor, pulse oximeter, thermometer).
          Scanning is never used to derive location; location permission only on Android ≤ 11. -->
     <uses-permission android:name="android.permission.BLUETOOTH_SCAN"

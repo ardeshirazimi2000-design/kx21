@@ -211,8 +211,10 @@ function navFor(u) {
 // Unread messages: notifications newer than the last time the inbox was opened (kept on the device).
 const badge = { count: 0, at: 0, newest: null };
 const seenKey = () => `inbox_seen:${session?.user?.id}`;
+// Pages where timing matters (visit day, support) check every ~10 s; elsewhere every ~30 s.
+const FAST_VIEWS = new Set(['home', 'appointments', 'doctor-appointments', 'support', 'support-desk', 'room']);
 async function refreshBadge(force = false) {
-  if (!session || (!force && Date.now() - badge.at < 25_000)) return;
+  if (!session || (!force && Date.now() - badge.at < (FAST_VIEWS.has(current.view) ? 9_000 : 28_000))) return;
   badge.at = Date.now();
   try {
     const r = await api('GET', '/v1/notifications');
@@ -233,6 +235,7 @@ function announce(items) {
   if (items.some((n) => /اتاق ویزیت|نوبت شما بعدی است/.test(n.body)) && ['home', 'appointments', 'doctor-appointments'].includes(current.view)
     && !document.querySelector('.wizard-overlay')) setTimeout(() => route(current.view), 1500);
   toast(items.length > 1 ? `${fa(items.length)} اعلان جدید — ${first}` : `🔔 ${first}`);
+  chime(items.some((n) => URGENT.test(n.body)) ? 'urgent' : 'soft');
   if (typeof Notification !== 'undefined' && Notification.permission === 'granted' && document.visibilityState !== 'visible') {
     for (const n of items.slice(0, 3)) {
       try { new Notification('درمان پلاس', { body: n.body, icon: 'icons/icon-192.png', tag: n.id }); } catch { /* not allowed here */ }
@@ -253,7 +256,52 @@ function notifyPermissionCard() {
     }) }, 'فعال‌سازی'));
   return card;
 }
-setInterval(() => refreshBadge(), 30_000);
+setInterval(() => refreshBadge(), 10_000);
+
+// Notification sounds, made in the page (no audio files): a distinct one for what needs action now,
+// a soft one for the rest; plus a short vibration on phones that support it. Browsers allow sound
+// only after the user has touched the page once, so the audio is unlocked on the first touch.
+const URGENT = /اتاق ویزیت|نوبت شما بعدی|پاسخ پشتیبانی|درخواست پشتیبانی جدید|پیام جدید در گفتگوی پشتیبانی|به شما واگذار شد|⏰|نوبت جدید|اورژانس/;
+const soundKey = () => `sound_on:${session?.user?.id ?? ''}`;
+const soundOn = () => store.get(soundKey(), true) !== false;
+let audioCtx = null;
+const unlockAudio = () => {
+  try {
+    audioCtx ??= new (window.AudioContext || window.webkitAudioContext)();
+    if (audioCtx.state === 'suspended') audioCtx.resume();
+  } catch { audioCtx = null; }
+};
+['pointerdown', 'keydown', 'touchstart'].forEach((ev) => window.addEventListener(ev, unlockAudio, { passive: true }));
+function chime(kind = 'soft', force = false) {
+  if (!force && !soundOn()) return;
+  try { navigator.vibrate?.(kind === 'urgent' ? [180, 80, 180] : 90); } catch { /* not supported */ }
+  if (!audioCtx || audioCtx.state !== 'running') return;
+  const notes = kind === 'urgent' ? [[784, 0], [988, 0.16], [1319, 0.32], [1319, 0.62]] : [[880, 0], [1175, 0.13]];
+  const t0 = audioCtx.currentTime + 0.02;
+  for (const [freq, at] of notes) {
+    const o = audioCtx.createOscillator();
+    const g = audioCtx.createGain();
+    o.type = 'sine';
+    o.frequency.value = freq;
+    const peak = kind === 'urgent' ? 0.32 : 0.16;
+    g.gain.setValueAtTime(0.0001, t0 + at);
+    g.gain.exponentialRampToValueAtTime(peak, t0 + at + 0.015);
+    g.gain.exponentialRampToValueAtTime(0.0001, t0 + at + 0.28);
+    o.connect(g).connect(audioCtx.destination);
+    o.start(t0 + at);
+    o.stop(t0 + at + 0.3);
+  }
+}
+// «صدای اعلان‌ها» on/off (kept on this device, per account) with a test button.
+function soundCard() {
+  const box = h('input', { type: 'checkbox', checked: soundOn(), onchange: (e) => { store.set(soundKey(), e.target.checked); if (e.target.checked) { unlockAudio(); chime('urgent', true); } } });
+  return h('div', { class: 'card row', style: 'flex-wrap:wrap' }, h('span', { class: 'svc-ic tone-violet' }, icon('bell', 24)),
+    h('label', { class: 'check grow', style: 'margin:0' }, box, h('span', {}, h('b', {}, 'صدای اعلان‌ها'), h('br'),
+      h('span', { class: 'muted small' }, 'با رسیدن اعلان جدید (وقتی سامانه باز است) صدا پخش می‌شود؛ برای اتاق ویزیت، نوبت بعدی و پاسخ پشتیبانی صدای متمایز.'))),
+    h('div', { class: 'row', style: 'gap:6px' },
+      h('button', { class: 'btn small', type: 'button', onclick: () => { unlockAudio(); setTimeout(() => chime('soft', true), 60); } }, '🔈 معمولی'),
+      h('button', { class: 'btn small', type: 'button', onclick: () => { unlockAudio(); setTimeout(() => chime('urgent', true), 60); } }, '🔔 مهم')));
+}
 function paintBadge() {
   const b = document.getElementById('bell-count');
   if (b) { b.textContent = badge.count > 9 ? '۹+' : fa(badge.count); b.hidden = !badge.count; }
@@ -386,7 +434,7 @@ VIEWS.home = async () => {
   $app.append(h('div', { class: 'card' }, h('h2', {}, `سلام ${me.full_name || ''}`.trim()),
     h('p', { class: 'muted' }, me.staff_role ? `نقش شما: ${me.staff_role.name ?? me.staff_role}` : 'دسترسی کامل مدیریت'),
     sections.map((sec) => h('section', { class: 'dash-sec' }, sec.label ? h('h3', {}, sec.label) : null,
-      h('div', { class: 'svc-grid' }, sec.items.map(([id, label]) => tile(id, label, tones[i++ % tones.length])))))));
+      h('div', { class: 'svc-grid' }, sec.items.map(([id, label]) => tile(id, label, tones[i++ % tones.length])))))), soundCard());
 };
 
 async function patientHome(me) {
@@ -1806,7 +1854,7 @@ for (const name of ['profile', 'doctor-profile']) {
   VIEWS[name] = async (...args) => {
     await view(...args);
     if (current.view !== name) return;
-    $app.append(h('div', { class: 'card row' }, h('span', { class: 'svc-ic tone-navy' }, icon('history', 24)),
+    $app.append(soundCard(), h('div', { class: 'card row' }, h('span', { class: 'svc-ic tone-navy' }, icon('history', 24)),
       h('div', { class: 'grow' }, h('b', {}, 'امنیت حساب'), h('div', { class: 'muted' }, 'سابقه ورودهای شما با تاریخ، دستگاه و نشانی اینترنتی')),
       h('button', { class: 'btn small', onclick: () => route('my-activity') }, 'سابقه ورود')));
   };
