@@ -4,6 +4,7 @@ import { MeetingStatusBadge, ResolutionBadge } from '../components/status';
 import { Badge, Card, dateFa, dateTimeFa, Empty, fa, Loading, PageHeader, Progress, Stat } from '../components/ui';
 import { useAuth } from '../lib/auth';
 import { useApi } from '../lib/hooks';
+import { DashboardOverview } from '../components/DashboardOverview';
 
 export function HomePage() {
   const { me, isAdmin, chamberId } = useAuth();
@@ -12,7 +13,7 @@ export function HomePage() {
   const officerOf = me!.memberships.filter((m) => ['chair', 'vice_chair', 'secretary'].includes(m.position));
   return (
     <>
-      <PageHeader title={`سلام، ${me!.full_name}`} subtitle="خلاصه وضعیت جلسات، مصوبات و کارهای شما" />
+      <DashboardOverview upcoming={home.data?.upcoming} />
       {isAdmin && chamberId && <ChamberDashboard chamberId={chamberId} />}
       {officerOf.map((m) => (
         <CommissionDashboard key={m.commission_id} commissionId={m.commission_id} name={m.commission_name} />
@@ -26,8 +27,8 @@ function MyHome({ data }: { data: any }) {
   const nav = useNavigate();
   return (
     <div className="grid grid-2 mt">
-      <Card title="جلسات در جریان و پیش رو">
-        {data.live.length === 0 && data.upcoming.length === 0 && <Empty>جلسه‌ای برای شما برنامه‌ریزی نشده است.</Empty>}
+      {data.live.length > 0 && (
+      <Card title="جلسات در حال برگزاری">
         <ul className="list">
           {data.live.map((m: any) => (
             <li key={m.id} className="row between gap">
@@ -38,21 +39,9 @@ function MyHome({ data }: { data: any }) {
               <MeetingStatusBadge status={m.status} />
             </li>
           ))}
-          {data.upcoming
-            .filter((m: any) => !data.live.some((l: any) => l.id === m.id))
-            .map((m: any) => (
-              <li key={m.id} className="row between gap clickable" onClick={() => nav(`/meetings/${m.id}`)} style={{ cursor: 'pointer' }}>
-                <div>
-                  <strong>{m.title}</strong>
-                  <div className="muted small">
-                    {m.commission_name} — {dateTimeFa(m.scheduled_at)}
-                  </div>
-                </div>
-                <Badge tone="info">{roleLabel(m.my_role, m.my_role_title)}</Badge>
-              </li>
-            ))}
         </ul>
       </Card>
+      )}
       <Card title="مصوبات من (مسئول اجرا)" actions={<Link to="/resolutions?mine=true">همه</Link>}>
         {data.resolutions.length === 0 ? (
           <Empty>مصوبه بازی به شما سپرده نشده است.</Empty>

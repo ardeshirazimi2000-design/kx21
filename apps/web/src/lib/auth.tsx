@@ -8,6 +8,7 @@ export interface Membership {
   chamber_id: string;
   chamber_name: string;
   position: string;
+  role_title?: string | null;
   has_vote: boolean;
 }
 

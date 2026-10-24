@@ -1,4 +1,4 @@
-import { formatJalaliDate, RESOLUTION_STATUS_LABELS, type ResolutionStatus } from '@kx/shared';
+import { formatJalaliDate, RESOLUTION_STATUS_LABELS, toGregorian, toJalali, type ResolutionStatus } from '@kx/shared';
 import { Router } from 'express';
 import { currentUser } from '../auth/middleware.js';
 import { one, query } from '../db/pool.js';
@@ -9,6 +9,7 @@ import { dateStr, listParam, paged, pageParams, param, uuid } from '../lib/valid
 import { buildActivityDocx, buildActivityPptx, loadActivityData, summarize } from '../services/activityReport.js';
 import { pool } from '../db/pool.js';
 import { commissionAccess, requireChamberAdmin } from '../services/access.js';
+import { tehranDate } from '../services/holidays.js';
 import { adminBrowsableChambers, browsableCommissionIds } from '../services/roles.js';
 
 export const reportsRouter = Router();
@@ -56,6 +57,57 @@ reportsRouter.get('/me/home', async (req, res) => {
     one<{ count: number }>('SELECT count(*) FROM notifications WHERE user_id = $1 AND read_at IS NULL', [u.id]),
   ]);
   res.json({ upcoming, live, resolutions, referrals, unreadNotifications: unread?.count ?? 0 });
+});
+
+/**
+ * Numbers for the dashboard cards. «Mine» counts the user's own commissions (or, for an admin choosing a chamber,
+ * that chamber's); the overall figures are the chamber's — the whole country for a Super Admin without one.
+ */
+reportsRouter.get('/me/overview', async (req, res) => {
+  const u = currentUser(req);
+  const asked = typeof req.query.chamberId === 'string' ? uuid.parse(req.query.chamberId) : null;
+  const adminOf = asked && (u.isSuperAdmin || u.adminChambers.includes(asked)) ? asked : null;
+  const home = await one<{ chamber_id: string | null }>(
+    `SELECT COALESCE(u.chamber_id, (SELECT m.chamber_id FROM commission_memberships m WHERE m.user_id = u.id AND m.status = 'active' LIMIT 1)) AS chamber_id
+       FROM users u WHERE u.id = $1`,
+    [u.id],
+  );
+  const chamber = adminOf ?? home?.chamber_id ?? null;
+  // Calendar month and year in Iran (Jalali).
+  const [y, m, d] = tehranDate(new Date()).split('-').map(Number);
+  const [jy, jm] = toJalali(y, m, d);
+  const g = (yy: number, mm: number) => toGregorian(yy, mm, 1).map((n, i) => (i ? String(n).padStart(2, '0') : n)).join('-');
+  const monthFrom = g(jy, jm);
+  const monthTo = jm === 12 ? g(jy + 1, 1) : g(jy, jm + 1);
+  const yearFrom = g(jy, 1);
+  const yearTo = g(jy + 1, 1);
+  const HELD = `('in_progress','agenda_processing','minutes_draft','pending_approval','approved','archived')`;
+  // $1: the chamber an admin chose (else the user's own commissions), $2: the user.
+  const scope = `SELECT id FROM commissions WHERE $1::uuid IS NOT NULL AND chamber_id = $1 AND status = 'active'
+                 UNION SELECT commission_id FROM commission_memberships WHERE $1::uuid IS NULL AND user_id = $2 AND status = 'active'`;
+  // $1: the chamber (null: every chamber).
+  const where = `($1::uuid IS NULL OR chamber_id = $1)`;
+  const [mine, overall] = await Promise.all([
+    one(
+      `SELECT
+         (SELECT count(*)::int FROM meeting_invitees i JOIN meetings mt ON mt.id = i.meeting_id
+           WHERE i.user_id = $2 AND mt.scheduled_at > now() AND mt.status IN ('draft','scheduled','invitation_sent','checkin_open')) AS upcoming,
+         (SELECT count(*)::int FROM (${scope}) s) AS commissions,
+         (SELECT count(*)::int FROM meetings WHERE commission_id IN (${scope}) AND status IN ${HELD} AND scheduled_at >= $3 AND scheduled_at < $4) AS meetings_this_month,
+         (SELECT count(*)::int FROM resolutions WHERE commission_id IN (${scope}) AND status NOT IN ('done','cancelled')) AS open_resolutions`,
+      [adminOf, u.id, monthFrom, monthTo],
+    ),
+    one(
+      `SELECT
+         (SELECT count(*)::int FROM commissions WHERE ${where} AND status = 'active') AS commissions,
+         (SELECT count(DISTINCT user_id)::int FROM commission_memberships WHERE ${where} AND status = 'active') AS members,
+         (SELECT count(*)::int FROM meetings WHERE ${where} AND status IN ${HELD} AND scheduled_at >= $2 AND scheduled_at < $3) AS meetings_this_year,
+         (SELECT count(*)::int FROM resolutions WHERE ${where} AND created_at >= $2 AND created_at < $3) AS resolutions_this_year`,
+      [chamber, yearFrom, yearTo],
+    ),
+  ]);
+  const name = chamber ? await one<{ name: string }>('SELECT name FROM chambers WHERE id = $1', [chamber]) : null;
+  res.json({ mine, overall, scope: chamber ? name?.name ?? null : 'همه اتاق‌ها' });
 });
 
 // ─────────────────────────────── Notifications ───────────────────────────────
