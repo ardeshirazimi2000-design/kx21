@@ -3,6 +3,7 @@ import { router } from 'expo-router';
 import { Pressable } from 'react-native';
 import { Button, Card, Empty, Screen, T } from '../../components/ui';
 import { post } from '../../lib/api';
+import { notifyUnreadChanged } from '../../lib/push';
 import { useRealtime } from '../../lib/socket';
 import { useTheme } from '../../lib/theme';
 import { useApi } from '../../lib/useApi';
@@ -12,14 +13,17 @@ export default function NotificationsScreen() {
   const { data, loading, reload } = useApi('/notifications?pageSize=50');
   useRealtime({ notification: () => void reload() });
   const open = async (n: any) => {
-    if (!n.read_at) await post(`/notifications/${n.id}/read`).catch(() => {});
+    if (!n.read_at) await post(`/notifications/${n.id}/read`).then(notifyUnreadChanged, () => {});
     if (n.data?.meetingId) router.push(`/meeting/${n.data.meetingId}`);
     else if (n.data?.resolutionId && !n.data?.networkId) router.push(`/resolution/${n.data.resolutionId}`);
     else void reload();
   };
   return (
     <Screen refreshing={loading} onRefresh={reload}>
-      <Button title="خواندن همه" variant="secondary" onPress={() => post('/notifications/read-all').then(reload)} />
+      <Button title="خواندن همه" variant="secondary" onPress={() => post('/notifications/read-all').then(() => {
+            notifyUnreadChanged();
+            return reload();
+          })} />
       {data?.items.length === 0 && <Empty text="اعلانی ندارید" />}
       {data?.items.map((n: any) => (
         <Pressable key={n.id} onPress={() => open(n)}>

@@ -2,6 +2,8 @@ import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { NotificationBridge } from '../components/NotificationBridge';
+// Registers the background notification check when the app starts (also when Android starts it in the background).
+import '../lib/backgroundCheck';
 import { AuthProvider } from '../lib/auth';
 import { useTheme } from '../lib/theme';
 

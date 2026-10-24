@@ -20,6 +20,10 @@ export async function registerForPush(): Promise<void> {
     await Notifications.setNotificationChannelAsync('default', {
       name: 'اعلان‌های جلسات',
       importance: Notifications.AndroidImportance.HIGH,
+      sound: 'default',
+      enableVibrate: true,
+      vibrationPattern: [0, 250, 150, 250],
+      lockscreenVisibility: Notifications.AndroidNotificationVisibility.PUBLIC,
     });
   }
   const current = await Notifications.getPermissionsAsync();
@@ -56,4 +60,16 @@ export function routeForNotification(data: Record<string, unknown> | undefined):
   if (typeof data.networkId === 'string') return '/notifications';
   if (typeof data.resolutionId === 'string') return `/resolution/${data.resolutionId}`;
   return '/notifications';
+}
+
+/** Unread count of the notifications tab: refreshed when a notification arrives or is read. */
+const unreadListeners = new Set<() => void>();
+export function onUnreadChanged(l: () => void) {
+  unreadListeners.add(l);
+  return () => {
+    unreadListeners.delete(l);
+  };
+}
+export function notifyUnreadChanged() {
+  unreadListeners.forEach((l) => l());
 }
