@@ -1,4 +1,7 @@
-/** Thin fetch wrapper with access-token refresh. Tokens live in localStorage (per-browser session). */
+/**
+ * Thin fetch wrapper with access-token refresh. Tokens live in localStorage when the user chose «مرا به خاطر
+ * بسپار» at login, otherwise in sessionStorage (gone when the browser is closed).
+ */
 
 const KEY = 'kx.session';
 
@@ -18,9 +21,15 @@ export class ApiError extends Error {
   }
 }
 
+let remember = true;
+/** Chosen on the login form; applies to the session stored next. */
+export function setRememberMe(on: boolean) {
+  remember = on;
+}
+
 export function getSession(): Session | null {
   try {
-    const raw = localStorage.getItem(KEY);
+    const raw = sessionStorage.getItem(KEY) ?? localStorage.getItem(KEY);
     return raw ? (JSON.parse(raw) as Session) : null;
   } catch {
     return null;
@@ -29,8 +38,11 @@ export function getSession(): Session | null {
 
 export function setSession(s: Session | null) {
   try {
-    if (s) localStorage.setItem(KEY, JSON.stringify(s));
-    else localStorage.removeItem(KEY);
+    // A refreshed session stays where the current one is; a new login goes where «مرا به خاطر بسپار» says.
+    const store = sessionStorage.getItem(KEY) !== null ? sessionStorage : localStorage.getItem(KEY) !== null ? localStorage : remember ? localStorage : sessionStorage;
+    localStorage.removeItem(KEY);
+    sessionStorage.removeItem(KEY);
+    if (s) store.setItem(KEY, JSON.stringify(s));
   } catch {
     /* storage unavailable */
   }
