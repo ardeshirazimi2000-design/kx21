@@ -2,7 +2,9 @@ import { useEffect, useState, type ReactNode } from 'react';
 import { Link, Navigate, NavLink, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
 import { Loading, fa } from './components/ui';
 import { useAuth } from './lib/auth';
+import { post } from './lib/api';
 import { useApi, useSocket } from './lib/hooks';
+import { notificationLink, playChime, setTitleCount, showDesktop, soundEnabled, unlockAudioOnFirstGesture, type LiveNotification } from './lib/notifyAlert';
 import { AuditPage } from './pages/Audit';
 import { ChambersPage } from './pages/Chambers';
 import { CommissionDetailPage } from './pages/CommissionDetail';
@@ -98,7 +100,18 @@ function Shell({ children }: { children: ReactNode }) {
   const loc = useLocation();
   const nav = useNavigate();
   const unread = useApi<{ total: number }>('/notifications?unread=true&pageSize=1');
-  useSocket({ notification: () => void unread.reload() });
+  const [toasts, setToasts] = useState<LiveNotification[]>([]);
+  useSocket({
+    notification: (n: LiveNotification) => {
+      void unread.reload();
+      if (soundEnabled()) playChime();
+      showDesktop(n, nav);
+      setToasts((t) => [n, ...t.filter((x) => x.id !== n.id)].slice(0, 3));
+      window.setTimeout(() => setToasts((t) => t.filter((x) => x.id !== n.id)), 8000);
+    },
+  });
+  useEffect(() => unlockAudioOnFirstGesture(), []);
+  useEffect(() => setTitleCount(unread.data?.total ?? 0), [unread.data?.total]);
   // Reading notifications (here or on another page) updates the unread count.
   useEffect(() => {
     const refresh = () => void unread.reload();
@@ -201,6 +214,15 @@ function Shell({ children }: { children: ReactNode }) {
           </button>
         </header>
         <main className="content">{children}</main>
+        <NotificationToasts
+          items={toasts}
+          onOpen={(n) => {
+            setToasts((t) => t.filter((x) => x.id !== n.id));
+            void post(`/notifications/${n.id}/read`).then(() => window.dispatchEvent(new Event(NOTIFICATIONS_CHANGED)));
+            nav(notificationLink(n));
+          }}
+          onClose={(id) => setToasts((t) => t.filter((x) => x.id !== id))}
+        />
       </div>
     </div>
   );
@@ -216,6 +238,26 @@ const readCollapsed = (): string[] => {
 };
 
 /** Collapsible sidebar group; the group holding the current page always opens. */
+/** New notifications pop up in a corner of the screen for a few seconds. */
+function NotificationToasts({ items, onOpen, onClose }: { items: LiveNotification[]; onOpen: (n: LiveNotification) => void; onClose: (id: string) => void }) {
+  if (!items.length) return null;
+  return (
+    <div className="toasts" role="status" aria-live="polite">
+      {items.map((n) => (
+        <div key={n.id} className="toast">
+          <button type="button" className="toast-body" onClick={() => onOpen(n)}>
+            <strong>🔔 {n.title}</strong>
+            <span>{n.body}</span>
+          </button>
+          <button type="button" className="toast-close" aria-label="بستن" onClick={() => onClose(n.id)}>
+            ×
+          </button>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function NavGroup({ id, title, paths, children }: { id: string; title: string; paths: string[]; children: ReactNode }) {
   const loc = useLocation();
   const holdsCurrent = paths.some((p) => loc.pathname === p || loc.pathname.startsWith(`${p}/`));

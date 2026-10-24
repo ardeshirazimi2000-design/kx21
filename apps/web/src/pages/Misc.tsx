@@ -4,6 +4,7 @@ import { Badge, Button, Card, dateFa, dateTimeFa, Empty, ErrorBox, Field, fa, Lo
 import { download, post } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { useApi } from '../lib/hooks';
+import { desktopPermission, notificationLink, playChime, requestDesktop, setSoundEnabled, soundEnabled } from '../lib/notifyAlert';
 
 export function ReferralsPage() {
   const { data, reload } = useApi<any[]>('/referrals');
@@ -45,12 +46,56 @@ export function ReferralsPage() {
   );
 }
 
-const EVENT_LINK = (n: any) =>
-  n.data?.networkId ? `/networks/${n.data.networkId}` : n.data?.meetingId ? `/meetings/${n.data.meetingId}` : n.data?.resolutionId ? `/resolutions/${n.data.resolutionId}` : n.data?.referralId ? '/referrals' : null;
+const EVENT_LINK = (n: any) => {
+  const to = notificationLink(n);
+  return to === '/notifications' ? null : to;
+};
 
 /** Tells the menu badge to recount unread notifications. */
 export const NOTIFICATIONS_CHANGED = 'kx:notifications-changed';
 const changed = () => void window.dispatchEvent(new Event(NOTIFICATIONS_CHANGED));
+
+/** How new notifications get the user's attention in this browser: sound and desktop notifications. */
+function AlertSettings() {
+  const [sound, setSound] = useState(soundEnabled());
+  const [desktop, setDesktop] = useState(desktopPermission());
+  return (
+    <Card className="mb">
+      <div className="row between wrap gap-sm" style={{ alignItems: 'center' }}>
+        <label className="check" style={{ margin: 0 }}>
+          <input
+            type="checkbox"
+            checked={sound}
+            onChange={(e) => {
+              setSoundEnabled(e.target.checked);
+              setSound(e.target.checked);
+              if (e.target.checked) playChime();
+            }}
+          />{' '}
+          🔔 پخش صدا هنگام رسیدن اعلان تازه
+        </label>
+        <Button size="sm" variant="ghost" onClick={playChime}>
+          آزمایش صدا
+        </Button>
+      </div>
+      <p className="muted small" style={{ marginBottom: 0 }}>
+        {desktop === 'granted'
+          ? 'اعلان‌های تازه وقتی این صفحه پشت پنجره‌های دیگر است، در گوشهٔ صفحهٔ رایانه هم نمایش داده می‌شوند.'
+          : desktop === 'unsupported'
+            ? 'وقتی سامانه باز است، اعلان تازه با صدا و یک کادر در گوشهٔ صفحه نمایش داده می‌شود. نمایش اعلان روی دسکتاپ رایانه (وقتی پنجرهٔ دیگری باز است) به نشانی امن (https) نیاز دارد.'
+            : 'وقتی سامانه باز است، اعلان تازه با صدا و یک کادر در گوشهٔ صفحه نمایش داده می‌شود.'}
+        {(desktop === 'default' || desktop === 'denied') && (
+          <>
+            {' '}
+            <Button size="sm" variant="secondary" disabled={desktop === 'denied'} onClick={() => void requestDesktop().then((p) => setDesktop(p))}>
+              {desktop === 'denied' ? 'اعلان دسکتاپ در تنظیمات مرورگر بسته شده است' : 'فعال‌سازی اعلان روی دسکتاپ'}
+            </Button>
+          </>
+        )}
+      </p>
+    </Card>
+  );
+}
 
 export function NotificationsPage() {
   const nav = useNavigate();
@@ -59,6 +104,7 @@ export function NotificationsPage() {
   return (
     <>
       <PageHeader title="اعلان‌ها" actions={<Button variant="secondary" onClick={() => post('/notifications/read-all').then(changed).then(reload)}>علامت‌گذاری همه به‌عنوان خوانده‌شده</Button>} />
+      <AlertSettings />
       <Card>
         {data?.items.length === 0 && <Empty>اعلانی ندارید.</Empty>}
         <ul className="list">
