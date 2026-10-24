@@ -465,7 +465,7 @@ table.table { width: 100%; border-collapse: collapse; }
 .lg-phone { direction: ltr; unicode-bidi: isolate; display: inline-block; font-weight: 500; }
 .lg-foot-sep { width: 1px; height: 28px; background: #d9e0eb; }
 .lg-hero { position: relative; display: flex; flex-direction: column; justify-content: space-between; gap: 32px; padding: 56px 64px 40px; color: #fff; overflow: hidden;
-  background: linear-gradient(180deg, rgba(10, 42, 98, 0.7), rgba(7, 26, 66, 0.94) 75%), url('/chamber-building.jpg') 35% center / cover no-repeat, linear-gradient(160deg, #123f8a, #071a42);
+  background: linear-gradient(180deg, #0a2a62 0, #0a2a62 66%, rgba(10, 42, 98, 0.5) 83%, rgba(7, 26, 66, 0.88) 100%), url('/chamber-building.jpg') 25% 100% / auto 36% no-repeat, #0a2a62;
   clip-path: ellipse(100% 100% at 0% 50%); padding-inline-start: 12%; }
 .lg-hero::before { content: ''; position: absolute; inset: auto -10% -30% -10%; height: 60%; background: radial-gradient(ellipse at 30% 100%, rgba(80, 140, 230, 0.25), transparent 60%); pointer-events: none; }
 .lg-hero-brand { display: flex; align-items: center; gap: 18px; position: relative; }
