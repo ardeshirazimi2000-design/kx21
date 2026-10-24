@@ -3,6 +3,7 @@ import { router } from 'expo-router';
 import { useState } from 'react';
 import { Pressable, View } from 'react-native';
 import { Badge, Button, Card, Empty, fa, Loading, Row, Screen, T, type Tone } from '../../components/ui';
+import { MonthCalendar } from '../../components/MonthCalendar';
 import { useApi } from '../../lib/useApi';
 
 const TONE: Partial<Record<MeetingStatus, Tone>> = {
@@ -15,15 +16,30 @@ const TONE: Partial<Record<MeetingStatus, Tone>> = {
 };
 
 export default function MeetingsScreen() {
-  const [past, setPast] = useState(false);
+  const [view, setView] = useState<'upcoming' | 'past' | 'calendar'>('upcoming');
+  const past = view === 'past';
   const now = new Date(Date.now() - 12 * 3600 * 1000).toISOString();
-  const { data, loading, reload } = useApi(past ? `/meetings?mine=true&to=${now}&order=desc&pageSize=50` : `/meetings?mine=true&from=${now}&pageSize=50`);
+  const { data, loading, reload } = useApi(
+    view === 'calendar' ? null : past ? `/meetings?mine=true&to=${now}&order=desc&pageSize=50` : `/meetings?mine=true&from=${now}&pageSize=50`,
+  );
+  const tabs = (
+    <View style={{ flexDirection: 'row-reverse', gap: 8, flexWrap: 'wrap' }}>
+      <Button title="جلسات آینده" variant={view === 'upcoming' ? 'primary' : 'secondary'} onPress={() => setView('upcoming')} />
+      <Button title="جلسات گذشته" variant={past ? 'primary' : 'secondary'} onPress={() => setView('past')} />
+      <Button title="تقویم" variant={view === 'calendar' ? 'primary' : 'secondary'} onPress={() => setView('calendar')} />
+    </View>
+  );
+  if (view === 'calendar') {
+    return (
+      <Screen>
+        {tabs}
+        <MonthCalendar />
+      </Screen>
+    );
+  }
   return (
     <Screen refreshing={loading} onRefresh={reload}>
-      <View style={{ flexDirection: 'row-reverse', gap: 8 }}>
-        <Button title="جلسات آینده" variant={past ? 'secondary' : 'primary'} onPress={() => setPast(false)} />
-        <Button title="جلسات گذشته" variant={past ? 'primary' : 'secondary'} onPress={() => setPast(true)} />
-      </View>
+      {tabs}
       {!data && loading && <Loading />}
       {data?.items.length === 0 && <Empty text="جلسه‌ای یافت نشد" />}
       {data?.items.map((m: any) => (

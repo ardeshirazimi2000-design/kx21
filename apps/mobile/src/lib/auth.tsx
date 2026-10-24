@@ -10,8 +10,9 @@ export interface Me {
   mobile: string | null;
   organization: string | null;
   is_super_admin: boolean;
+  chamber_id: string | null;
   adminChambers: string[];
-  memberships: { id: string; commission_id: string; commission_name: string; position: string; has_vote: boolean }[];
+  memberships: { id: string; commission_id: string; commission_name: string; position: string; has_vote: boolean; chamber_id: string }[];
 }
 
 interface AuthState {
