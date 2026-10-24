@@ -398,6 +398,7 @@ const tile = (id, label, tone, onclick = () => route(id), sub = null) => h('butt
 
 function route(view, arg) {
   for (const c of current.cleanup) c();
+  document.body.classList.remove('landing-mode');
   current = { view, arg, cleanup: [] };
   if (!['login', 'server', 'legal'].includes(view) && !session) view = current.view = 'login';
   location.hash = ['login', 'server'].includes(view) ? '' : (arg ? `${view}/${arg}` : view);
@@ -474,6 +475,38 @@ async function patientHome(me) {
           ? h('div', { class: 'stack', style: 'gap:6px' }, joinButton(a), Date.parse(a.starts_at) > serverNow() ? calendarButton(a) : null)
           : h('button', { class: 'btn small', onclick: () => route('appointments') }, 'مشاهده'))));
   }
+}
+
+// «راهنما» and «تماس با ما» on the start screen (no account needed).
+async function openGuide() {
+  const step = (n, t, d) => h('li', {}, h('b', {}, `${fa(n)}. ${t}`), h('div', { class: 'muted' }, d));
+  V2.sheet('راهنمای درمان پلاس', h('div', { class: 'legal-page stack' },
+    h('h3', {}, 'بیماران'),
+    h('ol', { class: 'guide-steps' },
+      step(1, 'ثبت‌نام', '«ثبت‌نام و ورود بیماران» را بزنید، شماره موبایل خود را وارد کنید، شرایط را تأیید کنید و کد ملی را بنویسید؛ شماره باید به نام خودتان باشد (استعلام شاهکار). با کد پیامکی وارد می‌شوید.'),
+      step(2, 'تکمیل پروفایل', 'تاریخ تولد، حساسیت‌ها و بیماری‌های زمینه‌ای را ثبت کنید تا پزشک پیش از ویزیت ببیند.'),
+      step(3, 'گرفتن نوبت', 'از «ویزیت با پزشک» تخصص و زمان را انتخاب کنید یا از «دستیار هوشمند» بخواهید علائم را بررسی و تخصص مناسب را پیشنهاد کند. نوبت را به تقویم گوشی اضافه کنید.'),
+      step(4, 'ویزیت', 'کمی پیش از زمان نوبت، از «نوبت‌ها» دکمه «ورود به اتاق ویزیت» را بزنید. ویزیت ویدیویی، صوتی یا متنی است و پس از آن نسخه و خلاصه ویزیت در سامانه است.')),
+    h('h3', {}, 'پزشکان'),
+    h('ol', { class: 'guide-steps' },
+      step(1, 'ثبت‌نام', '«ثبت‌نام و ورود پزشکان» را بزنید و با شماره موبایل و کد ملی ثبت‌نام کنید.'),
+      step(2, 'ارسال مدارک', 'در «پروفایل و مدارک» تخصص، شماره و کارت نظام پزشکی، عکس و معرفی را ثبت و برای بررسی ارسال کنید.'),
+      step(3, 'قرارداد همکاری', 'پس از تأیید مدارک، قرارداد همکاری را تکمیل و امضا کنید.'),
+      step(4, 'انتشار تقویم', 'در «تقویم» زمان‌های ویزیت را منتشر کنید تا بیماران نوبت بگیرند.')),
+    h('p', {}, 'پرسش دیگری دارید؟ پس از ورود، از بخش «پشتیبانی» با دستیار و کارشناس پشتیبانی گفتگو کنید.'),
+    legalLink('قوانین و حریم خصوصی')));
+}
+async function openContact() {
+  const r = await api('GET', '/v1/legal');
+  const c = r.company;
+  V2.sheet('تماس با ما', h('div', { class: 'legal-page stack' },
+    h('p', {}, h('b', {}, c.name), ' — ', c.brand),
+    h('ul', { class: 'contact-list' },
+      h('li', {}, h('span', { class: 'muted' }, 'نشانی: '), c.address),
+      h('li', {}, h('span', { class: 'muted' }, 'رایانامه: '), h('a', { href: `mailto:${c.email}`, dir: 'ltr' }, c.email)),
+      h('li', {}, h('span', { class: 'muted' }, 'وب‌سایت: '), h('bdi', {}, c.site))),
+    h('p', {}, 'کاربران سامانه پس از ورود می‌توانند از بخش «پشتیبانی» با دستیار پشتیبانی و کارشناس‌ها گفتگو کنند و شکایت یا درخواست خود را ثبت کنند.'),
+    legalLink('شیوه رسیدگی به شکایات', 'support')));
 }
 
 // First launch only: two animated introduction pages before the start screen (swipe, dots,
@@ -556,21 +589,49 @@ VIEWS.login = () => {
     h('span', {}, legalLink(), ' · ', siteLink()));
 
   // Start screen: two entries, as in the requirements.
+  // Start screen (landing): on wide screens an introduction beside the entry card, with a top bar
+  // (خانه، راهنما، تماس با ما); on phones the entry card alone.
   const stepRole = () => {
-    box.className = 'narrow stack';
-    box.replaceChildren(
-      h('div', { class: 'hero' }, h('img', { src: 'icon.svg', alt: '', width: 72, height: 72 }), h('h1', { class: 'wordmark', 'aria-label': 'درمان پلاس' }, h('b', {}, 'درمان'), ' ', h('i', {}, 'پلاس')), h('div', { class: 'wordmark-latin', 'aria-hidden': 'true' }, 'DARMAN PLUS'), h('p', { class: 'tagline' }, 'سلامت، همیشه در دسترس'), h('p', { class: 'muted' }, 'ویزیت آنلاین با پزشک و دستیار هوشمند')),
-      h('button', { class: 'entry', onclick: () => { role = 'patient'; stepPhone(); } },
-        h('span', { class: 'entry-icon' }, illus('patient', 60)), h('span', {}, h('b', {}, 'ثبت‌نام و ورود بیماران'), h('br'), h('small', { class: 'muted' }, 'دریافت نوبت، ویزیت آنلاین، دستیار هوشمند'))),
-      h('button', { class: 'entry', onclick: () => { role = 'doctor'; stepPhone(); } },
-        h('span', { class: 'entry-icon' }, illus('doctor', 60)), h('span', {}, h('b', {}, 'ثبت‌نام و ورود پزشکان'), h('br'), h('small', { class: 'muted' }, 'پزشکان و کادر کلینیک'))),
+    document.body.classList.add('landing-mode');
+    box.className = 'landing';
+    const wordmark = (cls = '') => h('div', { class: `lp-word ${cls}` }, h('div', { class: 'lp-name', 'aria-label': 'درمان پلاس' }, h('b', {}, 'درمان'), ' ', h('i', {}, 'پلاس')), h('div', { class: 'lp-latin', 'aria-hidden': 'true' }, 'DARMAN PLUS'));
+    const entry = (r, title, sub, cls) => h('button', { class: `lp-entry ${cls}`, type: 'button', onclick: () => { role = r; stepPhone(); } },
+      h('span', { class: 'lp-entry-ic' }, illus(r === 'doctor' ? 'doctor' : 'patient', 54)),
+      h('span', { class: 'lp-entry-text' }, h('b', {}, title), h('small', {}, sub)),
+      h('span', { class: 'lp-chev', 'aria-hidden': 'true' }, '‹'));
+    const card = h('section', { class: 'lp-card' },
+      h('img', { class: 'lp-card-logo', src: 'brand/mark.svg', alt: '', width: 76, height: 76 }),
+      wordmark('center'),
+      h('h1', {}, 'به درمان پلاس خوش آمدید'),
+      h('p', { class: 'muted' }, 'لطفاً نوع کاربری خود را انتخاب کنید:'),
+      entry('patient', 'ثبت‌نام و ورود بیماران', 'دریافت نوبت، ویزیت آنلاین، دستیار هوشمند', 'patient'),
+      entry('doctor', 'ثبت‌نام و ورود پزشکان', 'پزشکان و کادر کلینیک', 'doctor'),
       config.dev_mode ? h('div', { class: 'banner info small' },
         h('b', {}, 'حساب‌های نمونه (ورود پزشکان): '), 'پزشک ', h('bdi', {}, '09120000001'), ' · اپراتور ', h('bdi', {}, '09120000009'), ' · مدیر ', h('bdi', {}, '09120000010')) : null,
-      footer(),
-    );
+      h('div', { class: 'lp-links' }, legalLink(), h('span', { class: 'muted', 'aria-hidden': 'true' }, '|'), siteLink()),
+      IS_NATIVE ? (window.TELEHEALTH_API_BASE ? null : h('button', { class: 'btn small', onclick: () => route('server') }, `سرور: ${API_BASE.replace(/^https?:\/\//, '')} — تغییر`)) : installButton());
+    const feat = (ic, a, b) => h('li', {}, h('span', { class: 'lp-feat-ic' }, icon(ic, 26)), h('span', {}, a, h('br'), b));
+    const hero = h('section', { class: 'lp-hero' },
+      h('div', { class: 'lp-hero-head' }, h('img', { src: 'brand/mark.svg', alt: '', width: 96, height: 96 }), wordmark()),
+      h('h2', {}, 'سلامت، همیشه در دسترس'),
+      h('p', { class: 'muted' }, 'مشاوره آنلاین با پزشک و دستیار هوشمند'),
+      h('div', { class: 'lp-hero-body' },
+        h('ul', { class: 'lp-feats' },
+          feat('stethoscope', 'دسترسی سریع', 'به پزشک متخصص'),
+          feat('clock', 'مشاوره آنلاین', 'از هر جا'),
+          feat('shield', 'امنیت و محرمانگی', 'اطلاعات شما')),
+        h('img', { class: 'lp-laptop', src: 'intro/laptop.webp', alt: 'ویزیت تصویری با پزشک', width: 715, height: 515 })));
+    const nav = (label, fn, cur = false) => h('button', { type: 'button', class: cur ? 'cur' : '', onclick: fn }, label);
+    box.replaceChildren(
+      h('header', { class: 'lp-top' },
+        h('div', { class: 'lp-top-brand' }, h('img', { src: 'brand/mark.svg', alt: '', width: 38, height: 38 }), wordmark('sm')),
+        h('nav', { class: 'lp-nav', 'aria-label': 'پیوندها' },
+          nav('خانه', () => stepRole(), true), nav('راهنما', guard(openGuide)), nav('تماس با ما', guard(openContact)))),
+      h('div', { class: 'lp-grid' }, card, hero));
   };
 
   const stepPhone = (needNid = false) => {
+    document.body.classList.remove('landing-mode');
     box.className = 'card narrow stack';
     const input = h('input', { type: 'tel', dir: 'ltr', placeholder: '09121234567', autocomplete: 'tel', inputmode: 'tel', value: phone });
     const nid = needNid ? h('input', { type: 'text', dir: 'ltr', inputmode: 'numeric', maxlength: 10, placeholder: 'کد ملی ۱۰ رقمی' }) : null;
