@@ -95,6 +95,8 @@ body {
   line-height: 1.7;
   direction: rtl;
 }
+/* The hidden attribute always wins over layout rules (e.g. collapsed menu groups). */
+[hidden] { display: none !important; }
 a { color: var(--primary); text-decoration: none; }
 a:hover { text-decoration: underline; }
 h1, h2, h3, h4 { margin: 0; line-height: 1.4; }
@@ -154,6 +156,7 @@ h3 { font-size: 1rem; }
 .nav-chevron { transition: transform 0.2s ease; transform: rotate(90deg); opacity: 0.8; }
 .nav-section.open .nav-chevron { transform: rotate(0deg); }
 .nav-items { display: grid; gap: 2px; padding-inline-start: 8px; }
+.nav-items[hidden] { display: none; }
 .nav a, .nav-logout { display: flex; gap: 12px; align-items: center; padding: 10px 14px; border-radius: 10px; color: var(--sidebar-ink); font: inherit; }
 .nav a:hover, .nav-logout:hover { background: rgba(255, 255, 255, 0.07); color: #fff; text-decoration: none; }
 .nav a.active { background: var(--nav-active); color: #fff; box-shadow: 0 6px 16px rgba(29, 78, 216, 0.35); }
@@ -167,7 +170,7 @@ h3 { font-size: 1rem; }
 .menu-btn { display: inline-flex; }
 /* Wide screens: the ☰ button slides the sidebar away and back. */
 .shell { transition: grid-template-columns 0.28s ease; }
-.shell > .sidebar { min-width: 0; overflow-x: hidden; transition: padding 0.28s ease, opacity 0.2s ease, visibility 0s linear 0s; }
+.shell > .sidebar { min-width: 0; overflow-x: clip; transition: padding 0.28s ease, opacity 0.2s ease, visibility 0s linear 0s; }
 .shell > .sidebar > * { min-width: 232px; }
 .nav-hidden .shell { grid-template-columns: minmax(0, 1fr) 0; }
 .nav-hidden .shell > .sidebar { padding-inline: 0; opacity: 0; visibility: hidden; transition: padding 0.28s ease, opacity 0.2s ease 0.08s, visibility 0s linear 0.28s; }
