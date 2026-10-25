@@ -1,5 +1,6 @@
 import pg from 'pg';
 import { config } from '../config.js';
+import { logger } from '../lib/logger.js';
 
 // Return DATE columns as plain 'YYYY-MM-DD' strings instead of JS Dates (avoids timezone shifts).
 pg.types.setTypeParser(1082, (v) => v);
@@ -7,6 +8,8 @@ pg.types.setTypeParser(1082, (v) => v);
 pg.types.setTypeParser(20, (v) => Number(v));
 
 export const pool = new pg.Pool({ connectionString: config.databaseUrl, max: 20 });
+// An idle connection dropped by the database (restart, network) must not crash the process; the pool reconnects.
+pool.on('error', (err) => logger.error({ err }, 'idle database connection error'));
 
 export type Db = pg.Pool | pg.PoolClient;
 

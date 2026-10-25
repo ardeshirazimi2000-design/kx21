@@ -78,7 +78,12 @@ export async function api<T = any>(path: string, init: RequestInit & { json?: un
     headers.set('content-type', 'application/json');
     body = JSON.stringify(init.json);
   }
-  const res = await fetch(`/api${path}`, { ...init, headers, body });
+  let res: Response;
+  try {
+    res = await fetch(`/api${path}`, { ...init, headers, body });
+  } catch {
+    throw new ApiError(0, 'network', 'اتصال به سرور برقرار نشد؛ اتصال شبکه یا آدرس سامانه را بررسی کنید');
+  }
   if (res.status === 401 && retry && s && !path.startsWith('/auth/login')) {
     if (await refresh()) return api<T>(path, init, false);
   }
@@ -87,7 +92,8 @@ export async function api<T = any>(path: string, init: RequestInit & { json?: un
   const data = ct.includes('application/json') ? await res.json() : await res.text();
   if (!res.ok) {
     const e = (data as any)?.error;
-    throw new ApiError(res.status, e?.code ?? 'error', e?.message ?? 'خطا در ارتباط با سرور', e?.details);
+    const fallback = [502, 503, 504].includes(res.status) ? 'سرویس اتوماسیون اداری در دسترس نیست' : 'خطا در ارتباط با سرور';
+    throw new ApiError(res.status, e?.code ?? 'error', e?.message ?? `${fallback} (کد ${res.status})`, e?.details);
   }
   return data as T;
 }
