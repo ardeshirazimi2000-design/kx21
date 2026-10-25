@@ -67,6 +67,7 @@ minutesRouter.post('/minutes/:id/submit', async (req, res) => {
   const { meeting } = await tx(async (c) => {
     const { m, a } = await minutesAndAccess(u, param(req, 'id'), c);
     a.require('meeting.manage');
+    if (a.meeting.archival) throw conflict('صورتجلسهٔ جلسهٔ سوابق با «نهایی‌سازی» ثبت می‌شود، نه ارسال برای تأیید', 'archival');
     await transition(c, req, a.meeting, 'submit_minutes');
     await c.query(`UPDATE minutes SET status = 'pending_approval', submitted_at = now(), return_reason = NULL WHERE id = $1`, [m.id]);
     return { meeting: a.meeting };

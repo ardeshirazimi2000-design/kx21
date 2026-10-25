@@ -3,6 +3,7 @@ import {
   availableActions,
   formatJalaliDateTime,
   isCheckinWindow,
+  isArchivalOpen,
   isEditable,
   isLive,
   MEETING_TYPES,
@@ -231,7 +232,18 @@ meetingsRouter.get('/meetings/:id', async (req, res) => {
 meetingsRouter.patch('/meetings/:id', async (req, res) => {
   const u = currentUser(req);
   const id = param(req, 'id');
-  const b = body(req, meetingSchema.pick({ title: true, scheduledAt: true, durationMinutes: true, location: true, onlineLink: true, type: true, allowHoliday: true }).partial());
+  const b = body(
+    req,
+    meetingSchema
+      .pick({ title: true, number: true, scheduledAt: true, durationMinutes: true, location: true, onlineLink: true, type: true, allowHoliday: true })
+      .partial()
+      .extend({
+        /** Meetings recorded from the archive: the day and the real start/end times (Iran). */
+        date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+        startTime: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/).optional(),
+        endTime: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/).optional(),
+      }),
+  );
   if (b.scheduledAt) {
     const m = await one<{ chamber_id: string; scheduled_at: Date }>('SELECT chamber_id, scheduled_at FROM meetings WHERE id = $1', [id]);
     // Only a move to another day is checked again.
@@ -240,22 +252,39 @@ meetingsRouter.patch('/meetings/:id', async (req, res) => {
   const { after, changed, notifyChange } = await tx(async (c) => {
     const a = await meetingAccess(u, id, c, { forUpdate: true });
     a.require('meeting.manage');
-    if (!isEditable(a.meeting.status)) throw conflict('جلسه در وضعیت فعلی قابل ویرایش نیست');
+    const archival = isArchivalOpen(a.meeting);
+    if (!isEditable(a.meeting.status) && !archival) throw conflict('جلسه در وضعیت فعلی قابل ویرایش نیست');
     const before = a.meeting;
+    // A meeting from the archive keeps its real day and hours: start, end and duration move together.
+    let times: { start: Date; end: Date } | null = null;
+    if (archival && (b.date || b.startTime || b.endTime)) {
+      if (!b.date || !b.startTime || !b.endTime) throw badRequest('تاریخ، ساعت شروع و ساعت پایان را با هم وارد کنید');
+      if (b.endTime <= b.startTime) throw badRequest('ساعت پایان باید بعد از ساعت شروع باشد');
+      if (b.date > tehranDate(new Date())) throw badRequest('جلسهٔ سوابق باید در گذشته برگزار شده باشد');
+      times = { start: new Date(`${b.date}T${b.startTime}:00+03:30`), end: new Date(`${b.date}T${b.endTime}:00+03:30`) };
+    }
     const after = await one(
-      `UPDATE meetings SET title = COALESCE($2, title), scheduled_at = COALESCE($3, scheduled_at), duration_minutes = COALESCE($4, duration_minutes),
-         location = COALESCE($5, location), online_link = COALESCE($6, online_link), type = COALESCE($7, type), updated_at = now()
+      `UPDATE meetings SET title = COALESCE($2, title), scheduled_at = COALESCE($8, $3, scheduled_at), duration_minutes = COALESCE($10, $4, duration_minutes),
+         location = COALESCE($5, location), online_link = COALESCE($6, online_link), type = COALESCE($7, type),
+         started_at = COALESCE($8, started_at), ended_at = COALESCE($9, ended_at), checkin_closed_at = COALESCE($9, checkin_closed_at),
+         number = COALESCE($11, number), updated_at = now()
        WHERE id = $1 RETURNING *`,
-      [id, b.title, b.scheduledAt, b.durationMinutes, b.location, b.onlineLink, b.type],
+      [
+        id, b.title, archival ? null : b.scheduledAt, b.durationMinutes, b.location, b.onlineLink, b.type,
+        times?.start ?? null, times?.end ?? null, times ? Math.round((+times.end - +times.start) / 60000) : null, archival ? (b.number ?? null) : null,
+      ],
       c,
-    );
+    ).catch((e) => {
+      if (e.code === '23505') throw conflict('این شماره جلسه قبلاً در این کمیسیون ثبت شده است', 'number_taken');
+      throw e;
+    });
     const changed =
       new Date(before.scheduled_at).getTime() !== new Date(after.scheduled_at).getTime() ||
       before.location !== after.location ||
       before.online_link !== after.online_link ||
       before.type !== after.type;
     await audit(c, req, { chamberId: before.chamber_id, action: 'meeting.updated', entity: 'meeting', entityId: id, before, after });
-    return { after, changed, notifyChange: before.status !== 'draft' && before.status !== 'scheduled' };
+    return { after, changed, notifyChange: !archival && before.status !== 'draft' && before.status !== 'scheduled' };
   });
   if (changed && notifyChange) {
     await notify({
@@ -280,7 +309,11 @@ meetingsRouter.post('/meetings/:id/invitees', async (req, res) => {
   const sendNow = await tx(async (c) => {
     const a = await meetingAccess(u, id, c, { forUpdate: true });
     a.require('meeting.manage');
-    if (!isEditable(a.meeting.status) && !isLive(a.meeting.status)) throw conflict('امکان افزودن مدعو در این وضعیت وجود ندارد');
+    // Until the minutes are sent for approval; after the meeting no invitation is sent, attendance is recorded directly.
+    if (!isEditable(a.meeting.status) && !isLive(a.meeting.status) && a.meeting.status !== 'minutes_draft') {
+      throw conflict('امکان افزودن مدعو در این وضعیت وجود ندارد');
+    }
+    const held = a.meeting.status === 'minutes_draft';
     const person = await one('SELECT chamber_id FROM users WHERE id = $1 AND is_active', [b.userId], c);
     if (!person || person.chamber_id !== a.meeting.chamber_id) throw badRequest('فرد متعلق به این اتاق نیست');
     await assertRole(a.meeting.chamber_id, b.role, 'meeting', c);
@@ -288,10 +321,10 @@ meetingsRouter.post('/meetings/:id/invitees', async (req, res) => {
     await c.query(
       `INSERT INTO meeting_invitees (meeting_id, user_id, role, has_vote, invited_at) VALUES ($1,$2,$3,$4, CASE WHEN $5 THEN now() END)
        ON CONFLICT (meeting_id, user_id) DO UPDATE SET role = EXCLUDED.role, has_vote = EXCLUDED.has_vote`,
-      [id, b.userId, b.role, hasVote, a.meeting.status !== 'draft' && a.meeting.status !== 'scheduled'],
+      [id, b.userId, b.role, hasVote, !held && a.meeting.status !== 'draft' && a.meeting.status !== 'scheduled'],
     );
-    const sent = a.meeting.status !== 'draft' && a.meeting.status !== 'scheduled';
-    if (sent) await ensureAttendanceRows(id, c);
+    const sent = !held && a.meeting.status !== 'draft' && a.meeting.status !== 'scheduled';
+    if (sent || held) await ensureAttendanceRows(id, c);
     await audit(c, req, { chamberId: a.meeting.chamber_id, action: 'meeting.invitee_added', entity: 'meeting', entityId: id, after: { ...b, hasVote } });
     return sent ? a.meeting : null;
   });
@@ -317,7 +350,7 @@ meetingsRouter.delete('/meetings/:id/invitees/:userId', async (req, res) => {
   await tx(async (c) => {
     const a = await meetingAccess(u, id, c, { forUpdate: true });
     a.require('meeting.manage');
-    if (!isEditable(a.meeting.status)) throw conflict('حذف مدعو فقط پیش از شروع جلسه ممکن است');
+    if (!isEditable(a.meeting.status) && !isArchivalOpen(a.meeting)) throw conflict('حذف مدعو فقط پیش از شروع جلسه ممکن است');
     await c.query('DELETE FROM attendance WHERE meeting_id = $1 AND user_id = $2', [id, userId]);
     await c.query('DELETE FROM meeting_invitees WHERE meeting_id = $1 AND user_id = $2', [id, userId]);
     await audit(c, req, { chamberId: a.meeting.chamber_id, action: 'meeting.invitee_removed', entity: 'meeting', entityId: id, before: { userId } });

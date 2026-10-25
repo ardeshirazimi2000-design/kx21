@@ -17,7 +17,7 @@ export async function runScheduledJobs(): Promise<void> {
   const dueSoon = await query(
     `UPDATE resolutions r SET due_soon_notified_at = now()
        FROM commissions c
-      WHERE c.id = r.commission_id AND r.status NOT IN ('done','cancelled','submitted') AND r.due_soon_notified_at IS NULL
+      WHERE c.id = r.commission_id AND NOT r.archival AND r.status NOT IN ('done','cancelled','submitted') AND r.due_soon_notified_at IS NULL
         AND r.due_date >= current_date
         AND r.due_date <= current_date + COALESCE((c.settings->>'dueSoonDays')::int, 3)
       RETURNING r.id, r.chamber_id, r.commission_id, r.number, r.owner_id, r.due_date`,
@@ -36,7 +36,7 @@ export async function runScheduledJobs(): Promise<void> {
 
   const overdue = await query(
     `UPDATE resolutions SET overdue_notified_at = now()
-      WHERE status NOT IN ('done','cancelled') AND due_date < current_date AND overdue_notified_at IS NULL
+      WHERE NOT archival AND status NOT IN ('done','cancelled') AND due_date < current_date AND overdue_notified_at IS NULL
       RETURNING id, chamber_id, commission_id, number, owner_id, due_date`,
   );
   for (const r of overdue) {

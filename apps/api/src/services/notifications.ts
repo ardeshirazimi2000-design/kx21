@@ -216,6 +216,18 @@ async function sendPush(r: Recipient, title: string, body: string, data: Record<
 
 // ─────────────────────────────── Dispatch ───────────────────────────────
 
+/** Meetings and resolutions recorded from the archive are kept for the record: nobody is notified about them. */
+async function aboutArchive(data: Record<string, unknown> | undefined) {
+  const meetingId = typeof data?.meetingId === 'string' ? data.meetingId : null;
+  const resolutionId = typeof data?.resolutionId === 'string' ? data.resolutionId : null;
+  if (!meetingId && !resolutionId) return false;
+  const r = await query<{ archival: boolean }>(
+    `SELECT archival FROM meetings WHERE id = $1::uuid AND archival UNION ALL SELECT archival FROM resolutions WHERE id = $2::uuid AND archival LIMIT 1`,
+    [meetingId, resolutionId],
+  );
+  return r.length > 0;
+}
+
 /**
  * Stores in-app notifications, pushes them over the socket and sends push / SMS / email according
  * to the chamber's settings, with each recipient's own text. Call after the transaction committed.
@@ -223,6 +235,7 @@ async function sendPush(r: Recipient, title: string, body: string, data: Record<
 export async function notify(n: NotifyInput): Promise<void> {
   const userIds = [...new Set(n.userIds.filter(Boolean))];
   if (!userIds.length) return;
+  if (await aboutArchive(n.data)) return;
   const settings = await loadNotificationSettings(n.chamberId);
   const channels = channelsFor(settings, n.event);
   const recipients = await query<Recipient>(

@@ -45,6 +45,8 @@ const createSchema = z.object({
   dueDate: dateStr.nullish(),
   priority: z.enum(['low', 'normal', 'high', 'urgent']).default('normal'),
   kpi: z.string().nullish(),
+  /** The number written in the paper minutes, for a resolution of a meeting from the archive. */
+  number: z.string().trim().min(1).max(30).optional(),
   /** Executive bodies (دستگاه‌های اجرایی); without it, «addressee» becomes the lead body. */
   executors: z.array(z.object({ name: z.string().max(200), role: z.enum(['lead', 'partner']).optional() })).max(12).optional(),
 });
@@ -54,14 +56,17 @@ resolutionsRouter.post('/resolutions', async (req, res) => {
   const b = body(req, createSchema);
   const ca = await commissionAccess(u, b.commissionId);
   ca.require('resolution.manage');
+  let archival = false;
   const row = await tx(async (c) => {
     await c.query('SELECT 1 FROM commissions WHERE id = $1 FOR UPDATE', [b.commissionId]);
     if (b.meetingId) {
-      const m = await one('SELECT commission_id, status FROM meetings WHERE id = $1', [b.meetingId], c);
+      const m = await one('SELECT commission_id, status, archival FROM meetings WHERE id = $1', [b.meetingId], c);
       if (!m || m.commission_id !== b.commissionId) throw badRequest('جلسه متعلق به این کمیسیون نیست');
       if (['draft', 'scheduled', 'invitation_sent', 'checkin_open', 'cancelled'].includes(m.status)) {
         throw conflict('مصوبه فقط از جلسه برگزارشده ایجاد می‌شود');
       }
+      // Resolutions of a meeting from the archive are kept for the record (no notifications or reminders).
+      archival = !!m.archival;
     }
     if (b.agendaItemId) {
       const it = await one('SELECT meeting_id FROM agenda_items WHERE id = $1', [b.agendaItemId], c);
@@ -77,17 +82,20 @@ resolutionsRouter.post('/resolutions', async (req, res) => {
       if (!owner || owner.chamber_id !== ca.commission.chamber_id) throw badRequest('مسئول اجرا متعلق به این اتاق نیست');
     }
     const { n } = (await one<{ n: number }>('SELECT count(*) + 1 AS n FROM resolutions WHERE commission_id = $1', [b.commissionId], c))!;
-    const number = `${ca.commission.code}-${String(n).padStart(3, '0')}`;
+    const number = archival && b.number ? b.number : `${ca.commission.code}-${String(n).padStart(3, '0')}`;
     const r = await one(
       `INSERT INTO resolutions (chamber_id, commission_id, meeting_id, agenda_item_id, vote_session_id, number, text, owner_id, addressee,
-          due_date, priority, kpi, created_by)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) RETURNING *`,
+          due_date, priority, kpi, created_by, archival)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) RETURNING *`,
       [
         ca.commission.chamber_id, b.commissionId, b.meetingId ?? null, b.agendaItemId ?? null, b.voteSessionId ?? null, number, b.text,
-        b.ownerId ?? null, b.addressee ?? null, b.dueDate ?? null, b.priority, b.kpi ?? null, u.id,
+        b.ownerId ?? null, b.addressee ?? null, b.dueDate ?? null, b.priority, b.kpi ?? null, u.id, archival,
       ],
       c,
-    );
+    ).catch((e) => {
+      if (e.code === '23505') throw conflict(`مصوبه‌ای با شماره ${number} در این کمیسیون ثبت شده است`, 'number_taken');
+      throw e;
+    });
     await c.query(
       `INSERT INTO tasks (chamber_id, resolution_id, title, assignee_id, due_date) VALUES ($1,$2,$3,$4,$5)`,
       [r.chamber_id, r.id, `اجرای مصوبه ${number}`, r.owner_id, r.due_date],

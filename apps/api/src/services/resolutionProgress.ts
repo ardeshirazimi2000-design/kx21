@@ -22,7 +22,8 @@ export interface ProgressInput {
  */
 export async function recordProgress(c: Db, req: Request | null, r: any, p: ProgressInput) {
   if (['done', 'cancelled'].includes(r.status)) throw conflict('این مصوبه بسته شده است');
-  const status = p.submit || p.progress === 100 ? 'submitted' : 'in_progress';
+  // A resolution recorded from the archive is not reviewed: at 100% it is done.
+  const status = r.archival ? (p.progress === 100 ? 'done' : 'in_progress') : p.submit || p.progress === 100 ? 'submitted' : 'in_progress';
   const row = await one(`UPDATE resolutions SET progress = $2, status = $3, updated_at = now() WHERE id = $1 RETURNING *`, [r.id, p.progress, status], c);
   await c.query(
     `INSERT INTO resolution_updates (resolution_id, user_id, kind, progress, note, document_id, source, integration_client_id, external_ref)

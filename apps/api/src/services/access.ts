@@ -112,6 +112,8 @@ export interface MeetingRow {
   started_at: Date | null;
   started_by: string | null;
   ended_at: Date | null;
+  /** Recorded from the archive (ثبت از سوابق). */
+  archival: boolean;
   created_by: string | null;
 }
 

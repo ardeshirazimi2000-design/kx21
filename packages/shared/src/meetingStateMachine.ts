@@ -79,3 +79,11 @@ export class InvalidTransitionError extends Error {
     this.name = 'InvalidTransitionError';
   }
 }
+
+/**
+ * A meeting recorded from the archive (ثبت از سوابق) stays open for entering its data — details, invitees,
+ * attendance, agenda, vote results and resolutions — until the operator finalizes it.
+ */
+export function isArchivalOpen(m: { archival?: boolean; status: MeetingStatus | string }): boolean {
+  return !!m.archival && m.status === 'minutes_draft';
+}

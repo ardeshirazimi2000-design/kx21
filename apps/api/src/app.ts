@@ -14,6 +14,7 @@ import { agendaRouter } from './routes/agenda.js';
 import { authRouter } from './routes/auth.js';
 import { delegatesRouter } from './routes/delegates.js';
 import { documentsRouter, filesRouter } from './routes/documents.js';
+import { archivalRouter } from './routes/archival.js';
 import { holidaysRouter } from './routes/holidays.js';
 import { integrationApiRouter, integrationsAdminRouter } from './routes/integration.js';
 import { meetingsRouter } from './routes/meetings.js';
@@ -94,6 +95,7 @@ export function createApp() {
   api.use(structureRouter);
   api.use(notificationSettingsRouter);
   api.use(holidaysRouter);
+  api.use(archivalRouter);
   api.use(meetingsRouter);
   api.use(agendaRouter);
   api.use(minutesRouter);

@@ -1,4 +1,4 @@
-import { isEditable, isLive, SOCKET_EVENTS, tallyVotes, DEFAULT_VOTE_OPTIONS, type PassRule } from '@kx/shared';
+import { isArchivalOpen, isEditable, isLive, SOCKET_EVENTS, tallyVotes, DEFAULT_VOTE_OPTIONS, type PassRule } from '@kx/shared';
 import { Router } from 'express';
 import { z } from 'zod';
 import { currentUser, type AuthUser } from '../auth/middleware.js';
@@ -47,7 +47,7 @@ agendaRouter.post('/meetings/:id/agenda', async (req, res) => {
   const row = await tx(async (c) => {
     const a = await meetingAccess(u, id, c, { forUpdate: true });
     a.require('meeting.manage');
-    if (!isEditable(a.meeting.status) && !isLive(a.meeting.status)) throw conflict('افزودن دستور جلسه در این وضعیت مجاز نیست');
+    if (!isEditable(a.meeting.status) && !isLive(a.meeting.status) && !isArchivalOpen(a.meeting)) throw conflict('افزودن دستور جلسه در این وضعیت مجاز نیست');
     if (b.issueId) {
       const issue = await one('SELECT commission_id FROM issues WHERE id = $1', [b.issueId], c);
       if (!issue || issue.commission_id !== a.meeting.commission_id) throw badRequest('موضوع متعلق به این کمیسیون نیست');
@@ -82,7 +82,7 @@ agendaRouter.patch('/agenda-items/:id', async (req, res) => {
     a.require('meeting.manage');
     const s = a.meeting.status;
     const definitionChange = b.title !== undefined || b.description !== undefined || b.presenterId !== undefined || b.durationMinutes !== undefined;
-    if (definitionChange && !isEditable(s) && !isLive(s)) throw conflict('ویرایش دستور جلسه در این وضعیت مجاز نیست');
+    if (definitionChange && !isEditable(s) && !isLive(s) && !isArchivalOpen(a.meeting)) throw conflict('ویرایش دستور جلسه در این وضعیت مجاز نیست');
     if (!isEditable(s) && !isLive(s) && s !== 'minutes_draft') throw conflict('جلسه قفل شده است');
     const r = await one(
       `UPDATE agenda_items SET title = COALESCE($2, title), description = COALESCE($3, description), priority = COALESCE($4, priority),
@@ -108,7 +108,7 @@ agendaRouter.delete('/agenda-items/:id', async (req, res) => {
     const { a, item } = await itemAccess(u, id, c, true);
     a.require('meeting.manage');
     if (item.status === 'active') throw conflict('آیتم فعال را نمی‌توان حذف کرد');
-    if (!isEditable(a.meeting.status) && !isLive(a.meeting.status)) throw conflict('جلسه قفل شده است');
+    if (!isEditable(a.meeting.status) && !isLive(a.meeting.status) && !isArchivalOpen(a.meeting)) throw conflict('جلسه قفل شده است');
     await c.query(`UPDATE agenda_items SET status = 'removed', updated_at = now() WHERE id = $1`, [id]);
     await audit(c, req, { chamberId: a.meeting.chamber_id, action: 'agenda.removed', entity: 'agenda_item', entityId: id, before: item, reason: b.reason });
     return a.meeting.id;

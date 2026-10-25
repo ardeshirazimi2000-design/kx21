@@ -85,7 +85,11 @@ export async function buildMinutesBody(db: Db, meetingId: string): Promise<strin
   });
   lines.push('');
   lines.push('---');
-  lines.push(`پیش‌نویس به‌صورت خودکار در ${formatJalaliDateTime(new Date())} تولید شد.`);
+  lines.push(
+    m.archival
+      ? `ثبت از سوابق در ${formatJalaliDateTime(new Date())}؛ نسخهٔ امضاشدهٔ کاغذی صورتجلسه در مستندات جلسه پیوست است.`
+      : `پیش‌نویس به‌صورت خودکار در ${formatJalaliDateTime(new Date())} تولید شد.`,
+  );
   return toPersianDigits(lines.join('\n'));
 }
 

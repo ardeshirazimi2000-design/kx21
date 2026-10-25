@@ -174,7 +174,7 @@ documentsRouter.post('/documents', upload.single('file'), async (req, res) => {
   try {
     const meta = parse(
       targetSchema.extend({
-        kind: z.enum(['attachment', 'presentation', 'photo', 'letter', 'report', 'evidence', 'recording']).optional(),
+        kind: z.enum(['attachment', 'presentation', 'photo', 'letter', 'report', 'evidence', 'recording', 'minutes_scan']).optional(),
         title: z.string().max(200).nullish(),
       }),
       req.body,
@@ -293,7 +293,7 @@ async function editableDocument(u: AuthUser, id: string) {
   return { d, meetingId };
 }
 
-const DOC_KINDS = ['attachment', 'presentation', 'photo', 'letter', 'report', 'evidence'] as const;
+const DOC_KINDS = ['attachment', 'presentation', 'photo', 'letter', 'report', 'evidence', 'minutes_scan'] as const;
 
 /** Corrects the title or type of an uploaded document. */
 documentsRouter.patch('/documents/:id', async (req, res) => {
