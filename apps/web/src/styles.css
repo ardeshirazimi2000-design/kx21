@@ -584,3 +584,9 @@ table.table { width: 100%; border-collapse: collapse; }
   :root:not([data-theme="light"]) .dash-green { background: #133325; color: #6fd3a0; }
   :root:not([data-theme="light"]) .dash-slate { background: #1e2a3d; color: #a9bbd8; }
 }
+
+/* Executive bodies editor */
+.exec-editor { display: grid; gap: 8px; }
+.exec-row { display: flex; align-items: center; gap: 10px; }
+.exec-row .input { flex: 1; min-width: 0; }
+@media (max-width: 640px) { .exec-row { flex-wrap: wrap; } .exec-row .input { flex-basis: 100%; } }

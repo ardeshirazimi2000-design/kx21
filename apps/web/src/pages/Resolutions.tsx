@@ -3,11 +3,12 @@ import { NetworkShareCard } from './Networks';
 import { useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { PriorityBadge, ResolutionBadge } from '../components/status';
-import { Badge, Button, Card, dateFa, dateTimeFa, Empty, ErrorBox, Field, fa, Loading, PageHeader, Pager, Progress } from '../components/ui';
+import { Badge, Button, Card, dateFa, dateTimeFa, Empty, ErrorBox, Field, fa, JalaliDateInput, Loading, Modal, PageHeader, Pager, Progress } from '../components/ui';
 import { download, patch, post, upload } from '../lib/api';
 import { useApi } from '../lib/hooks';
 import { useAuth } from '../lib/auth';
 import { DocActions } from '../components/docs';
+import { cleanExecutors, ExecutorsCard, ExecutorsEditor, type ExecutorDraft } from '../components/Executors';
 
 export function ResolutionsPage() {
   const nav = useNavigate();
@@ -154,6 +155,8 @@ export function ResolutionDetailPage() {
   const [file, setFile] = useState<File | null>(null);
   const [err, setErr] = useState<Error | null>(null);
   const [busy, setBusy] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [cancelling, setCancelling] = useState(false);
   if (error) return <ErrorBox error={error} />;
   if (!r) return <Loading />;
   const closed = ['done', 'cancelled'].includes(r.status);
@@ -194,15 +197,50 @@ export function ResolutionDetailPage() {
             {r.agenda_title ? ` — ${r.agenda_title}` : ''}
           </>
         }
-        actions={<ResolutionBadge status={r.status} overdue={!closed && r.due_date && new Date(r.due_date) < new Date()} />}
+        actions={
+          <>
+            <ResolutionBadge status={r.status} overdue={!closed && r.due_date && new Date(r.due_date) < new Date()} />
+            {r.canManage && !closed && (
+              <>
+                <Button size="sm" variant="secondary" onClick={() => setEditing(true)}>
+                  ویرایش مصوبه
+                </Button>
+                <Button size="sm" variant="ghost" onClick={() => setCancelling(true)}>
+                  <span style={{ color: 'var(--danger)' }}>لغو مصوبه</span>
+                </Button>
+              </>
+            )}
+          </>
+        }
       />
+      {editing && (
+        <ResolutionEditModal
+          r={r}
+          onClose={() => setEditing(false)}
+          onSaved={() => {
+            setEditing(false);
+            void reload();
+          }}
+        />
+      )}
+      {cancelling && (
+        <CancelModal
+          r={r}
+          onClose={() => setCancelling(false)}
+          onSaved={() => {
+            setCancelling(false);
+            void reload();
+          }}
+        />
+      )}
       <ErrorBox error={err} />
+      <ExecutorsCard r={r} onChanged={() => void reload()} />
       <div className="grid grid-2">
         <Card title="متن مصوبه">
           <p className="pre">{r.text}</p>
           <ul className="list small">
-            <li>مسئول اجرا: {r.owner_name ?? '—'}</li>
-            <li>دستگاه/مخاطب: {r.addressee ?? '—'}</li>
+            <li>مسئول پیگیری: {r.owner_name ?? '—'}</li>
+            <li>دستگاه‌های اجرایی: {r.addressee ?? '—'}</li>
             <li>مهلت: {dateFa(r.due_date)}</li>
             <li>
               اولویت: <PriorityBadge priority={r.priority} />
@@ -214,7 +252,12 @@ export function ResolutionDetailPage() {
           </ul>
         </Card>
         <Card title="گزارش اجرا و بررسی">
-          {(r.isOwner || r.canManage) && !closed && r.status !== 'submitted' && (
+          {r.executors?.length > 0 && !closed && r.status !== 'submitted' && (
+            <p className="muted small" style={{ marginTop: 0 }}>
+              گزارش پیشرفت هر دستگاه را از جدول «دستگاه‌های اجرایی» ثبت کنید.
+            </p>
+          )}
+          {(r.isOwner || r.canManage) && !closed && r.status !== 'submitted' && !r.executors?.length && (
             <>
               <Field label={`درصد پیشرفت: ${fa(progress ?? r.progress)}٪`}>
                 <input type="range" min={0} max={100} step={5} value={progress ?? r.progress} onChange={(e) => setProgress(Number(e.target.value))} />
@@ -261,7 +304,7 @@ export function ResolutionDetailPage() {
             {r.updates.map((u: any) => (
               <li key={u.id}>
                 <strong>{u.full_name}</strong> {u.source === 'integration' && <Badge tone="info">سامانه خارجی</Badge>} <span className="muted">{dateTimeFa(u.created_at)}</span> —{' '}
-                {u.kind === 'progress' ? `پیشرفت ${fa(u.progress)}٪` : u.kind === 'approve' ? 'تأیید انجام' : u.kind === 'return' ? 'برگشت' : 'یادداشت'}
+                {u.kind === 'progress' ? `پیشرفت ${u.executor_name ? `${u.executor_name}: ` : ''}${fa(u.progress)}٪` : u.kind === 'approve' ? 'تأیید انجام' : u.kind === 'return' ? 'برگشت' : 'یادداشت'}
                 {u.note && <div className="pre">{u.note}</div>}
               </li>
             ))}
@@ -284,5 +327,112 @@ export function ResolutionDetailPage() {
       </div>
       <NetworkShareCard resolutionId={r.id} />
     </>
+  );
+}
+
+/** Correcting a resolution: text (until the minutes are approved), follow-up person, deadline, priority and bodies. */
+function ResolutionEditModal({ r, onClose, onSaved }: { r: any; onClose: () => void; onSaved: () => void }) {
+  const members = useApi<any[]>(`/commissions/${r.commission_id}/members`);
+  const [form, setForm] = useState({ text: r.text, ownerId: r.owner_id ?? '', dueDate: r.due_date?.slice(0, 10) ?? '', priority: r.priority });
+  const [executors, setExecutors] = useState<ExecutorDraft[]>((r.executors ?? []).map((e: any) => ({ name: e.name, role: e.role })));
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<Error | null>(null);
+  const save = async () => {
+    setBusy(true);
+    setErr(null);
+    try {
+      await patch(`/resolutions/${r.id}`, {
+        ...(r.textLocked ? {} : { text: form.text.trim() }),
+        ownerId: form.ownerId || undefined,
+        dueDate: form.dueDate || undefined,
+        priority: form.priority,
+        executors: cleanExecutors(executors),
+      });
+      onSaved();
+    } catch (e) {
+      setErr(e as Error);
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <Modal
+      title={`ویرایش مصوبه ${r.number}`}
+      wide
+      onClose={onClose}
+      footer={
+        <Button busy={busy} disabled={form.text.trim().length < 5} onClick={() => void save()}>
+          ذخیره تغییرات
+        </Button>
+      }
+    >
+      <ErrorBox error={err} />
+      <Field label="متن مصوبه" hint={r.textLocked ? 'صورتجلسه این جلسه تأیید شده است؛ متن مصوبه قابل تغییر نیست.' : undefined}>
+        <textarea className="input" rows={4} value={form.text} disabled={r.textLocked} onChange={(e) => setForm({ ...form, text: e.target.value })} />
+      </Field>
+      <div className="grid grid-3">
+        <Field label="مسئول پیگیری">
+          <select className="input" value={form.ownerId} onChange={(e) => setForm({ ...form, ownerId: e.target.value })}>
+            <option value="">—</option>
+            {r.owner_id && !(members.data ?? []).some((x) => x.user_id === r.owner_id) && <option value={r.owner_id}>{r.owner_name}</option>}
+            {(members.data ?? []).map((x) => (
+              <option key={x.user_id} value={x.user_id}>
+                {x.full_name}
+                {x.organization ? ` — ${x.organization}` : ''}
+              </option>
+            ))}
+          </select>
+        </Field>
+        <Field label="مهلت اجرا">
+          <JalaliDateInput value={form.dueDate} onChange={(v) => setForm({ ...form, dueDate: v })} />
+        </Field>
+        <Field label="اولویت">
+          <select className="input" value={form.priority} onChange={(e) => setForm({ ...form, priority: e.target.value })}>
+            <option value="low">کم</option>
+            <option value="normal">عادی</option>
+            <option value="high">زیاد</option>
+            <option value="urgent">فوری</option>
+          </select>
+        </Field>
+      </div>
+      <Field label="دستگاه‌های اجرایی" hint="دستگاه‌هایی که می‌مانند، پیشرفت ثبت‌شده‌شان را حفظ می‌کنند">
+        <ExecutorsEditor chamberId={r.chamber_id} value={executors} onChange={setExecutors} />
+      </Field>
+    </Modal>
+  );
+}
+
+function CancelModal({ r, onClose, onSaved }: { r: any; onClose: () => void; onSaved: () => void }) {
+  const [reason, setReason] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<Error | null>(null);
+  const save = async () => {
+    setBusy(true);
+    setErr(null);
+    try {
+      await patch(`/resolutions/${r.id}`, { status: 'cancelled', reason: reason.trim() });
+      onSaved();
+    } catch (e) {
+      setErr(e as Error);
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <Modal
+      title={`لغو مصوبه ${r.number}`}
+      onClose={onClose}
+      footer={
+        <Button variant="danger" busy={busy} disabled={reason.trim().length < 3} onClick={() => void save()}>
+          لغو مصوبه
+        </Button>
+      }
+    >
+      <ErrorBox error={err} />
+      <p style={{ marginTop: 0 }}>مصوبهٔ لغوشده دیگر پیگیری نمی‌شود و این کار با نام شما در سابقهٔ مصوبه ثبت می‌شود.</p>
+      <Field label="دلیل لغو">
+        <textarea className="input" value={reason} onChange={(e) => setReason(e.target.value)} placeholder="مثلاً تکراری ثبت شده بود" />
+      </Field>
+    </Modal>
   );
 }

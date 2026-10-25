@@ -5,7 +5,8 @@ import { one, query, tx } from '../db/pool.js';
 import { audit } from '../lib/audit.js';
 import { badRequest, conflict, forbidden, notFound } from '../lib/errors.js';
 import { body, dateStr, listParam, paged, pageParams, param, uuid } from '../lib/validate.js';
-import { commissionAccess } from '../services/access.js';
+import { commissionAccess, visibleChamberIds } from '../services/access.js';
+import { loadExecutors, normalizeOrgName, recordExecutorProgress, setExecutors } from '../services/executors.js';
 import { adminBrowsableChambers, browsableCommissionIds } from '../services/roles.js';
 import { notify } from '../services/notifications.js';
 import { notifySubmitted, recordProgress } from '../services/resolutionProgress.js';
@@ -44,6 +45,8 @@ const createSchema = z.object({
   dueDate: dateStr.nullish(),
   priority: z.enum(['low', 'normal', 'high', 'urgent']).default('normal'),
   kpi: z.string().nullish(),
+  /** Executive bodies (دستگاه‌های اجرایی); without it, «addressee» becomes the lead body. */
+  executors: z.array(z.object({ name: z.string().max(200), role: z.enum(['lead', 'partner']).optional() })).max(12).optional(),
 });
 
 resolutionsRouter.post('/resolutions', async (req, res) => {
@@ -89,8 +92,9 @@ resolutionsRouter.post('/resolutions', async (req, res) => {
       `INSERT INTO tasks (chamber_id, resolution_id, title, assignee_id, due_date) VALUES ($1,$2,$3,$4,$5)`,
       [r.chamber_id, r.id, `اجرای مصوبه ${number}`, r.owner_id, r.due_date],
     );
-    await audit(c, req, { chamberId: r.chamber_id, action: 'resolution.created', entity: 'resolution', entityId: r.id, after: r });
-    return r;
+    const executors = await setExecutors(c, r, b.executors ?? (b.addressee ? [{ name: b.addressee, role: 'lead' }] : []));
+    await audit(c, req, { chamberId: r.chamber_id, action: 'resolution.created', entity: 'resolution', entityId: r.id, after: { ...r, executors: executors.map((e) => e.name) } });
+    return { ...r, addressee: executors.map((e) => e.name).join('، ') || null, executors };
   });
   if (row.owner_id) {
     await notify({
@@ -136,10 +140,12 @@ resolutionsRouter.get('/resolutions', async (req, res) => {
 resolutionsRouter.get('/resolutions/:id', async (req, res) => {
   const u = currentUser(req);
   const { r, canManage, isOwner } = await loadResolution(u, param(req, 'id'));
-  const [updates, tasks, documents, extra] = await Promise.all([
+  const [updates, tasks, documents, extra, executors] = await Promise.all([
     query(
-      `SELECT ru.*, COALESCE(u.full_name, ic.name) AS full_name FROM resolution_updates ru LEFT JOIN users u ON u.id = ru.user_id
-         LEFT JOIN integration_clients ic ON ic.id = ru.integration_client_id WHERE ru.resolution_id = $1 ORDER BY ru.created_at DESC`,
+      `SELECT ru.*, COALESCE(u.full_name, ic.name) AS full_name, o.name AS executor_name FROM resolution_updates ru LEFT JOIN users u ON u.id = ru.user_id
+         LEFT JOIN integration_clients ic ON ic.id = ru.integration_client_id
+         LEFT JOIN resolution_executors e ON e.id = ru.executor_id LEFT JOIN organizations o ON o.id = e.organization_id
+        WHERE ru.resolution_id = $1 ORDER BY ru.created_at DESC`,
       [r.id],
     ),
     query('SELECT t.*, u.full_name AS assignee_name FROM tasks t LEFT JOIN users u ON u.id = t.assignee_id WHERE t.resolution_id = $1', [r.id]),
@@ -150,41 +156,70 @@ resolutionsRouter.get('/resolutions/:id', async (req, res) => {
          LEFT JOIN meetings m ON m.id = r.meeting_id LEFT JOIN agenda_items ai ON ai.id = r.agenda_item_id WHERE r.id = $1`,
       [r.id],
     ),
+    loadExecutors(r.id),
   ]);
-  res.json({ ...r, ...extra, updates, tasks, documents, canManage, isOwner });
+  const meeting = r.meeting_id ? await one<{ status: string }>('SELECT status FROM meetings WHERE id = $1', [r.meeting_id]) : null;
+  res.json({ ...r, ...extra, updates, tasks, documents, executors, canManage, isOwner, textLocked: textLocked(meeting) });
 });
+
+/** The text of a resolution is part of the minutes: once they are approved it stays as recorded. */
+const textLocked = (meeting: { status: string } | null) => !!meeting && ['approved', 'archived'].includes(meeting.status);
 
 resolutionsRouter.patch('/resolutions/:id', async (req, res) => {
   const u = currentUser(req);
   const b = body(
     req,
-    createSchema.pick({ text: true, ownerId: true, addressee: true, dueDate: true, priority: true, kpi: true }).partial().extend({
+    createSchema.pick({ text: true, ownerId: true, addressee: true, dueDate: true, priority: true, kpi: true, executors: true }).partial().extend({
       status: z.literal('cancelled').optional(),
+      /** Why it is cancelled (required with status=cancelled). */
+      reason: z.string().trim().max(500).optional(),
     }),
   );
+  if (b.status === 'cancelled' && (!b.reason || b.reason.length < 3)) throw badRequest('دلیل لغو مصوبه را بنویسید');
   const { row, ownerChanged } = await tx(async (c) => {
     const { r, canManage } = await loadResolution(u, param(req, 'id'), c, true);
     if (!canManage) throw forbidden();
     if (r.status === 'done') throw conflict('مصوبه انجام‌شده قابل ویرایش نیست');
+    if (r.status === 'cancelled') throw conflict('مصوبه لغوشده قابل ویرایش نیست');
+    if (b.text !== undefined && b.text !== r.text && r.meeting_id) {
+      const m = await one<{ status: string }>('SELECT status FROM meetings WHERE id = $1', [r.meeting_id], c);
+      if (textLocked(m)) throw conflict('صورتجلسه این جلسه تأیید شده است؛ متن مصوبه قابل تغییر نیست', 'text_locked');
+    }
     if (b.ownerId) {
       const owner = await one('SELECT chamber_id FROM users WHERE id = $1', [b.ownerId], c);
       if (!owner || owner.chamber_id !== r.chamber_id) throw badRequest('مسئول اجرا متعلق به این اتاق نیست');
     }
-    const row = await one(
+    let row = await one(
       `UPDATE resolutions SET text = COALESCE($2, text), owner_id = COALESCE($3, owner_id), addressee = COALESCE($4, addressee),
          due_date = COALESCE($5, due_date), priority = COALESCE($6, priority), kpi = COALESCE($7, kpi), status = COALESCE($8, status),
          overdue_notified_at = CASE WHEN $5::date IS NOT NULL THEN NULL ELSE overdue_notified_at END,
          due_soon_notified_at = CASE WHEN $5::date IS NOT NULL THEN NULL ELSE due_soon_notified_at END,
          updated_at = now() WHERE id = $1 RETURNING *`,
-      [r.id, b.text, b.ownerId, b.addressee, b.dueDate, b.priority, b.kpi, b.status],
+      [r.id, b.text, b.ownerId, b.executors ? null : b.addressee, b.dueDate, b.priority, b.kpi, b.status],
       c,
     );
+    let executors;
+    if (b.executors) {
+      executors = await setExecutors(c, r, b.executors);
+      row = { ...row, addressee: executors.map((e) => e.name).join('، ') || null };
+    }
     await c.query(
       `UPDATE tasks SET assignee_id = $2, due_date = $3, status = CASE WHEN $4 = 'cancelled' THEN 'cancelled' ELSE status END, updated_at = now()
         WHERE resolution_id = $1`,
       [r.id, row.owner_id, row.due_date, row.status],
     );
-    await audit(c, req, { chamberId: r.chamber_id, action: 'resolution.updated', entity: 'resolution', entityId: r.id, before: r, after: row });
+    if (b.status === 'cancelled') {
+      await c.query(`INSERT INTO resolution_updates (resolution_id, user_id, kind, note) VALUES ($1,$2,'comment',$3)`, [r.id, u.id, `لغو مصوبه: ${b.reason}`]);
+    }
+    await audit(c, req, {
+      chamberId: r.chamber_id,
+      action: b.status === 'cancelled' ? 'resolution.cancelled' : 'resolution.updated',
+      entity: 'resolution',
+      entityId: r.id,
+      before: r,
+      after: executors ? { ...row, executors: executors.map((e) => e.name) } : row,
+      reason: b.reason,
+    });
     return { row, ownerChanged: r.owner_id !== row.owner_id };
   });
   if (ownerChanged && row.owner_id) {
@@ -200,12 +235,52 @@ resolutionsRouter.patch('/resolutions/:id', async (req, res) => {
   res.json(row);
 });
 
+/** One executive body's progress report (by the commission's officers or the person following the resolution up). */
+resolutionsRouter.patch('/resolutions/:id/executors/:executorId/progress', async (req, res) => {
+  const u = currentUser(req);
+  const b = body(req, z.object({ progress: z.number().int().min(0).max(100), note: z.string().nullish(), documentId: uuid.nullish() }));
+  const { row, officers } = await tx(async (c) => {
+    const { r, canManage, isOwner } = await loadResolution(u, param(req, 'id'), c, true);
+    if (!isOwner && !canManage) throw forbidden('فقط مسئول پیگیری یا دبیر کمیسیون گزارش پیشرفت ثبت می‌کند');
+    if (b.documentId) {
+      const d = await one('SELECT resolution_id FROM documents WHERE id = $1', [b.documentId], c);
+      if (!d || d.resolution_id !== r.id) throw badRequest('مستند متعلق به این مصوبه نیست');
+    }
+    return recordExecutorProgress(c, req, r, param(req, 'executorId'), { ...b, userId: u.id });
+  });
+  await notifySubmitted(row, officers);
+  res.json({ ...row, executors: await loadExecutors(row.id) });
+});
+
+/** The chamber's executive bodies, for choosing them on a resolution. */
+resolutionsRouter.get('/organizations', async (req, res) => {
+  const u = currentUser(req);
+  const chamberId = uuid.parse(req.query.chamberId);
+  const ids = await visibleChamberIds(u);
+  if (ids && !ids.includes(chamberId)) throw notFound();
+  const q = typeof req.query.q === 'string' && req.query.q.trim() ? normalizeOrgName(req.query.q) : null;
+  res.json(
+    await query(
+      `SELECT o.id, o.name, (SELECT count(*)::int FROM resolution_executors e WHERE e.organization_id = o.id) AS resolutions
+         FROM organizations o WHERE o.chamber_id = $1 AND ($2::text IS NULL OR o.name ILIKE '%' || $2 || '%')
+        ORDER BY resolutions DESC, o.name LIMIT 50`,
+      [chamberId, q],
+    ),
+  );
+});
+
 /** Owner reports progress (percentage, note, evidence document). submit=true sends it for secretary review. */
 resolutionsRouter.patch('/resolutions/:id/progress', async (req, res) => {
   const u = currentUser(req);
   const b = body(
     req,
-    z.object({ progress: z.number().int().min(0).max(100), note: z.string().nullish(), documentId: uuid.nullish(), submit: z.boolean().default(false) }),
+    z.object({
+      progress: z.number().int().min(0).max(100),
+      note: z.string().nullish(),
+      documentId: uuid.nullish(),
+      submit: z.boolean().default(false),
+      executorId: uuid.nullish(),
+    }),
   );
   const { row, officers } = await tx(async (c) => {
     const { r, canManage, isOwner } = await loadResolution(u, param(req, 'id'), c, true);
@@ -214,6 +289,10 @@ resolutionsRouter.patch('/resolutions/:id/progress', async (req, res) => {
       const d = await one('SELECT resolution_id FROM documents WHERE id = $1', [b.documentId], c);
       if (!d || d.resolution_id !== r.id) throw badRequest('مستند متعلق به این مصوبه نیست');
     }
+    // With executive bodies the report belongs to one of them (the only one, if there is just one).
+    const bodies = await query<{ id: string }>('SELECT id FROM resolution_executors WHERE resolution_id = $1', [r.id], c);
+    if (b.executorId || bodies.length === 1) return recordExecutorProgress(c, req, r, b.executorId ?? bodies[0].id, { ...b, userId: u.id });
+    if (bodies.length > 1) throw badRequest('این مصوبه چند دستگاه اجرایی دارد؛ دستگاهِ گزارش را مشخص کنید', { code: 'executor_required' });
     return recordProgress(c, req, r, { ...b, userId: u.id });
   });
   await notifySubmitted(row, officers);

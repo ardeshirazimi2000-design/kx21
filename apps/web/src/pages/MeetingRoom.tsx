@@ -15,6 +15,7 @@ import {
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { DocActions, DocKind, UploadFiles, ViewButton } from '../components/docs';
+import { cleanExecutors, ExecutorsEditor, type ExecutorDraft } from '../components/Executors';
 import { PresentationCard } from '../components/Presentation';
 import { KPI_HINT, KPI_LABEL } from './Resolutions';
 import { AgendaBadge, AttendanceBadge, MeetingStatusBadge, MinutesBadge, ResolutionBadge } from '../components/status';
@@ -990,11 +991,11 @@ function NewResolutionModal({ m, vote, onClose, onSaved }: { m: any; vote?: any;
     agendaItemId: item?.id ?? '',
     text: item?.proposed_resolution ?? item?.decision ?? '',
     ownerId: '',
-    addressee: '',
     dueDate: '',
     priority: 'normal',
     kpi: '',
   });
+  const [executors, setExecutors] = useState<ExecutorDraft[]>([]);
   const members = useApi<any[]>(`/commissions/${m.commission.id}/members`);
   // The responsible person is the invitee themself (e.g. the head of an organisation), never their representative.
   const owners = useMemo(() => {
@@ -1013,7 +1014,7 @@ function NewResolutionModal({ m, vote, onClose, onSaved }: { m: any; vote?: any;
         voteSessionId: vote?.id ?? null,
         text: form.text,
         ownerId: form.ownerId || null,
-        addressee: form.addressee || null,
+        executors: cleanExecutors(executors),
         dueDate: form.dueDate || null,
         priority: form.priority,
         kpi: form.kpi || null,
@@ -1040,13 +1041,15 @@ function NewResolutionModal({ m, vote, onClose, onSaved }: { m: any; vote?: any;
         <textarea className="input" value={form.text} onChange={(e) => setForm({ ...form, text: e.target.value })} />
       </Field>
       <div className="grid grid-2">
-        <Field label="مسئول اجرا">
+        <Field label="مسئول پیگیری" hint="شخصی که اجرای مصوبه را پیگیری و گزارش می‌کند">
           <select
             className="input"
             value={form.ownerId}
             onChange={(e) => {
               const o = owners.find((x) => x.user_id === e.target.value);
-              setForm({ ...form, ownerId: e.target.value, addressee: form.addressee || o?.organization || '' });
+              setForm({ ...form, ownerId: e.target.value });
+              // The person's organisation is a likely lead body.
+              if (!executors.length && o?.organization) setExecutors([{ name: o.organization, role: 'lead' }]);
             }}
           >
             <option value="">—</option>
@@ -1057,9 +1060,6 @@ function NewResolutionModal({ m, vote, onClose, onSaved }: { m: any; vote?: any;
               </option>
             ))}
           </select>
-        </Field>
-        <Field label="دستگاه/مخاطب">
-          <input className="input" value={form.addressee} onChange={(e) => setForm({ ...form, addressee: e.target.value })} />
         </Field>
         <Field label="مهلت اجرا">
           <JalaliDateInput value={form.dueDate} onChange={(v) => setForm({ ...form, dueDate: v })} />
@@ -1073,6 +1073,9 @@ function NewResolutionModal({ m, vote, onClose, onSaved }: { m: any; vote?: any;
           </select>
         </Field>
       </div>
+      <Field label="دستگاه‌های اجرایی" hint="یک دستگاه مسئول اصلی و بقیه همکار؛ هر دستگاه گزارش پیشرفت خود را جداگانه دارد">
+        <ExecutorsEditor chamberId={m.chamber_id} value={executors} onChange={setExecutors} />
+      </Field>
       <Field label={KPI_LABEL} hint={KPI_HINT}>
         <input className="input" value={form.kpi} onChange={(e) => setForm({ ...form, kpi: e.target.value })} placeholder="اختیاری" />
       </Field>
