@@ -74,11 +74,13 @@ function Shell({ children }: { children: ReactNode }) {
   const { me, logout, isAdmin, chamberId, setChamberId } = useAuth();
   const chambers = useApi<any[]>(isAdmin ? '/chambers' : null);
   const selectable = (chambers.data ?? []).filter((c) => me!.is_super_admin || me!.adminChambers.includes(c.id));
-  // A super admin without a home chamber starts on the first chamber.
+  // A super admin without a home chamber starts on the first chamber; a remembered chamber that no longer
+  // exists (e.g. after the data was reset) is replaced the same way.
+  const known = !chamberId || !chambers.data || chambers.data.some((c) => c.id === chamberId);
   useEffect(() => {
-    if (!chamberId && selectable.length) setChamberId(selectable[0].id);
+    if ((!chamberId || !known) && selectable.length) setChamberId(selectable[0].id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [chamberId, selectable.length]);
+  }, [chamberId, known, selectable.length]);
   // Narrow screens: the menu slides in over the page (open). Wide screens: the ☰ button hides or shows the sidebar (hidden, remembered).
   const [open, setOpen] = useState(false);
   const [hidden, setHidden] = useState(() => {
