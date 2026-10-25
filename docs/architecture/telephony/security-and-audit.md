@@ -1,138 +1,245 @@
 # امنیت، مجوزها، اسرار و ممیزی ماژول تلفن
 
+> نسخه نهایی طراحی (۲۰۲۶-۱۰-۲۵). برچسب «**نیازمند تأیید**» یعنی آن مورد از کد موجود قابل اثبات نیست و به پاسخ مدیر مرکز تلفن یا تصمیم سازمان (`open-questions.md`) وابسته است.
+
 ## ۱. مدل تهدید (خلاصه)
 
 | تهدید | پیامد | کنترل |
 |---|---|---|
-| دسترسی مستقیم به AMI از شبکه کاربران | کنترل کامل تماس‌ها، شنود فراداده، Originate دلخواه | AMI فقط از IP سرور اتوماسیون (`permit/deny` در `manager.conf` و فایروال PBX)؛ TLS یا شبکه مدیریتی جدا؛ مرورگر هرگز اطلاعات اتصال نمی‌بیند |
-| سوءاستفاده از تماس با یک کلیک (Toll Fraud) | هزینه تماس بین‌المللی/ویژه | فقط از داخلی خود کاربر، دسته‌بندی شماره و سیاست شماره‌گیری بر اساس نقش و واحد، فهرست مسدود، سقف ساعتی و روزانه، ثبت نتیجه هر درخواست در `click_to_call_requests` و هشدار سوءاستفاده (بخش ۸)، Originate فقط در Context عادی تا Outbound Routes و محدودیت‌های Issabel اعمال شود |
-| SSRF از طریق تنظیم میزبان اتصال | دسترسی سرور به سرویس‌های داخلی دیگر | `allowedHosts` و فقط مجوز `telephony.settings.manage`؛ ممیزی تغییر |
-| نشت اسرار اتصال | تصاحب PBX | AES-256-GCM با `encryptText`، هرگز در پاسخ API، لاگ، ممیزی یا پیام خطا |
-| تغییر داخلی بدون اختیار | قطع خدمات تلفن، شنود (مثلاً تغییر مسیر) | مجوز اختصاصی، Maker-Checker، تشخیص تعارض، ممیزی |
-| نشت حریم خصوصی تاریخچه تماس | افشای ارتباطات افراد | دامنه دید (خود/واحد/همه)، پوشاندن شماره، طبقه‌بندی، نگهداری محدود |
-| جعل رویداد تماس | تاریخچه نادرست | رویدادها فقط از اتصال AMI احراز هویت‌شده؛ هیچ Webhook عمومی بدون امضا |
-| از کار افتادن PBX | اختلال اتوماسیون | جداسازی کامل؛ Timeout و مدار قطع (`target-architecture.md` بخش ۶) |
+| دسترسی مستقیم به AMI از شبکه کاربران | کنترل کامل تماس‌ها، شنود فراداده، Originate دلخواه | AMI فقط از IP سرور اتوماسیون (`permit/deny` و فایروال PBX)؛ TLS در صورت پشتیبانی یا شبکه مدیریتی جدا؛ مرورگر هرگز اطلاعات اتصال نمی‌بیند (بخش ۹) |
+| سوءاستفاده از تماس با یک کلیک (Toll Fraud) | هزینه تماس بین‌المللی یا ویژه | زنجیره کنترل بخش ۸ |
+| SSRF از طریق تنظیم میزبان اتصال | دسترسی سرور به سرویس‌های داخلی دیگر | `allowedHosts` و فقط مجوز `telephony.manage`؛ ممیزی تغییر |
+| نشت اسرار اتصال | تصاحب PBX | AES-256-GCM با `encryptText`؛ هرگز در پاسخ API، لاگ، ممیزی یا پیام خطا (بخش ۴) |
+| تغییر داخلی بدون اختیار (فاز ۴) | قطع خدمات تلفن یا تغییر مسیر | مجوز جدا برای هر عمل، Maker-Checker، تشخیص تعارض، ممیزی |
+| **اعطای خودکار یا خوداعطایی مجوزهای حساس** | دسترسی مدیر سیستم به تاریخچه همه و ضبط | بخش ۲.۳ (یافته قطعی کد و راه‌حل پیشنهادی) |
+| نشت تاریخچه تماس بین کاربران و واحدها | افشای ارتباطات افراد | یک تابع دسترسی برای API، گزارش، خروجی فایل و SSE (بخش ۳)؛ پوشاندن شماره؛ طبقه‌بندی |
+| جعل رویداد تماس | تاریخچه نادرست | رویدادها فقط از اتصال AMI احراز هویت‌شده و CDR فقط‌خواندنی؛ هیچ Webhook عمومی |
+| از کار افتادن PBX | اختلال اتوماسیون | جداسازی کامل، Timeout و مدار قطع |
 
 ## ۲. مجوزها
 
-افزوده به `PERMISSIONS` در `apps/office-api/src/services/permissions.ts` با `module: 'تلفن'`. همه از سازوکار موجود دامنه واحد (`user_roles.scope_unit_id` و `AuthUser.unitsFor`) پشتیبانی می‌کنند.
+### ۲.۱ الگوی نام‌گذاری
 
-| کلید | نام فارسی | admin | it | manager | president | secretariat | expert |
-|---|---|:-:|:-:|:-:|:-:|:-:|:-:|
-| `telephony.settings.manage` | تنظیم اتصال مرکز تلفن | ✓ | ✓ | | | | |
-| `telephony.extensions.view` | مشاهده داخلی‌ها | ✓ | ✓ | ✓ واحد | | | |
-| `telephony.extensions.assign` | تخصیص داخلی | ✓ | ✓ | | | | |
-| `telephony.extensions.request` | درخواست تغییر داخلی | ✓ | ✓ | | | | |
-| `telephony.extensions.approve` | تأیید تغییر داخلی | ✓ | | | | | |
-| `telephony.extensions.provision` | اطلاعات راه‌اندازی دستگاه | | ✓ | | | | |
-| `telephony.presence.view` | مشاهده وضعیت داخلی همکاران | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
-| `telephony.call` | تماس با یک کلیک | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
-| `telephony.calls.view_own` | مشاهده تماس‌های خود | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
-| `telephony.calls.view_unit` | مشاهده تماس‌های واحد (با دامنه نقش) | ✓ | | ✓ واحد | ✓ | | |
-| `telephony.calls.view_all` | مشاهده همه تماس‌ها | ✱ | | | | | |
-| `telephony.calls.link` | اتصال تماس به پرونده | ✓ | | ✓ | ✓ | ✓ | ✓ |
-| `telephony.calls.annotate` | ویرایش یادداشت تماس دیگران | ✓ | | ✓ واحد | | | |
-| `telephony.calls.export` | خروجی Excel از تاریخچه | ✓ | | ✓ واحد | ✓ | | |
-| `telephony.numbers.view_full` | دیدن شماره کامل طرف بیرونی | ✓ | | ✓ | ✓ | ✓ | |
-| `telephony.dial_policy.manage` | تنظیم دسته شماره، سیاست شماره‌گیری و فهرست مسدود | ✓ | ✓ | | | | |
-| `telephony.recordings.listen` | شنیدن ضبط تماس (در صورت وجود) | ✱ | | | | | |
-| `telephony.recordings.download` | دریافت فایل ضبط (جدا از شنیدن) | ✱ | | | | | |
-| `contacts.view` / `contacts.manage` | مخاطبان (آینده) | ✓ | | ✓ | ✓ | ✓ | view |
+الگوی موجود در `apps/office-api/src/services/permissions.ts` به شکل `<موجودیت>.<عمل>` است (`letter.create`، `letter.read_all`، `signatures.manage`، `integration.manage`، `meetings.view`). مجوزهای تلفن با همین الگو و `module: 'تلفن'` تعریف می‌شوند. `call.read_all` عمداً هم‌نام با `letter.read_all` است ولی معنای آن متفاوت است (بخش ۲.۴).
+
+### ۲.۲ فهرست نهایی
+
+ستون «حساس» یعنی از اعطای خودکار به `admin` مستثناست و فقط با اعطای صریح داده می‌شود (بخش ۲.۳). نقش‌های پیش‌فرض **نیازمند تأیید** هستند (F3، F12).
+
+| کلید | نام فارسی | فاز | حساس | نقش‌های پیش‌فرض پیشنهادی |
+|---|---|:-:|:-:|---|
+| `telephony.manage` | تنظیم اتصال مرکز تلفن | ۱ | | admin، it |
+| `extension.view` | مشاهده داخلی‌ها و تخصیص‌ها | ۱ | | admin، it، manager (با دامنه واحد) |
+| `extension.assign` | تخصیص داخلی به کارمند، واحد و سمت | ۱ | | admin، it |
+| `call.read` | **مشاهده تاریخچه تماس‌های مجاز کاربر** (تماس‌هایی که خودش طرف آن‌ها بوده) | ۲ | | همه نقش‌ها |
+| `call.read_unit` | مشاهده تماس‌های واحد در دامنه نقش | ۲ | | manager (با دامنه واحد) |
+| `call.read_all` | **مشاهده تاریخچه همه تماس‌ها** | ۲ | ✓ | هیچ‌کس (فقط اعطای صریح) |
+| `call.link` | اتصال تماس به پرونده | ۲ | | همه نقش‌های دارای `letter.create` |
+| `call.annotate` | ویرایش یادداشت تماس دیگران | ۲ | | manager (با دامنه واحد) |
+| `call.export` | خروجی فایل از تاریخچه | ۲ | | manager (با دامنه واحد)، president |
+| `call.number_full` | دیدن شماره کامل طرف بیرونی | ۲ | | secretariat، manager، president |
+| `call.recording_listen` | **شنیدن ضبط تماس** | آینده | ✓ | هیچ‌کس |
+| `call.recording_download` | **دریافت فایل ضبط تماس** | آینده | ✓ | هیچ‌کس |
+| `call.originate` | **اجرای تماس خروجی** (تماس با یک کلیک) | ۳ | | همه نقش‌ها (محدود به سیاست شماره‌گیری) |
+| `presence.view` | مشاهده وضعیت داخلی همکاران | ۳ | | همه نقش‌ها |
+| `dialing.manage` | تنظیم دسته شماره، سیاست شماره‌گیری و فهرست مسدود | ۳ | | admin، it |
+| `extension.create` | **ایجاد داخلی** (ثبت درخواست) | ۴ | | admin، it |
+| `extension.update` | **ویرایش داخلی** (ثبت درخواست) | ۴ | | admin، it |
+| `extension.disable` | **غیرفعال‌سازی داخلی** (ثبت درخواست) | ۴ | | admin، it |
+| `extension.approve` | تأیید یا رد درخواست تغییر داخلی | ۴ | | admin (یا نقش جدید مدیر مرکز تلفن، F8) |
+| `extension.provision` | دیدن یک‌باره اطلاعات راه‌اندازی دستگاه | ۴ | | it |
+| `queues.view` | مشاهده صف‌ها، گروه‌های زنگ و مسیرها | ۵ | | admin، it، manager |
+| `queues.manage` | **مدیریت صف‌ها و مسیریابی** | ۵ | | هیچ‌کس تا تأیید رابط واقعی |
+| `roles.grant_sensitive` | اعطای مجوزهای حساس | ۲ | ✓ | هیچ‌کس (راه‌اندازی اولیه در بخش ۲.۳) |
+| `contacts.view` / `contacts.manage` | دفترچه مخاطبان | آینده | | تصمیم هنگام ساخت |
 
 نکات:
 
-- **✱ مجوز حساس به حریم خصوصی:** در کد فعلی نقش `admin` با `permissions: all` در `SYSTEM_ROLES` تعریف شده و هر مجوز جدید را خودکار می‌گیرد. برای اجرای تصمیم D7، پیشنهاد می‌شود فهرست کوچکی از مجوزهای حساس (`telephony.calls.view_all`، `telephony.recordings.listen`، `telephony.recordings.download`) از `all` مستثنا شود و فقط با انتساب صریح نقش جداگانه (مثلاً نقش جدید «ناظر تماس») داده شود. این تنها تغییر پیشنهادی در منطق نقش‌های موجود است و دلیل فنی آن همین اعطای خودکار است. تصمیم نهایی: `open-questions.md` F3.
-- `it` تاریخچه تماس دیگران و ضبط را نمی‌بیند (تفکیک وظیفه فنی از دسترسی به محتوای کاری).
-- «✓ واحد» یعنی انتساب نقش با `scope_unit_id`؛ مدیر واحد (`managedUnits`) مانند `letterVisibleSql` دامنه واحد خود را دارد.
-- مجوزهای ضبط فقط معنا دارند اگر داشتن ضبط در PBX تأیید شود (C7)؛ حتی با مجوز ضبط، کاربر باید خود تماس را هم ببیند (بخش ۳).
+- حذف داخلی در فاز ۴ نیست؛ فقط غیرفعال‌سازی. اگر بعداً لازم شد، مجوز جدای `extension.delete` با تأیید دوم اضافه می‌شود (**نیازمند تأیید**).
+- `it` تاریخچه تماس دیگران و ضبط را نمی‌بیند (تفکیک وظیفه فنی از محتوای کاری).
+- هر مجوز فقط وقتی به کاتالوگ اضافه می‌شود که فاز آن پیاده شود؛ فاز ۱ فقط سه مجوز اول را دارد.
 
-## ۳. ABAC و دید تماس
+### ۲.۳ قاعده نقش `admin`: یافته‌های کد و راه‌حل پیشنهادی
 
-تابع پیشنهادی `callVisibleSql(u, params, alias)` در `services/access.ts` (هم‌سبک `letterVisibleSql`):
+**یافته‌های قطعی:**
+
+1. `services/permissions.ts`: نقش سیستمی `admin` با `permissions: all` تعریف شده است (همه کلیدهای `PERMISSIONS`).
+2. `db/bootstrap.ts` تابع `ensureBaseData`: در **هر شروع سرور** این دستور اجرا می‌شود: «The admin role always holds every permission (new permissions included)»:
+   `INSERT INTO role_permissions ... SELECT r.id, p.key FROM roles r, permissions p WHERE r.key = 'admin' ON CONFLICT DO NOTHING`.
+   پس اگر مجوزی دستی از نقش admin حذف شود، **با راه‌اندازی بعدی برمی‌گردد**. صرفاً تغییر `SYSTEM_ROLES` کافی نیست.
+3. `routes/org.ts`: دارنده `roles.manage` می‌تواند هر مجوزی را به هر نقشی (از جمله نقش خودش) اضافه کند (`PATCH /roles/:id`)، و دارنده `users.manage` می‌تواند هر نقشی را به هر کاربری (از جمله خودش) بدهد (`setAssignments`). هر دو ممیزی می‌شوند ولی **مانعی برای خوداعطایی** وجود ندارد.
+4. در `auth/middleware.ts` تابع `loadAuthUser`: انتساب نقش **بدون** `scope_unit_id` یعنی دامنه `'all'`.
+
+**نتیجه:** با کد فعلی، هر مجوز حساس جدید خودکار به admin می‌رسد و admin می‌تواند آن را به هر نقش و کاربری بدهد. این با سیاست مصوب تعارض دارد.
+
+**راه‌حل پیشنهادی (هیچ کدی تغییر نکرده؛ در فاز ۲ پیاده می‌شود):**
+
+| # | تغییر پیشنهادی | محل |
+|---|---|---|
+| R1 | افزودن ویژگی `sensitive: true` به ورودی‌های حساس کاتالوگ و ثابت `SENSITIVE_PERMISSIONS` | `services/permissions.ts` |
+| R2 | نقش admin: `all` منهای `SENSITIVE_PERMISSIONS` | `SYSTEM_ROLES` |
+| R3 | دستور همگام‌سازی admin در bootstrap با شرط `AND NOT (p.key = ANY($sensitive))` | `db/bootstrap.ts` |
+| R4 | در `POST/PATCH /roles`: افزودن یا حذف مجوز حساس فقط با `roles.grant_sensitive`؛ دلیل الزامی؛ ممیزی جدا `permission.sensitive_changed` | `routes/org.ts` |
+| R5 | در `setAssignments`: دادن نقشی که مجوز حساس دارد فقط با `roles.grant_sensitive`، **ممنوعیت اعطا به خود**، دلیل الزامی، ممیزی `permission.sensitive_granted` | `routes/org.ts` |
+| R6 | راه‌اندازی اولیه `roles.grant_sensitive`: چون هیچ نقشی آن را خودکار ندارد، با یک اسکریپت سمت سرور (هم‌سبک `db/connect-meetings.ts`) و متغیر محیطی یک‌باره برای یک کاربر نام‌برده اعطا و ممیزی می‌شود (**نیازمند تأیید**: چه کسی) | `db/` |
+| R7 | گزارش دوره‌ای دارندگان مجوزهای حساس به دارندگان `audit.view` | `services/scheduler.ts` |
+| R8 | آزمون خودکار: پس از `ensureBaseData` نقش admin هیچ مجوز حساسی ندارد؛ PATCH نقش با مجوز حساس بدون `roles.grant_sensitive` ۴۰۳ می‌دهد؛ اعطا به خود ۴۰۳ می‌دهد | `test/` |
+
+قید موجود «نقش admin باید `roles.manage` را نگه دارد» (`routes/org.ts`) بدون تغییر می‌ماند.
+
+### ۲.۴ تعارض دامنه بدون واحد
+
+در هسته، انتساب نقش بدون `scope_unit_id` یعنی «همه واحدها». اگر نقش `manager` بدون دامنه داده شود، `call.read_unit` عملاً `call.read_all` می‌شود و قاعده حساس را دور می‌زند. راه‌حل بدون تغییر هسته: در تابع جدید `callVisibleSql`، برای `call.read_unit` مقدار `null` از `unitsFor` (یعنی بدون دامنه) **به همه واحدها تفسیر نمی‌شود** و به `managedUnits` کاربر محدود می‌شود. تنها راه دیدن همه تماس‌ها `call.read_all` است.
+
+## ۳. سیاست دسترسی به تاریخچه تماس
+
+### ۳.۱ قاعده
+
+| نقش کاربر | چه چیزی را می‌بیند | مجوز |
+|---|---|---|
+| کاربر عادی | تماس‌هایی که در آن‌ها `calls.user_id` خودش است یا در `call_parties` حضور دارد (پاسخ داده، زنگ خورده، انتقال گرفته) | `call.read` |
+| مدیر واحد | علاوه بر بالا، تماس‌هایی که `calls.unit_id` (واحد ثبت‌شده در لحظه تماس) در دامنه واحد او است | `call.read_unit` با دامنه؛ بدون دامنه = `managedUnits` |
+| نقش مجاز | همه تماس‌ها | `call.read_all` (حساس) |
+| همه | فقط اگر `calls.confidentiality <= users.clearance` | ABAC موجود |
+
+اینکه زنگ خوردن بی‌پاسخ یک داخلی «مرتبط با کاربر» حساب شود، **نیازمند تأیید** است (F3). پیشنهاد: بله، چون کاربر باید تماس‌های از دست رفته خود را ببیند.
+
+### ۳.۲ یک تابع برای همه کانال‌ها
+
+تابع `callVisibleSql(u, params, alias)` در `services/access.ts`، هم‌سبک `letterVisibleSql`:
 
 ```
 (
-     call.user_id = me                                                  -- کارمند: تماس‌های خودش
-  OR EXISTS (call_parties cp WHERE cp.call_id = call.id AND cp.user_id = me)
-  OR (call.unit_id = ANY(unitsFor('telephony.calls.view_unit') ∪ managedUnits))   -- واحد: با دامنه نقش یا مدیر واحد
-  OR unitsFor('telephony.calls.view_all') IS NULL                       -- نقش مجاز: همه
+     c.user_id = :me
+  OR EXISTS (SELECT 1 FROM call_parties cp WHERE cp.call_id = c.id AND cp.user_id = :me)
+  OR c.unit_id = ANY(:unitScope)           -- :unitScope = unitsFor('call.read_unit') ?? managedUnits
+  OR :readAll                               -- u.can('call.read_all')
 )
-AND call.confidentiality <= u.clearance
+AND c.confidentiality <= :clearance
 ```
 
-سه محور دسترسی تصمیم D7 به این شکل اعمال می‌شود: **کارمند** (تماسی که خودش طرف آن بوده)، **واحد سازمانی** (`calls.unit_id` که در لحظه تماس از تخصیص داخلی ثبت شده و با جابه‌جایی بعدی کارمند تغییر نمی‌کند)، و **نقش** (مجوز با یا بدون دامنه واحد). گزارش‌ها و خروجی Excel همین شرط را اعمال می‌کنند.
+این تابع **تنها** منبع تصمیم دسترسی است و همه کانال‌ها از آن استفاده می‌کنند:
 
-- تماسی که به نامه یا سند طبقه‌بندی‌شده پیوند می‌خورد، `confidentiality` آن به بیشینه طبقه موجودیت‌های پیوندی ارتقا می‌یابد (هرگز کاهش خودکار).
-- پیوندها فقط برای کاربری نمایش داده می‌شوند که هم تماس و هم موجودیت مقصد را ببیند.
-- تماس یا موجودیت نامرئی ۴۰۴ برمی‌گرداند (عدم افشای وجود).
+| کانال | نحوه اعمال |
+|---|---|
+| `GET /telephony/calls` و `/calls/:id` | شرط در WHERE؛ نامرئی ۴۰۴ |
+| `GET /letters/:id/calls` و مشابه | هم دیدن موجودیت (`loadVisibleLetter`، `documentVisibleSql`) و هم `callVisibleSql` |
+| گزارش‌ها (`/telephony/reports/*`) | تجمیع فقط روی ردیف‌های قابل دیدن؛ گروه‌های کمتر از ۳ تماس برای کاربر بدون `call.read_all` نمایش داده نمی‌شود تا افراد شناسایی نشوند (**نیازمند تأیید**) |
+| خروجی فایل (`/telephony/reports/export`) | همان شرط + `call.export`؛ ممیزی |
+| SSE | هر رویداد پیش از ارسال به هر مشترک با همین قاعده سنجیده می‌شود (بخش ۹.۲) |
+| ضبط | `call.recording_listen` یا `call.recording_download` **و** دیدن خود تماس |
+
+شماره بیرونی برای کاربر بدون `call.number_full` در همه کانال‌ها پوشانده می‌شود (`+98912***4567`).
+
+### ۳.۳ ضبط تماس
+
+- وضعیت فعلی: وجود ضبط در PBX **نامشخص** است (C7). تا تأیید، قابلیت ضبط **غیرفعال** است: جدول `call_recordings` ساخته نمی‌شود، مسیرهای ضبط وجود ندارند و `GET /telephony/health` مقدار `recordings: "disabled"` برمی‌گرداند.
+- پس از فعال‌سازی: شنیدن و دریافت دو مجوز جدا دارند؛ فایل از سمت سرور خوانده و جریان داده می‌شود؛ مسیر فایل در PBX به مرورگر نمی‌رسد؛ هر پخش و دریافت ممیزی می‌شود؛ دریافت دلیل الزامی دارد.
 
 ## ۴. اسرار
 
 | راز | محل | دسترسی |
 |---|---|---|
 | گذرواژه کاربر AMI | `telephony_connections.secret_enc` (`purpose='ami'`) | فقط آداپتور AMI در حافظه سرور |
-| اعتبارنامه API مدیریتی Issabel | `telephony_connections.secret_enc` (`purpose='config_api'`)؛ توکن کوتاه‌عمر حاصل فقط در حافظه (الگوی `tokenCache` در `integration/meetings.ts`) | فقط آداپتور پیکربندی |
-| اعتبارنامه پایگاه CDR (کاربر فقط‌خواندنی و فقط `SELECT` روی جدول CDR/CEL) | `telephony_connections.secret_enc` (`purpose='cdr_db'`) | فقط `CdrSource` |
-| Secret SIP داخلی‌های جدید | **ذخیره نمی‌شود**؛ تولید با `crypto.randomBytes` و ارسال مستقیم به آداپتور | نمایش یک‌باره با `telephony.extensions.provision` |
-| کلید رمزنگاری | `DATA_ENCRYPTION_KEY` موجود در `config.ts` | بدون تغییر |
+| اعتبارنامه رابط مدیریتی (فاز ۴، در صورت تأیید) | `telephony_connections.secret_enc` (`purpose='config_api'`)؛ توکن کوتاه‌عمر فقط در حافظه (الگوی `tokenCache` در `integration/meetings.ts`) | فقط آداپتور پیکربندی |
+| اعتبارنامه پایگاه CDR (فقط `SELECT`) | `telephony_connections.secret_enc` (`purpose='cdr_db'`) | فقط `CdrSource` |
+| Secret SIP داخلی جدید (فاز ۴) | **ذخیره نمی‌شود** | نمایش یک‌باره با `extension.provision` |
+| کلید رمزنگاری | `DATA_ENCRYPTION_KEY` موجود | بدون تغییر |
 
 قواعد:
 
 - `GET` هیچ‌گاه راز برنمی‌گرداند (`hasSecret: boolean`، مانند `GET /integrations`).
-- لاگ `pino` با `redact` برای کلیدهای `secret`، `password`، `Secret` در پیام‌های AMI.
-- پیام خطای PBX پیش از ذخیره در `last_error` پاک‌سازی می‌شود (حذف خطوط حاوی `Secret:`/`password`) و به ۵۰۰ کاراکتر محدود می‌شود.
-- کاربر AMI با حداقل مجوز: `read` فقط کلاس‌های لازم (مانند `call,cdr,reporting` یا معادل نسخه) و `write` فقط `originate` (و در صورت نیاز `call`)؛ **بدون** `system`، `command`، `config` و `all`. تأیید نهایی با مدیر مرکز تلفن.
-- چرخش راز: تغییر راز در UI → آزمون اتصال → ذخیره؛ راز قبلی نگه داشته نمی‌شود.
-- هیچ گذرواژه، کلید یا توکنی در مستندات، کد، مهاجرت، seed یا تست ثابت نوشته نمی‌شود؛ تست‌ها از `FakePbx` استفاده می‌کنند.
+- لاگ عمومی (`pino`) هیچ راز، هیچ شماره تلفن کامل و هیچ متن یادداشت تماس ندارد: `redact` برای `secret`، `password`، `Secret`، `authorization`؛ شماره‌ها فقط پوشانده؛ شناسه‌ها (`call_id`، `correlation_id`) به‌جای محتوا.
+- پیام خطای PBX پیش از ذخیره پاک‌سازی (حذف خطوط حاوی `Secret`/`password`) و به ۵۰۰ کاراکتر محدود می‌شود.
+- چرخش راز: تغییر در UI → آزمون → ذخیره؛ راز قبلی نگه داشته نمی‌شود.
+- هیچ راز در مستندات، کد، مهاجرت، seed یا آزمون؛ آزمون‌ها از `FakePbx` استفاده می‌کنند.
 
-## ۵. ممیزی
+## ۵. ممیزی و ثبت عملیاتی (دو جریان جدا)
 
-از `audit(db, req, entry)` در `lib/audit.ts` و درون همان تراکنش تغییر. به‌دلیل قفل سراسری ممیزی، فقط **اقدامات انسانی و تغییرات مدیریتی** ممیزی می‌شوند؛ رویدادهای خودکار تماس در `calls`/`call_events` می‌مانند.
+### ۵.۱ `audit_logs` (فقط اقدامات انسانی و مدیریتی)
 
-| action | entity | ثبت در before/after |
+از `audit(db, req, entry)` در `lib/audit.ts` درون تراکنش تغییر.
+
+| action | entity | محتوا (بدون راز) |
 |---|---|---|
-| `telephony.connection.updated` | `telephony_connection` | میزبان، پورت، TLS، کاربر، `secretChanged`؛ بدون راز |
-| `telephony.connection.tested` | `telephony_connection` | نتیجه و تأخیر |
-| `telephony.settings.updated` | `integration` | تنظیمات قبل/بعد |
+| `telephony.connection.updated` / `.tested` | `telephony_connection` | میزبان، پورت، TLS، کاربر، `secretChanged`، نتیجه آزمون |
+| `telephony.settings.updated` | `integration` | قبل/بعد |
 | `telephony.extension.assigned` / `.unassigned` / `.reassigned` | `pbx_extension` | تخصیص قبل/بعد |
-| `telephony.change.requested` / `.submitted` / `.approved` / `.rejected` / `.cancelled` | `extension_change_request` | payload و دلیل |
-| `telephony.change.applied` / `.failed` | `extension_change_request` | نتیجه خلاصه PBX، کد خطا (`userId` = سامانه، مانند intake) |
-| `telephony.change.drift_detected` | `pbx_extension` | snapshot قبل/بعد (بدون راز) |
-| `telephony.dial_policy.created` / `.updated` / `.deleted` | `telephony_dial_policy` | سیاست قبل/بعد |
-| `telephony.number_class.updated`، `telephony.blocked_number.added` / `.removed` | `telephony_number_class` / `telephony_blocked_number` | قبل/بعد |
-| `telephony.recording.played` / `.downloaded` | `call_recording` | تماس، دلیل (برای دریافت) |
-| `telephony.call.linked` / `.unlinked` | `call` | نوع و شناسه موجودیت |
-| `telephony.call.annotated` | `call` | یادداشت قبل/بعد |
+| `telephony.change.requested` / `.approved` / `.rejected` / `.cancelled` / `.applied` / `.failed` / `.drift_detected` (فاز ۴) | `extension_change_request` | payload، دلیل، نتیجه خلاصه |
+| `telephony.dial_policy.*`، `telephony.number_class.updated`، `telephony.blocked_number.*` | — | قبل/بعد |
+| `telephony.call.linked` / `.unlinked` / `.annotated` | `call` | نوع و شناسه موجودیت، یادداشت قبل/بعد |
 | `telephony.calls.exported` | `call` | فیلترها و تعداد ردیف |
+| `telephony.calls.viewed_all` | `call` | فقط وقتی کاربر با `call.read_all` تماسی را می‌بیند که بدون آن نمی‌دید؛ حداکثر یک ردیف برای هر کاربر در هر ساعت و هر فیلتر (برای جلوگیری از حجم) (**نیازمند تأیید**) |
+| `telephony.recording.played` / `.downloaded` | `call_recording` | تماس، دلیل |
+| `permission.sensitive_granted` / `.sensitive_changed` | `user` / `role` | مجوز، دلیل، اعطاکننده |
 | `telephony.provision.viewed` | `pbx_extension` | فقط «نمایش داده شد» |
 
-**آنچه ممیزی نمی‌شود (ثبت عملیاتی):** رویدادهای تماس، ردیف‌های CDR، تغییر وضعیت داخلی‌ها، و درخواست‌های تماس با یک کلیک (پذیرفته یا ردشده) که با نتیجه کامل در `click_to_call_requests` ثبت می‌شوند. این جداول از کاربران عادی فقط‌خواندنی‌اند و کد برنامه ردیف آن‌ها را حذف نمی‌کند جز کار نگهداری.
+### ۵.۲ ثبت عملیاتی (جدا از ممیزی)
 
-مشاهده عادی فهرست تماس‌ها ممیزی نمی‌شود؛ مشاهده تماس‌های دیگران با `view_all` (اختیاری، با تصمیم سازمان) ممیزی شود.
+| داده | جدول |
+|---|---|
+| تماس نهایی | `calls`، `call_parties` |
+| رویدادهای خام خلاصه و بخش‌های تماس (کانال‌ها) | `call_events`، `call_legs` |
+| ردیف‌های CDR | `cdr_records` |
+| هر درخواست تماس با نتیجه (پذیرفته یا رد، دلیل، کاربر، زمان، شناسه همبستگی) | `click_to_call_requests` |
+| اجرای همگام‌سازی | `telephony_sync_runs` |
+
+این جداول قفل ممیزی را نمی‌گیرند، سیاست نگهداری جدا دارند و از API فقط‌خواندنی‌اند. هیچ مسیر یا کار ثبت تماس تابع `audit` را صدا نمی‌زند (آزمون خودکار در هر فاز).
 
 ## ۶. مدیریت خطا و امنیت عملیاتی
 
-- همه خطاهای آداپتور به `HttpError` با کدهای `pbx_*` تبدیل می‌شوند (الگوی `meetingsRequest`)؛ جزئیات فنی فقط در لاگ سرور.
-- `GET /metrics` با شمارنده‌های `telephony_ami_connected`، `telephony_events_total`، `telephony_originate_total{result}`، `telephony_sync_drift`، `telephony_cdr_lag_seconds` (با `lib/metrics.ts`).
-- هشدار `telephony.connection_down` به دارندگان `telephony.settings.manage` پس از ۵ دقیقه قطعی (یک‌بار در هر رخداد).
-- MFA: پیشنهاد افزودن نقش‌های دارای `telephony.settings.manage` و `telephony.extensions.approve` به `MFA_REQUIRED_ROLES`.
+- خطاهای آداپتور به `HttpError` با کدهای `pbx_*` تبدیل می‌شوند (الگوی `meetingsRequest`)؛ جزئیات فنی فقط در لاگ سرور.
+- متریک‌ها با `lib/metrics.ts`: `telephony_ami_connected`، `telephony_events_total`، `telephony_events_duplicate_total`، `telephony_originate_total{result}`، `telephony_sync_drift`، `telephony_cdr_lag_seconds`، `telephony_sse_clients`.
+- هشدار `telephony.connection_down` به دارندگان `telephony.manage` پس از ۵ دقیقه قطعی.
+- MFA: پیشنهاد افزودن نقش‌های دارای `telephony.manage`، `extension.approve`، `call.read_all` و `roles.grant_sensitive` به `MFA_REQUIRED_ROLES` (**نیازمند تأیید**).
 
 ## ۷. حریم خصوصی
 
-- ضبط مکالمه در دامنه این طرح **نیست**. اگر بعداً لازم شد، با مجوز جدا (`telephony.recordings.listen`)، ممیزی هر پخش، و الزامات قانونی جدا طراحی شود.
-- اطلاع‌رسانی به کارکنان درباره ثبت فراداده تماس (چه کسی، کی، چقدر) پیش از فعال‌سازی، بر عهده سازمان.
-- نگهداری و ناشناس‌سازی طبق `telephony-data-model.md` بخش ۶.
+- اطلاع‌رسانی به کارکنان درباره ثبت فراداده تماس پیش از فعال‌سازی فاز ۲ بر عهده سازمان است (F10).
+- نگهداری و ناشناس‌سازی طبق `telephony-data-model.md` بخش ۶؛ مدت‌ها **نیازمند تأیید** (F5).
 
-## ۸. محدودیت شماره و جلوگیری از سوءاستفاده (تصمیم D8)
+## ۸. محدودیت شماره و جلوگیری از سوءاستفاده (فاز ۳)
 
 | لایه | کنترل | محل |
 |---|---|---|
-| ۱. Issabel | Outbound Routes و محدودیت‌های موجود همچنان اعمال می‌شوند چون Originate در Context عادی داخلی‌ها انجام می‌شود، نه Context ویژه | پیکربندی PBX (بدون تغییر از سمت ما) |
-| ۲. مالکیت | فقط از داخلی تخصیص‌یافته به خود کاربر | `extension_assignments` |
-| ۳. فهرست مسدود | شماره یا پیشوند مسدود همیشه رد می‌شود | `telephony_blocked_numbers` |
-| ۴. دسته و سیاست | دسته شماره (داخلی، اضطراری، شهری، همراه، سراسری، رایگان، ویژه، بین‌المللی) باید در سیاست نقش/واحد کاربر مجاز باشد؛ پیش‌فرض فقط داخلی؛ ویژه و بین‌المللی در هیچ سیاست پیش‌فرضی نیستند | `telephony_number_classes`، `telephony_dial_policies` |
-| ۵. سقف | سقف ساعتی و روزانه هر سیاست، حداکثر یک تماس هم‌زمان در حال زنگ، ساعت کاری اختیاری | شمارش `click_to_call_requests` |
-| ۶. تکرار | `idempotencyKey` از دوبار زدن دکمه جلوگیری می‌کند | `click_to_call_requests` |
-| ۷. ثبت نتیجه | هر درخواست با وضعیت نهایی، دلیل رد، پاسخ PBX، دسته شماره و سیاست اعمال‌شده | `click_to_call_requests` |
-| ۸. هشدار | رد پیاپی، رسیدن به سقف، یا حجم غیرعادی تماس یک کاربر → اعلان `telephony.dial_abuse_suspected` و نمایش در گزارش «عملیات تماس ردشده» | زمان‌بند + `notify` |
-| ۹. توقف اضطراری | غیرفعال کردن اتصال AMI یا سیاست‌ها، همه تماس‌های با یک کلیک را فوراً متوقف می‌کند بدون اثر روی تلفن‌های فیزیکی | `telephony_connections.is_active` |
+| ۱. Issabel | Originate در Context عادی داخلی‌ها تا Outbound Routes و محدودیت‌های موجود اعمال شوند (نام Context **نیازمند تأیید**، E4) | PBX (بدون تغییر از سمت ما) |
+| ۲. مجوز | `call.originate` | RBAC |
+| ۳. مالکیت | فقط از داخلی تخصیص‌یافته به خود کاربر | `extension_assignments` |
+| ۴. فهرست مسدود | شماره یا پیشوند مسدود همیشه رد | `telephony_blocked_numbers` |
+| ۵. دسته و سیاست | دسته شماره باید در سیاست نقش/واحد کاربر مجاز باشد؛ نبود سیاست = فقط داخلی؛ ویژه و بین‌المللی در هیچ سیاست پیش‌فرضی نیستند | `telephony_number_classes`، `telephony_dial_policies` |
+| ۶. سقف | سقف ساعتی و روزانه، یک تماس هم‌زمان در حال زنگ، ساعت کاری اختیاری | شمارش `click_to_call_requests` |
+| ۷. تکرار | `idempotencyKey` | `click_to_call_requests` |
+| ۸. ثبت نتیجه | هر درخواست با وضعیت، دلیل رد، کاربر، زمان، شناسه همبستگی، دسته و سیاست اعمال‌شده و پاسخ خلاصه PBX | `click_to_call_requests` |
+| ۹. هشدار | رد پیاپی یا حجم غیرعادی → `telephony.dial_abuse_suspected` | زمان‌بند + `notify` |
+| ۱۰. توقف اضطراری | غیرفعال کردن اتصال AMI یا سیاست‌ها همه تماس‌های با یک کلیک را فوراً متوقف می‌کند | `telephony_connections.is_active` |
+
+## ۹. AMI و SSE
+
+### ۹.۱ AMI (رابط رویداد و عملیات تماس، نه رابط پیکربندی)
+
+AMI فقط برای رویدادهای تماس، وضعیت دستگاه و Originate استفاده می‌شود. ایجاد و ویرایش داخلی از طریق AMI طراحی **نمی‌شود**، چون Issabel پیکربندی داخلی‌ها را در پایگاه داده خود نگه می‌دارد و فایل‌های Asterisk را از آن تولید می‌کند. پس تغییری که مستقیم در Asterisk داده شود در Issabel دیده نمی‌شود و با اعمال پیکربندی بعدی از بین می‌رود (رفتار شناخته‌شده خانواده FreePBX/IssabelPBX؛ روی نسخه نصب‌شده **نیازمند تأیید**).
+
+| موضوع | طراحی |
+|---|---|
+| حداقل مجوز | کاربر AMI اختصاصی. فاز ۱: فقط خواندن لازم برای فهرست Endpoint و نسخه (در صورت انتخاب AMI به‌عنوان منبع فهرست). فاز ۳: افزودن خواندن رویدادهای تماس و نوشتن فقط `originate`. **بدون** `command`، `config`، `system` (برای نوشتن) و `all`. نام دقیق کلاس‌ها در نسخه نصب‌شده **نیازمند تأیید** (B2) |
+| حفاظت اعتبارنامه | بخش ۴؛ فقط در حافظه فرایند شنونده و API |
+| محدودیت شبکه | `permit` فقط IP سرور اتوماسیون و `deny` بقیه؛ فایروال PBX؛ ترجیحاً VLAN مدیریتی (D1، D2) |
+| TLS | در صورت پشتیبانی (B1): اتصال TLS با Pin اثرانگشت گواهی (`tls_fingerprint`). در غیر این صورت فعال‌سازی فقط روی شبکه مدیریتی جدا و با تأیید کتبی (D3) |
+| اتصال مجدد | Backoff نمایی ۱ تا ۶۰ ثانیه با Jitter؛ پس از اتصال، Login، کشف نسخه، بازسازی تماس‌های باز از CDR (`call-lifecycle.md`) |
+| مدیریت خطا | Timeout هر Action ۵ ثانیه؛ شکست ورود پس از ۳ بار پیاپی → توقف تا اقدام دستی (جلوگیری از قفل حساب) و هشدار؛ رویداد ناشناخته نادیده و شمارش می‌شود |
+| تک‌نمونه | قفل مشورتی `pg_try_advisory_lock(hashtext('telephony-listener'))`؛ نمونه دوم منتظر می‌ماند |
+
+### ۹.۲ SSE (فاز ۳)
+
+SSE **فقط کانال تحویل رویداد به کاربر است** و جایگزین کنترل دسترسی API نیست. هر داده‌ای که کاربر از SSE می‌گیرد باید از API هم با همان قاعده قابل دریافت باشد، و هر عملی (مثلاً اتصال به پرونده) فقط از API و با بررسی کامل مجوز انجام می‌شود.
+
+| موضوع | طراحی |
+|---|---|
+| احراز هویت | `GET /api/telephony/stream` پشت `authenticate` موجود با سرآیند `Authorization`؛ کلاینت با `fetch` و `ReadableStream` می‌خواند (نه `EventSource`) تا توکن در URL و لاگ‌ها نیاید |
+| عمر اتصال | سرور جریان را در زمان انقضای توکن دسترسی (حداکثر ۱۵ دقیقه، `ACCESS_TOKEN_TTL`) می‌بندد؛ کلاینت با توکن تمدیدشده دوباره وصل می‌شود؛ پس هر تغییر نقش یا غیرفعال شدن کاربر حداکثر ظرف یک دوره توکن اعمال می‌شود |
+| مجوز هر رویداد | برای هر مشترک، `AuthUser` بارگذاری‌شده نگه داشته می‌شود و هر رویداد پیش از ارسال با همان قاعده `callVisibleSql` (نسخه درون‌حافظه با همان ورودی‌ها) سنجیده می‌شود. رویداد وضعیت داخلی فقط با `presence.view` یا برای داخلی خود کاربر |
+| جلوگیری از نشت | محتوای رویداد حداقلی است: شناسه تماس، وضعیت، داخلی، زمان، و شماره پوشانده‌شده (کامل فقط با `call.number_full`). نام مخاطب، یادداشت و پیوندها در SSE ارسال نمی‌شوند و کلاینت از API می‌گیرد |
+| چندنمونه‌ای | `LISTEN/NOTIFY` پستگرس فقط شناسه تماس و نوع رویداد را منتقل می‌کند؛ هر نمونه جزئیات را خودش می‌خواند و برای مشترکان خودش فیلتر می‌کند |
+| اتصال مجدد امن | `Last-Event-ID` پذیرفته می‌شود ولی رویدادهای گذشته بازپخش نمی‌شوند؛ کلاینت پس از اتصال مجدد وضعیت را از `GET /telephony/calls/live` می‌گیرد (که مجوز را دوباره می‌سنجد). Heartbeat هر ۲۵ ثانیه |
+| محدودیت | حداکثر ۳ اتصال هم‌زمان برای هر کاربر؛ اتصال اضافه قدیمی‌ترین را می‌بندد |
+| جایگزین | با قطع SSE، Polling `GET /telephony/calls/live` هر ۱۵ ثانیه |

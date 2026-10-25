@@ -37,7 +37,7 @@
 | `user_positions` (خط ۵۲) | انتساب کاربر به سمت با `is_primary`، `start_date`، `end_date`؛ تاریخچه سمت به این شکل نگه داشته می‌شود. الگوی مناسب برای تاریخچه تخصیص داخلی. |
 | `roles`، `permissions`، `role_permissions`، `user_roles` (خط ۶۲ تا ۹۰) | RBAC؛ `user_roles.scope_unit_id` نقش را به یک زیردرخت واحد محدود می‌کند. |
 | `user_external_links` (خط ۱۰۴) | نگاشت کاربر به شناسه سامانه دیگر (`system`، `external_id`، `matched_by`). تابع `mapExternalUser` در `integration/meetings.ts` از آن استفاده می‌کند. قابل استفاده برای نگاشت شناسه کاربر در Issabel (در صورت وجود)، ولی **برای داخلی کافی نیست** چون تاریخچه و قید یکتایی فعال/غیرفعال ندارد. |
-| `services/permissions.ts` | کاتالوگ ثابت `PERMISSIONS` (۲۴ کلید) و `SYSTEM_ROLES` (admin، secretariat، manager، president، expert، it). در `db/bootstrap.ts` تابع `ensureBaseData` هنگام شروع کاتالوگ را upsert می‌کند؛ پس افزودن مجوز جدید با افزودن به آرایه و (برای نقش‌های موجود) یک مهاجرت `INSERT ... role_permissions` انجام می‌شود، همان کاری که `002` و `003` کرده‌اند. |
+| `services/permissions.ts` | کاتالوگ ثابت `PERMISSIONS` (۲۴ کلید، الگوی نام `<موجودیت>.<عمل>`) و `SYSTEM_ROLES` (admin با `permissions: all`، secretariat، manager، president، expert، it). در `db/bootstrap.ts` تابع `ensureBaseData` هنگام شروع کاتالوگ را upsert می‌کند، نقش‌های سیستمی را فقط در اولین ایجاد مقداردهی می‌کند و **همه مجوزها را در هر شروع به admin می‌دهد**؛ پس افزودن مجوز جدید با افزودن به آرایه و (برای نقش‌های موجود) یک مهاجرت `INSERT ... role_permissions` انجام می‌شود، همان کاری که `002` و `003` کرده‌اند. |
 | `auth/middleware.ts` | `loadAuthUser` مجوزها را به `'all'` یا مجموعه واحدها (با زیرشاخه‌ها) تبدیل می‌کند؛ `can(p, unitId)`، `unitsFor(p)` و `requirePerm`. `managedUnits` برای مدیران واحد. |
 | `services/access.ts` | ABAC نامه (`letterVisibleSql`) و سند بایگانی (`documentVisibleSql`)؛ نامه نامرئی ۴۰۴ برمی‌گرداند. هر اتصال تماس به نامه یا سند باید از همین توابع عبور کند. |
 
@@ -102,4 +102,6 @@
 | G7 | لحظه‌ای فقط Polling | SSE در فاز تماس لحظه‌ای؛ تا آن زمان Polling |
 | G8 | هیچ اطلاعاتی از Issabel | پرسش‌نامه مدیر مرکز تلفن پیش‌نیاز فاز ۱ |
 | G9 | `user_external_links` تاریخچه ندارد | تاریخچه تخصیص داخلی جدا، به سبک `user_positions` |
-| G10 | نقش `admin` با `permissions: all` هر مجوز جدید را خودکار می‌گیرد | استثنای مجوزهای حساس تماس و ضبط از `all` (D7، F3) |
+| G10 | نقش `admin` هر مجوز جدید را خودکار می‌گیرد: `SYSTEM_ROLES` با `permissions: all` و در `db/bootstrap.ts` تابع `ensureBaseData` در **هر شروع** همه مجوزهای جدول `permissions` را دوباره به admin می‌دهد | استثنای مجوزهای حساس در هر دو محل (R1 تا R3 در `security-and-audit.md` بخش ۲.۳) |
+| G11 | `routes/org.ts`: دارنده `roles.manage` هر مجوزی را به هر نقش و دارنده `users.manage` هر نقشی را به هر کاربر (از جمله خودش) می‌دهد؛ فقط ممیزی می‌شود | مجوز `roles.grant_sensitive`، منع اعطا به خود، دلیل الزامی (R4، R5) |
+| G12 | `auth/middleware.ts` تابع `loadAuthUser`: انتساب نقش بدون `scope_unit_id` یعنی همه واحدها | در `callVisibleSql` دامنه بدون واحد برای `call.read_unit` به `managedUnits` محدود می‌شود (`security-and-audit.md` بخش ۲.۴) |

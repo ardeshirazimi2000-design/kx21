@@ -9,7 +9,7 @@
 | فاز | جداول و تغییرات | دسته داده |
 |---|---|---|
 | ۱ | قید `integrations_kind_check`، `telephony_connections`، `pbx_extensions`، `extension_assignments`، `telephony_sync_runs` | پیکربندی و نگاشت |
-| ۲ | `calls`، `call_parties`، `cdr_records`، `call_links` | ثبت عملیاتی تماس (جدا از ممیزی) |
+| ۲ | `calls`، `call_parties`، `call_legs`، `cdr_records`، `call_links` | ثبت عملیاتی تماس (جدا از ممیزی) |
 | ۳ | `call_events`، `telephony_number_classes`، `telephony_dial_policies`، `telephony_blocked_numbers`، `click_to_call_requests` | ثبت عملیاتی تماس + سیاست |
 | ۴ | `extension_change_requests` | تغییر پیکربندی |
 | آینده (تصمیم جدا) | `contacts`، `contact_phones`، `call_recordings` | — |
@@ -28,6 +28,7 @@ erDiagram
   pbx_extensions ||--o{ extension_change_requests : ""
   telephony_connections ||--o{ calls : ""
   calls ||--o{ call_events : ""
+  calls ||--o{ call_legs : ""
   calls ||--o{ call_parties : ""
   calls ||--o{ call_links : ""
   call_links }o--|| letters : "entity_type=letter"
@@ -145,7 +146,7 @@ CREATE TABLE extension_change_requests (
   extension_id       uuid REFERENCES pbx_extensions(id),         -- null برای ایجاد تا پیش از اعمال
   pbx_key            text NOT NULL DEFAULT 'main',
   extension          text NOT NULL,
-  op                 text NOT NULL CHECK (op IN ('create','update','disable','enable','delete')),
+  op                 text NOT NULL CHECK (op IN ('create','update','disable','enable')),   -- حذف در فاز ۴ نیست
   origin             text NOT NULL DEFAULT 'user' CHECK (origin IN ('user','pbx_drift')),
   payload            jsonb NOT NULL DEFAULT '{}'::jsonb,         -- بدون Secret
   base_snapshot_hash text,                                       -- برای تشخیص تعارض هنگام اعمال
@@ -196,6 +197,11 @@ CREATE TABLE calls (
   talk_seconds     int,                                          -- billsec
   source           text NOT NULL DEFAULT 'ami' CHECK (source IN ('ami','cdr','click_to_call')),
   cdr_reconciled   boolean NOT NULL DEFAULT false,
+  completeness     text NOT NULL DEFAULT 'live'
+                   CHECK (completeness IN ('live','complete','cdr_only','partial','needs_review')),
+                   -- live: در جریان؛ complete: رویداد زنده + CDR منطبق؛ cdr_only: فقط از CDR (شنونده قطع بود یا فاز ۲)؛
+                   -- partial: پایان دیده نشد و CDR هم نیامد؛ needs_review: داده متناقض (مثلاً جهت نامشخص)
+  correlation_key  text NOT NULL,                                -- linkedid؛ اگر CDR ستون linkedid نداشت، uniqueid نخستین بخش (نیازمند تأیید، C2)
   note             text,                                         -- یادداشت کاربر
   outcome          text,                                         -- نتیجه کاری انتخابی (مثلاً «پیگیری لازم»)
   confidentiality  int NOT NULL DEFAULT 0 CHECK (confidentiality BETWEEN 0 AND 2),
@@ -223,16 +229,34 @@ CREATE TABLE call_parties (
 );
 CREATE INDEX call_parties_user_idx ON call_parties (user_id);
 
--- رویدادهای خام خلاصه‌شده (برای عیب‌یابی و بازسازی؛ با سیاست نگهداری کوتاه)
+-- بخش‌های تماس (هر کانال Asterisk یک بخش؛ تماس با انتقال، صف یا زنگ گروهی چند بخش دارد). فاز ۲ از ردیف‌های CDR، فاز ۳ از رویداد AMI
+CREATE TABLE call_legs (
+  id            uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  call_id       uuid NOT NULL REFERENCES calls(id) ON DELETE CASCADE,
+  pbx_uniqueid  text NOT NULL,
+  kind          text NOT NULL DEFAULT 'unknown' CHECK (kind IN ('extension','trunk','local','queue','unknown')),
+  extension_id  uuid REFERENCES pbx_extensions(id),
+  peer_uniqueid text,                                            -- طرف مقابل در Bridge یا Dial
+  started_at    timestamptz NOT NULL,
+  answered_at   timestamptz,
+  ended_at      timestamptz,
+  hangup_cause  int,
+  disposition   text,
+  source        text NOT NULL CHECK (source IN ('ami','cdr')),
+  UNIQUE (call_id, pbx_uniqueid)
+);
+CREATE INDEX call_legs_ext_idx ON call_legs (extension_id, started_at DESC);
+
+-- رویدادهای خام خلاصه‌شده (فاز ۳؛ برای عیب‌یابی و بازسازی؛ نگهداری کوتاه)
 CREATE TABLE call_events (
   id            bigserial PRIMARY KEY,
   call_id       uuid NOT NULL REFERENCES calls(id) ON DELETE CASCADE,
   pbx_uniqueid  text NOT NULL,
-  event_type    text NOT NULL,                                   -- Newchannel, DialBegin, BridgeEnter, Hangup, Cdr, ...
-  seq           int  NOT NULL,                                   -- ترتیب دریافت در شنونده برای این uniqueid
-  occurred_at   timestamptz NOT NULL,
-  data          jsonb NOT NULL DEFAULT '{}'::jsonb,              -- فیلدهای مجاز (Allowlist)، نه کل رویداد
-  UNIQUE (pbx_uniqueid, event_type, seq)
+  event_type    text NOT NULL,                                   -- Newchannel, DialBegin, BridgeEnter, Hangup, ...
+  occurred_at   timestamptz NOT NULL,                            -- از Timestamp رویداد AMI (نه زمان دریافت)
+  event_hash    text NOT NULL,                                   -- sha256(uniqueid|type|timestamp|فیلدهای کلیدی): پایدار پس از اتصال مجدد
+  data          jsonb NOT NULL DEFAULT '{}'::jsonb,              -- فقط فیلدهای مجاز (Allowlist)، بدون متغیرهای دلخواه کانال
+  UNIQUE (event_hash)
 );
 CREATE INDEX call_events_call_idx ON call_events (call_id, occurred_at);
 
@@ -273,6 +297,19 @@ CREATE INDEX call_links_entity_idx ON call_links (entity_type, entity_id);
 قید ارجاعی چندریختی در پایگاه ممکن نیست؛ سرویس هنگام درج، وجود و **قابل دیدن بودن** موجودیت برای کاربر را با `loadVisibleLetter` و `documentVisibleSql` بررسی می‌کند. با حذف موجودیت مقصد، کار شبانه پیوندهای یتیم را پاک می‌کند.
 
 ### ۳.۷ مخاطبان (پیش‌بینی معماری؛ خارج از فاز ۱، تصمیم D5)
+
+> SQL زیر فقط برای نشان دادن جای خالی در معماری است و در مهاجرت هیچ‌یک از فازهای ۱ تا ۵ نیست. زمان ساخت: تصمیم جدا (F1).
+
+**وابستگی‌های آینده برای نگاشت «شماره → مخاطب → پرونده»:**
+
+| # | وابستگی | وضعیت در فازهای ۱ تا ۳ |
+|---|---|---|
+| V1 | شماره تماس بیرونی همیشه E.164 نرمال (`calls.external_number`) | از فاز ۲ رعایت می‌شود |
+| V2 | تابع واحد `resolveNumber(number)` در `services/telephony/numbers.ts` که امروز فقط داخلی → کارمند را برمی‌گرداند | از فاز ۲ |
+| V3 | `call_links.entity_type` مقدار `contact` را از ابتدا در CHECK دارد ولی API آن را تا ساخت دفترچه رد می‌کند | از فاز ۲ |
+| V4 | پیوند طرف نامه به مخاطب (`letters.contact_id` یا جدول ارتباطی) تا پیشنهاد «پرونده‌های این مخاطب» ممکن شود | آینده؛ تغییر جدول `letters` نیازمند تصمیم جدا |
+| V5 | ABAC مخاطب (`owner_unit_id`، `confidentiality`) هم‌سبک نامه | آینده |
+| V6 | ورود اولیه مخاطبان از `letters.external_party/external_org` (فقط پیشنهاد، بدون شماره) | آینده |
 
 ```sql
 CREATE TABLE contacts (
@@ -343,10 +380,12 @@ CREATE TABLE click_to_call_requests (
   target_number    text NOT NULL,                                  -- نرمال‌شده
   number_class     text REFERENCES telephony_number_classes(key),
   dial_policy_id   uuid REFERENCES telephony_dial_policies(id),
+  correlation_id   uuid NOT NULL DEFAULT gen_random_uuid() UNIQUE, -- در ActionID (c2c-<id>) و متغیر کانال KX_C2C؛ کلید پیوند به calls
+  request_id       text,                                           -- x-request-id درخواست HTTP (همبستگی با لاگ سرور)
   context_type     text,                                           -- letter | document | user | contact
   context_id       text,
   idempotency_key  uuid NOT NULL,
-  ami_action_id    text UNIQUE,                                    -- فقط برای درخواست ارسال‌شده
+  ami_action_id    text UNIQUE,                                    -- فقط برای درخواست ارسال‌شده؛ = 'c2c-' || correlation_id
   status           text NOT NULL DEFAULT 'requested'
                    CHECK (status IN ('requested','rejected','sent','agent_ringing','agent_no_answer','connected','failed','completed')),
   reject_reason    text CHECK (reject_reason IN ('no_permission','no_extension','extension_not_owned','destination_not_allowed',
@@ -400,17 +439,20 @@ CREATE INDEX telephony_sync_runs_kind_idx ON telephony_sync_runs (kind, started_
 
 ## ۴. مجوزهای جدید
 
-افزوده به `PERMISSIONS` در `services/permissions.ts` با ماژول «تلفن»، و یک `INSERT ... role_permissions` در مهاجرت برای نقش‌های موجود (الگوی `002` و `003`). فهرست کامل در `security-and-audit.md`.
+افزوده به `PERMISSIONS` در `services/permissions.ts` با ماژول «تلفن» و فقط در فاز مربوط، و یک `INSERT ... role_permissions` در مهاجرت برای نقش‌های پیش‌فرض (الگوی `002` و `003`). فهرست کامل، نام‌گذاری و مجوزهای حساس در `security-and-audit.md` بخش ۲. مجوزهای حساس (`call.read_all`، `call.recording_listen`، `call.recording_download`، `roles.grant_sensitive`) در هیچ مهاجرتی به هیچ نقشی، از جمله `admin`، داده نمی‌شوند و همگام‌سازی admin در `db/bootstrap.ts` باید آن‌ها را مستثنا کند (همان سند، بخش ۲.۳).
 
 ## ۵. رویدادهای اعلان جدید
 
-`telephony.change_pending`، `telephony.change_applied`، `telephony.change_failed`، `telephony.missed_call` (اختیاری)، `telephony.connection_down` به `NOTIFICATION_EVENTS` و `DEFAULT_TEMPLATES` اضافه می‌شوند.
+`telephony.connection_down` (فاز ۱)، `telephony.missed_call` (فاز ۳، اختیاری)، `telephony.dial_abuse_suspected` (فاز ۳)، `telephony.change_pending`، `telephony.change_applied`، `telephony.change_failed` (فاز ۴) به `NOTIFICATION_EVENTS` و `DEFAULT_TEMPLATES` اضافه می‌شوند. متن اعلان‌ها شماره کامل بیرونی ندارد.
 
 ## ۶. نگهداری داده
+
+همه مدت‌ها **نیازمند تأیید** سازمان هستند (F5).
 
 | داده | پیش‌فرض پیشنهادی | تنظیم |
 |---|---|---|
 | `call_events` | ۹۰ روز | `integrations.settings.retention.callEventsDays` |
+| `call_legs` | همراه `calls` | — |
 | `cdr_records.data` | ۱۸ ماه | قابل تنظیم |
 | `calls` | مطابق سیاست سازمان (`open-questions.md`) | ستون‌های حساس پس از دوره، ناشناس‌سازی (`external_number` → هش) |
 | `click_to_call_requests` | ۱۲ ماه | — |

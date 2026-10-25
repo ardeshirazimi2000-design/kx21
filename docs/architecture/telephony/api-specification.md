@@ -20,7 +20,7 @@
 | ۴ | «درخواست تغییر پیکربندی» در بخش ۲ |
 | آینده | مخاطبان و ضبط تماس (بخش ۳)، صف‌ها (فاز ۵) |
 
-## ۱. اتصال و تنظیمات (`telephony.settings.manage`)
+## ۱. اتصال و تنظیمات (`telephony.manage`)
 
 | روش و مسیر | توضیح | ممیزی |
 |---|---|---|
@@ -30,7 +30,7 @@
 | `GET /telephony/admin/capabilities` | خروجی `PbxConfigAdapter.capabilities()` و نسخه‌ها و رابط‌های کشف‌شده (نسخه Issabel/Asterisk، درایور، وجود API مدیریتی، ستون‌های CDR)؛ مبنای تصمیم درباره فاز ۴ | — |
 | `PUT /telephony/admin/settings` | محدوده داخلی‌ها، پیش‌شماره‌ها، الگوی مقصد مجاز، فواصل همگام‌سازی، نگهداری | `telephony.settings.updated` |
 | `GET /telephony/admin/sync-runs` | تاریخچه `telephony_sync_runs` | — |
-| `GET /telephony/health` | برای همه کاربران واردشده: `{ available, ami, configApi, cdr }` فقط به‌صورت `ok/degraded/down` | — |
+| `GET /telephony/health` | برای همه کاربران واردشده: `{ available, ami, configApi, cdr, recordings }`؛ چهار مورد اول `ok/degraded/down/disabled` و `recordings` تا تأیید C7 همیشه `disabled` | — |
 
 بدنه `PUT /telephony/admin/connections/ami`:
 
@@ -40,77 +40,81 @@
   "settings": { "originateContext": "from-internal", "channelTech": "PJSIP" } }
 ```
 
+مقادیر بالا فقط نمونه‌اند؛ میزبان، پورت، Context و درایور واقعی **نیازمند تأیید** هستند (B1، A3، E4). در فاز ۱ و ۲ آزمون هر اتصال فقط عملیات خواندنی انجام می‌دهد و `originateContext` استفاده نمی‌شود.
+
 اعتبارسنجی: `host` فقط IP یا نام میزبان شبکه خصوصی مجاز در `settings.allowedHosts` (جلوگیری از SSRF)؛ `secret` حداقل ۱۶ کاراکتر؛ هرگز در پاسخ یا لاگ برنمی‌گردد.
 
 ## ۲. داخلی‌ها
 
 | روش و مسیر | مجوز | توضیح |
 |---|---|---|
-| `GET /telephony/extensions` | `telephony.extensions.view` (دامنه واحد) | فیلترها: `q`، `unitId`، `syncStatus`، `lifecycle`، `unassigned=true`. خروجی هر ردیف: `id, extension, displayName, tech, lifecycle, syncStatus, deviceState, assignment{user, unit, position, validFrom}, lastSyncedAt, lastError` |
+| `GET /telephony/extensions` | `extension.view` (دامنه واحد) | فیلترها: `q`، `unitId`، `syncStatus`، `lifecycle`، `unassigned=true`. خروجی هر ردیف: `id, extension, displayName, tech, lifecycle, syncStatus, deviceState, assignment{user, unit, position, validFrom}, lastSyncedAt, lastError` |
 | `GET /telephony/extensions/:id` | همان | جزئیات + تاریخچه تخصیص + درخواست‌های تغییر |
-| `POST /telephony/extensions/sync` | `telephony.extensions.request` | صف‌کردن `telephony.sync_extensions`؛ پاسخ ۲۰۲ `{ runId }` |
-| `GET /telephony/extensions/suggestions` | `telephony.extensions.assign` | پیشنهاد تطبیق نام نمایشی با کاربر |
-| `GET /telephony/presence?extensions=101,102` | `telephony.presence.view` | فقط `deviceState` |
-| `GET /users/:id/extensions` | خود کاربر یا `telephony.extensions.view` | داخلی‌های فعال کاربر |
+| `POST /telephony/extensions/sync` | `extension.assign` یا `telephony.manage` | صف‌کردن `telephony.sync_extensions`؛ پاسخ ۲۰۲ `{ runId }` |
+| `GET /telephony/extensions/suggestions` | `extension.assign` | پیشنهاد تطبیق نام نمایشی با کاربر |
+| `GET /telephony/presence?extensions=101,102` | `presence.view` (فاز ۳) | فقط `deviceState`؛ در فاز ۱ و ۲ ستون `deviceState` فهرست داخلی‌ها همیشه `unknown` است |
+| `GET /users/:id/extensions` | خود کاربر یا `extension.view` | داخلی‌های فعال کاربر |
 
 ### تخصیص
 
 | روش و مسیر | مجوز | بدنه / نتیجه |
 |---|---|---|
-| `POST /telephony/extensions/:id/assignments` | `telephony.extensions.assign` در واحد مقصد | `{ userId?, unitId, positionId?, isPrimary, validFrom?, note? }` → ۲۰۱. خطاها: ۴۰۹ `extension_already_assigned`، ۴۰۹ `user_has_primary_extension`، ۴۲۲ `position_unit_mismatch`، ۴۲۲ `extension_not_active` |
-| `POST /telephony/assignments/:id/end` | `telephony.extensions.assign` | `{ reason }` → ۲۰۰ |
-| `POST /telephony/extensions/:id/reassign` | `telephony.extensions.assign` | بستن تخصیص فعلی و ایجاد جدید در یک تراکنش |
+| `POST /telephony/extensions/:id/assignments` | `extension.assign` در واحد مقصد | `{ userId?, unitId, positionId?, isPrimary, validFrom?, note? }` → ۲۰۱. خطاها: ۴۰۹ `extension_already_assigned`، ۴۰۹ `user_has_primary_extension`، ۴۲۲ `position_unit_mismatch`، ۴۲۲ `extension_not_active` |
+| `POST /telephony/assignments/:id/end` | `extension.assign` | `{ reason }` → ۲۰۰ |
+| `POST /telephony/extensions/:id/reassign` | `extension.assign` | بستن تخصیص فعلی و ایجاد جدید در یک تراکنش |
 
 ### درخواست تغییر پیکربندی (فاز ۴؛ تا آن زمان این مسیرها وجود ندارند)
 
 | روش و مسیر | مجوز | توضیح |
 |---|---|---|
-| `GET /telephony/change-requests?status=` | `telephony.extensions.view` | فهرست |
-| `POST /telephony/change-requests` | `telephony.extensions.request` | `{ op, extension, payload, reason }`؛ اگر `extension` در محدوده نیست ۴۲۲ `extension_out_of_range`؛ اگر درخواست باز دیگری هست ۴۰۹ `change_already_open` |
+| `GET /telephony/change-requests?status=` | `extension.view` | فهرست |
+| `POST /telephony/change-requests` | بر اساس `op`: `extension.create`، `extension.update` یا `extension.disable` (و برای `enable` همان `extension.disable`) | `{ op, extension, payload, reason }`؛ `op='delete'` در فاز ۴ پشتیبانی نمی‌شود (۴۲۲ `capability_not_supported`)؛ اگر `extension` در محدوده نیست ۴۲۲ `extension_out_of_range`؛ اگر درخواست باز دیگری هست ۴۰۹ `change_already_open` |
 | `PATCH /telephony/change-requests/:id` | درخواست‌دهنده، فقط در `draft` | ویرایش |
 | `POST /telephony/change-requests/:id/submit` | درخواست‌دهنده | `draft → pending_approval` |
-| `POST /telephony/change-requests/:id/approve` | `telephony.extensions.approve` | ۴۰۳ `self_approval_forbidden` اگر خود درخواست‌دهنده باشد؛ صف‌کردن `telephony.apply_change` یا `manual_pending` |
-| `POST /telephony/change-requests/:id/reject` | `telephony.extensions.approve` | `{ note }` الزامی |
-| `POST /telephony/change-requests/:id/retry` | `telephony.extensions.approve` | فقط از `failed` |
+| `POST /telephony/change-requests/:id/approve` | `extension.approve` | ۴۰۳ `self_approval_forbidden` اگر خود درخواست‌دهنده باشد؛ صف‌کردن `telephony.apply_change` یا `manual_pending` |
+| `POST /telephony/change-requests/:id/reject` | `extension.approve` | `{ note }` الزامی |
+| `POST /telephony/change-requests/:id/retry` | `extension.approve` | فقط از `failed` |
 | `POST /telephony/change-requests/:id/cancel` | درخواست‌دهنده یا تأییدکننده | فقط پیش از `applying` |
-| `POST /telephony/change-requests/:id/confirm-manual` | `telephony.extensions.approve` | تأیید اعمال دستی پس از اینکه همگام‌سازی تغییر را دید؛ در غیر این صورت ۴۰۹ `pbx_change_not_observed` |
+| `POST /telephony/change-requests/:id/confirm-manual` | `extension.approve` | تأیید اعمال دستی پس از اینکه همگام‌سازی تغییر را دید؛ در غیر این صورت ۴۰۹ `pbx_change_not_observed` |
 
 ## ۳. تماس‌ها و تاریخچه
 
 | روش و مسیر | مجوز | توضیح |
 |---|---|---|
-| `GET /telephony/calls` | `telephony.calls.view_own` / `view_unit` / `view_all` | فیلترها: `from`، `to` (بازه)، `userId`، `unitId`، `direction`، `disposition`، `number`، `linked=true/false`، `entityType`+`entityId`. دامنه اعمال‌شده: فقط تماس‌های خود (`user_id` یا `call_parties`)، یا واحدهای مجاز (`unitsFor`)، یا همه. شماره بیرونی برای کاربر بدون `telephony.numbers.view_full` پوشانده می‌شود (`+98912***4567`) |
-| `GET /telephony/calls/:id` | همان | جزئیات، طرف‌ها، پیوندها؛ رویدادهای خام فقط برای `telephony.settings.manage`. تماس نامرئی ۴۰۴ |
-| `PATCH /telephony/calls/:id` | مشارکت‌کننده تماس یا `telephony.calls.annotate` | `{ note?, outcome? }` |
-| `GET /telephony/calls/live` | `telephony.calls.view_own` به بالا | تماس‌های `state <> 'ended'` در دامنه کاربر |
-| `GET /telephony/reports/summary` | `reports.view` + دامنه تماس | تجمیع بر اساس کارمند/واحد/روز/جهت/نتیجه؛ تعداد، مدت کل، میانگین انتظار، نرخ بی‌پاسخ |
-| `GET /telephony/reports/export?format=xlsx` | همان | با `lib/xlsx.ts` (ایمن در برابر Formula Injection) |
+| `GET /telephony/calls` | `call.read`؛ دامنه بیشتر با `call.read_unit` یا `call.read_all` | فیلترها: `from`، `to` (بازه)، `userId`، `unitId`، `direction`، `disposition`، `completeness`، `number`، `linked=true/false`، `entityType`+`entityId`. دامنه همیشه با `callVisibleSql` اعمال می‌شود (`security-and-audit.md` بخش ۳)؛ فیلتر `userId` یا `unitId` خارج از دامنه، نتیجه خالی می‌دهد نه خطا. شماره بیرونی برای کاربر بدون `call.number_full` پوشانده می‌شود (`+98912***4567`) |
+| `GET /telephony/calls/:id` | همان | جزئیات، بخش‌ها، طرف‌ها، پیوندها؛ رویدادهای خام فقط برای کسی که **هم** `telephony.manage` دارد **و هم** تماس را با `callVisibleSql` می‌بیند (مجوز فنی به‌تنهایی دسترسی به تاریخچه نمی‌دهد). تماس نامرئی ۴۰۴ |
+| `PATCH /telephony/calls/:id` | مشارکت‌کننده تماس یا `call.annotate` | `{ note?, outcome? }` |
+| `GET /telephony/calls/live` | `call.read` به بالا | تماس‌های `state <> 'ended'` در دامنه کاربر |
+| `GET /telephony/reports/summary` | `reports.view` + `call.read` و دامنه `callVisibleSql` | تجمیع بر اساس کارمند/واحد/روز/جهت/نتیجه؛ تعداد، مدت کل، میانگین انتظار، نرخ بی‌پاسخ |
+| `GET /telephony/reports/export?format=xlsx` | `call.export` + دامنه `callVisibleSql` | با `lib/xlsx.ts` (ایمن در برابر Formula Injection)؛ پوشاندن شماره مانند API؛ ممیزی `telephony.calls.exported` |
 
 ### اتصال به پرونده
 
 | روش و مسیر | مجوز | توضیح |
 |---|---|---|
-| `POST /telephony/calls/:id/links` | `telephony.calls.link` + دیدن تماس + دیدن موجودیت | `{ entityType, entityId, note? }`؛ ۴۰۴ اگر موجودیت برای کاربر نامرئی باشد (افشا نشود)؛ ۴۰۹ `duplicate` |
-| `DELETE /telephony/calls/:id/links/:linkId` | ایجادکننده یا `telephony.calls.annotate` | — |
+| `POST /telephony/calls/:id/links` | `call.link` + دیدن تماس + دیدن موجودیت | `{ entityType, entityId, note? }`؛ ۴۰۴ اگر موجودیت برای کاربر نامرئی باشد (افشا نشود)؛ ۴۰۹ `duplicate` |
+| `DELETE /telephony/calls/:id/links/:linkId` | ایجادکننده یا `call.annotate` | — |
 | `GET /letters/:id/calls` | دیدن نامه | تماس‌های پیوندشده به نامه، با اعمال دامنه تماس |
 | `GET /archive/documents/:id/calls`، `GET /archive/folders/:id/calls` | دیدن موجودیت | همان الگو |
-| `GET /contacts/:id/calls` | دیدن مخاطب | فقط پس از ساخت دفترچه مخاطبان |
+| `GET /contacts/:id/calls` | دیدن مخاطب | آینده؛ در فازهای ۱ تا ۵ وجود ندارد |
 
 ### مخاطبان (آینده؛ خارج از فاز ۱)
 
-`GET/POST /contacts`، `GET/PATCH /contacts/:id`، `POST /contacts/:id/phones`، `GET /contacts/lookup?number=` با مجوزهای `contacts.view` و `contacts.manage`. تا پیش از ساخت، `entityType='contact'` با ۴۲۲ `capability_not_supported` رد می‌شود.
+فقط برای پیش‌بینی معماری؛ در فازهای ۱ تا ۵ پیاده نمی‌شوند: `GET/POST /contacts`، `GET/PATCH /contacts/:id`، `POST /contacts/:id/phones`، `GET /contacts/lookup?number=` با مجوزهای `contacts.view` و `contacts.manage`. تا پیش از ساخت، `entityType='contact'` با ۴۲۲ `capability_not_supported` رد می‌شود.
 
-### ضبط تماس (فقط اگر PBX ضبط داشته باشد و سازمان تصمیم بگیرد)
+### ضبط تماس (غیرفعال؛ فقط اگر PBX ضبط داشته باشد و سازمان تصمیم بگیرد)
+
+تا تأیید C7 و F11 این مسیرها ثبت نمی‌شوند و درخواست به آن‌ها ۴۰۴ می‌گیرد؛ `GET /telephony/health` مقدار `recordings: "disabled"` برمی‌گرداند.
 
 | روش و مسیر | مجوز | توضیح |
 |---|---|---|
-| `GET /telephony/calls/:id/recordings` | `telephony.recordings.listen` + دیدن تماس | فقط فراداده |
-| `GET /telephony/recordings/:id/stream` | `telephony.recordings.listen` + دیدن تماس | سرور فایل را از PBX می‌خواند و جریان می‌دهد؛ مسیر فایل در PBX هرگز به مرورگر داده نمی‌شود. هر پخش ممیزی می‌شود (`telephony.recording.played`) |
-| `GET /telephony/recordings/:id/download` | `telephony.recordings.download` (جدا از شنیدن) + دیدن تماس | ممیزی `telephony.recording.downloaded` با دلیل الزامی در `?reason=` |
+| `GET /telephony/calls/:id/recordings` | `call.recording_listen` + دیدن تماس | فقط فراداده |
+| `GET /telephony/recordings/:id/stream` | `call.recording_listen` + دیدن تماس | سرور فایل را از PBX می‌خواند و جریان می‌دهد؛ مسیر فایل در PBX هرگز به مرورگر داده نمی‌شود. هر پخش ممیزی می‌شود (`telephony.recording.played`) |
+| `POST /telephony/recordings/:id/download` | `call.recording_download` (جدا از شنیدن) + دیدن تماس | بدنه `{ reason }` الزامی (در بدنه، نه URL، تا در لاگ دسترسی ثبت نشود)؛ ممیزی `telephony.recording.downloaded` |
 
 ## ۴. تماس با یک کلیک
 
-`POST /telephony/calls/originate` (مجوز `telephony.call`)
+`POST /telephony/calls/originate` (مجوز `call.originate`)
 
 ```json
 { "to": "02188001234", "fromExtensionId": "uuid اختیاری", "context": { "type": "letter", "id": "uuid" }, "idempotencyKey": "uuid" }
@@ -129,28 +133,29 @@
 7. تکرار `idempotencyKey` همان پاسخ قبلی را برمی‌گرداند.
 8. AMI `Originate` با `Async: true` و Timeout ۵ ثانیه؛ پاسخ ۲۰۲ `{ requestId, status: 'sent' }`. خطاها: ۵۰۳ `pbx_unavailable`، ۵۰۲ `pbx_rejected`.
 
-**ثبت نتیجه:** هر درخواست، **چه پذیرفته چه ردشده**، یک ردیف در `click_to_call_requests` دارد (`status`، `reject_reason`، `pbx_response`، `number_class`، `dial_policy_id`). وضعیت پس از رویدادهای AMI و تطبیق CDR به `agent_no_answer`، `connected`، `failed` یا `completed` می‌رسد. این ثبت عملیاتی است و در `audit_logs` نوشته نمی‌شود (تصمیم D6). بیش از ۵ رد پیاپی `destination_not_allowed` یا `blocked_number` از یک کاربر در یک ساعت، اعلان `telephony.dial_abuse_suspected` به دارندگان `telephony.settings.manage` می‌فرستد.
+**ثبت نتیجه:** هر درخواست، **چه پذیرفته چه ردشده**، یک ردیف در `click_to_call_requests` دارد (`status`، `reject_reason`، `pbx_response`، `number_class`، `dial_policy_id`). وضعیت پس از رویدادهای AMI و تطبیق CDR به `agent_no_answer`، `connected`، `failed` یا `completed` می‌رسد. این ثبت عملیاتی است و در `audit_logs` نوشته نمی‌شود (تصمیم D6). بیش از ۵ رد پیاپی `destination_not_allowed` یا `blocked_number` از یک کاربر در یک ساعت، اعلان `telephony.dial_abuse_suspected` به دارندگان `telephony.manage` می‌فرستد.
 
-### سیاست شماره‌گیری (`telephony.dial_policy.manage`)
+### سیاست شماره‌گیری (`dialing.manage`)
 
 | روش و مسیر | توضیح | ممیزی |
 |---|---|---|
 | `GET /telephony/admin/number-classes` و `PUT /telephony/admin/number-classes/:key` | دسته‌ها و الگوها | `telephony.number_class.updated` |
 | `GET/POST /telephony/admin/dial-policies`، `PATCH/DELETE /telephony/admin/dial-policies/:id` | سیاست بر اساس نقش و واحد | `telephony.dial_policy.created/updated/deleted` |
 | `GET/POST /telephony/admin/blocked-numbers`، `DELETE /telephony/admin/blocked-numbers/:number` | فهرست مسدود | `telephony.blocked_number.added/removed` |
-| `GET /telephony/admin/call-operations?status=rejected` | گزارش درخواست‌های تماس ردشده و ناموفق | — |
-| `GET /telephony/me/dial-policy` | (هر کاربر با `telephony.call`) دسته‌های مجاز و سهمیه باقی‌مانده خودش | — |
+| `GET /telephony/admin/call-operations?status=rejected` | گزارش درخواست‌های تماس ردشده و ناموفق برای پایش سوءاستفاده: کاربر، زمان، دلیل، دسته شماره؛ شماره مقصد پوشانده مگر با `call.number_full` | — |
+| `GET /telephony/me/dial-policy` | (هر کاربر با `call.originate`) دسته‌های مجاز و سهمیه باقی‌مانده خودش | — |
 
 `GET /telephony/calls/originate/:requestId` وضعیت درخواست را برمی‌گرداند.
 
-## ۵. رویداد لحظه‌ای (فاز تماس لحظه‌ای)
+## ۵. رویداد لحظه‌ای (فاز ۳)
 
-`GET /telephony/stream` (Server-Sent Events)
+`GET /telephony/stream` (Server-Sent Events). طراحی امنیتی کامل در `security-and-audit.md` بخش ۹.۲؛ خلاصه:
 
-- `EventSource` امکان ارسال سرآیند `Authorization` ندارد. دو گزینه: (الف) خواندن جریان با `fetch` و `ReadableStream` در کلاینت با همان توکن؛ (ب) `POST /telephony/stream-ticket` یک بلیت یک‌بارمصرف ۳۰ ثانیه‌ای می‌دهد و `GET /telephony/stream?ticket=` آن را مصرف می‌کند. پیشنهاد: (الف)، چون توکن در URL و لاگ‌ها ظاهر نمی‌شود.
-- رویدادها فقط در دامنه کاربر: `call.ringing`، `call.answered`، `call.ended`، `extension.state` (برای داخلی‌های خود و در صورت `telephony.presence.view` دیگران)، `originate.status`.
-- Heartbeat هر ۲۵ ثانیه؛ با قطع، کلاینت به Polling `GET /telephony/calls/live` هر ۱۵ ثانیه برمی‌گردد.
-- در چندنمونه‌ای، انتشار رویداد بین نمونه‌ها با `LISTEN/NOTIFY` پستگرس (بدون Broker جدید).
+- پشت `authenticate` با سرآیند `Authorization`؛ کلاینت با `fetch` و `ReadableStream` می‌خواند، نه `EventSource`.
+- مجوز: `call.read` برای رویدادهای تماس و `presence.view` برای وضعیت داخلی همکاران. هر رویداد پیش از ارسال با قاعده `callVisibleSql` برای همان کاربر سنجیده می‌شود.
+- رویدادها: `call.ringing`، `call.answered`، `call.ended`، `extension.state`، `originate.status` با محتوای حداقلی (شناسه، وضعیت، داخلی، زمان، شماره پوشانده).
+- جریان در انقضای توکن دسترسی بسته می‌شود؛ رویداد گذشته بازپخش نمی‌شود و کلاینت پس از اتصال مجدد از `GET /telephony/calls/live` وضعیت را می‌گیرد.
+- SSE فقط کانال تحویل است؛ هر داده آن از API هم با همان قاعده قابل دریافت است و هیچ عملی از طریق آن انجام نمی‌شود.
 
 ## ۶. کدهای خطای اختصاصی
 
@@ -171,6 +176,7 @@
 | `self_approval_forbidden` | 403 | — |
 | `no_extension_assigned` | 422 | — |
 | `extension_not_owned` | 403 | — |
+| `sensitive_grant_forbidden` | 403 | افزودن مجوز حساس بدون `roles.grant_sensitive` یا اعطا به خود (پیشنهادی برای `routes/org.ts`) |
 | `destination_not_allowed` | 422 | — |
 | `blocked_number` | 422 | — |
 | `rate_limited` | 429 | — |
@@ -184,3 +190,28 @@
 ## ۸. OpenAPI
 
 پس از پیاده‌سازی، مسیرها به `apps/office-api/openapi.yaml` با `scripts/gen-openapi.py` افزوده می‌شوند.
+
+## ۹. ردیابی مجوزها به مسیرها
+
+| مجوز | مسیرها | حساس |
+|---|---|:-:|
+| `telephony.manage` | `/telephony/admin/connections*`، `/telephony/admin/settings`، `/telephony/admin/capabilities`، `/telephony/admin/sync-runs`، `POST /telephony/extensions/sync` | |
+| `extension.view` | `GET /telephony/extensions*`، `GET /users/:id/extensions`، `GET /telephony/change-requests` | |
+| `extension.assign` | `POST /telephony/extensions/:id/assignments`، `/assignments/:id/end`، `/extensions/:id/reassign`، `/extensions/suggestions`، `POST /telephony/extensions/sync` | |
+| `extension.create` / `.update` / `.disable` | `POST /telephony/change-requests` (بر اساس `op`) | |
+| `extension.approve` | `/change-requests/:id/approve`، `reject`، `retry`، `confirm-manual` | |
+| `extension.provision` | نمایش یک‌باره اطلاعات راه‌اندازی پس از `applied` | |
+| `call.read` | `GET /telephony/calls*`، `/calls/live`، `/reports/summary`، `GET /letters/:id/calls` و مشابه، SSE | |
+| `call.read_unit` | همان مسیرها با دامنه واحد | |
+| `call.read_all` | همان مسیرها بدون محدودیت دامنه | ✓ |
+| `call.link` | `POST/DELETE /telephony/calls/:id/links` | |
+| `call.annotate` | `PATCH /telephony/calls/:id` (تماس دیگران)، حذف پیوند دیگران | |
+| `call.export` | `GET /telephony/reports/export` | |
+| `call.number_full` | همه مسیرها و SSE: شماره کامل به‌جای پوشانده | |
+| `call.originate` | `POST /telephony/calls/originate`، `GET /telephony/calls/originate/:requestId`، `GET /telephony/me/dial-policy` | |
+| `dialing.manage` | `/telephony/admin/number-classes*`، `/dial-policies*`، `/blocked-numbers*`، `/call-operations` | |
+| `presence.view` | `GET /telephony/presence`، رویداد `extension.state` همکاران در SSE | |
+| `call.recording_listen` | `GET /telephony/calls/:id/recordings`، `GET /telephony/recordings/:id/stream` | ✓ |
+| `call.recording_download` | `POST /telephony/recordings/:id/download` | ✓ |
+| `queues.view` / `queues.manage` | مسیرهای فاز ۵ (پس از تأیید رابط واقعی تعریف می‌شوند) | |
+| `roles.grant_sensitive` | `POST/PATCH /roles` و `POST/PATCH /users` وقتی مجوز حساس در کار است (پیشنهادی) | ✓ |
