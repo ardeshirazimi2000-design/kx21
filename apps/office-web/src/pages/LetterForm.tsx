@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { LetterEditor } from '../components/editor';
+import { ContactPicker, useContacts } from '../components/contacts';
 import { CONFIDENTIALITY, KIND, PRIORITY } from '../components/labels';
 import { LetterPaper, type LetterTemplate } from '../components/letterPaper';
 import { PositionSelect, UnitSelect, UserSelect, useOrg } from '../components/pickers';
@@ -18,6 +19,7 @@ const empty = {
   summary: '',
   externalOrg: '',
   externalParty: '',
+  contactId: '',
   externalNumber: '',
   externalDate: '',
   deliveryMethod: '',
@@ -38,6 +40,8 @@ export function LetterFormPage() {
   const nav = useNavigate();
   const { me, can } = useAuth();
   const org = useOrg();
+  const contacts = useContacts();
+  const [loadedContact, setLoadedContact] = useState('');
   const workflows = useApi<any[]>(can('workflow.start') ? '/workflows' : null);
   const [f, setF] = useState({ ...empty, kind: (sp.get('kind') as typeof empty.kind) ?? (can('letter.register_incoming') ? 'incoming' : 'internal') });
   const [recipients, setRecipients] = useState<Recipient[]>([]);
@@ -61,7 +65,7 @@ export function LetterFormPage() {
       const html = l.kind !== 'incoming';
       setF({
         kind: l.kind, subject: l.subject, body: html && l.body_format !== 'html' ? textToHtml(l.body ?? '') : l.body ?? '', summary: l.summary ?? '', externalOrg: l.external_org ?? '', externalParty: l.external_party ?? '',
-        externalNumber: l.external_number ?? '', externalDate: l.external_date?.slice(0, 10) ?? '', deliveryMethod: l.delivery_method ?? '', priority: l.priority,
+        contactId: l.contact_id ?? '', externalNumber: l.external_number ?? '', externalDate: l.external_date?.slice(0, 10) ?? '', deliveryMethod: l.delivery_method ?? '', priority: l.priority,
         confidentiality: l.confidentiality, ownerUnitId: l.owner_unit_id ?? '', dueDate: l.due_date?.slice(0, 10) ?? '', source: l.source,
       });
       setRecipients(
@@ -70,6 +74,7 @@ export function LetterFormPage() {
           label: r.user_name ?? (r.position_title ? `${r.position_title} — ${r.position_unit}` : r.unit_name),
         })),
       );
+      setLoadedContact(l.contact_id ?? '');
       setTemplateId(l.template_id ?? '');
       setRegisteredNumber({ number: l.number, date: l.registered_at });
       if (l.signatory_id) setSigner({ mode: l.signatory_id === me!.id ? 'me' : 'other', id: l.signatory_id, name: l.signatory_name, position: l.signatory_position });
@@ -105,6 +110,7 @@ export function LetterFormPage() {
         subject: `پاسخ: ${l.subject}`.slice(0, 500),
         externalOrg: l.external_org ?? '',
         externalParty: l.external_party ?? '',
+        contactId: l.contact_id ?? '',
         ownerUnitId: l.owner_unit_id ?? '',
       }));
     });
@@ -117,6 +123,14 @@ export function LetterFormPage() {
 
   if (!loaded) return <Loading />;
   const external = f.kind !== 'internal';
+  // The sender / recipient as the letter will name it (the server composes the same texts from the contact).
+  const picked = f.contactId ? contacts.ancestors(f.contactId) : [];
+  const pickedSelf = picked[picked.length - 1];
+  const party =
+    pickedSelf
+      ? { org: picked.filter((c) => c.kind !== 'position').map((c) => c.name).join(' — '), person: pickedSelf.kind === 'position' ? [pickedSelf.person_name, pickedSelf.name].filter(Boolean).join(' — ') : '' }
+      : { org: f.externalOrg, person: f.externalParty };
+  const legacyText = !f.contactId && (f.externalOrg || f.externalParty) ? [f.externalParty, f.externalOrg].filter(Boolean).join(' — ') : '';
   const rich = f.kind !== 'incoming';
   const template = usable.find((t) => t.id === templateId) ?? (templates.data ?? []).find((t) => t.id === templateId) ?? null;
   const chooseTemplate = (tid: string) => {
@@ -148,6 +162,7 @@ export function LetterFormPage() {
     e.preventDefault();
     void act.run(async () => {
       if (rich && signer.mode === 'other' && !signer.id) throw new Error('امضاکننده نامه را انتخاب کنید');
+      if (external && !f.contactId && !legacyText) throw new Error(f.kind === 'incoming' ? 'فرستنده نامه را از مخاطبین انتخاب کنید' : 'گیرنده نامه را از مخاطبین انتخاب کنید');
       const payload = {
         subject: f.subject,
         body: f.body || null,
@@ -155,8 +170,14 @@ export function LetterFormPage() {
           ? { bodyFormat: 'html', templateId: templateId || null, signatoryId: signer.mode === 'none' ? null : signer.id || null }
           : { bodyFormat: 'text' }),
         summary: f.summary || null,
-        externalOrg: external ? f.externalOrg || null : null,
-        externalParty: external ? f.externalParty || null : null,
+        // A picked contact is sent as such; a letter typed before the directory keeps its text until a contact is picked.
+        ...(external && f.contactId
+          ? f.contactId !== loadedContact ? { contactId: f.contactId } : {}
+          : {
+              externalOrg: external ? f.externalOrg || null : null,
+              externalParty: external ? f.externalParty || null : null,
+              ...(loadedContact && !f.contactId ? { contactId: null } : {}),
+            }),
         externalNumber: f.kind === 'incoming' ? f.externalNumber || null : null,
         externalDate: f.kind === 'incoming' ? f.externalDate || null : null,
         deliveryMethod: f.deliveryMethod || null,
@@ -222,12 +243,15 @@ export function LetterFormPage() {
           </Field>
           {external && (
             <div className="grid grid-4">
-              <Field label={f.kind === 'incoming' ? 'سازمان فرستنده' : 'سازمان گیرنده'}>
-                <input className="input" value={f.externalOrg} onChange={(e) => set('externalOrg', e.target.value)} />
-              </Field>
-              <Field label={f.kind === 'incoming' ? 'شخص فرستنده' : 'مخاطب'}>
-                <input className="input" value={f.externalParty} onChange={(e) => set('externalParty', e.target.value)} />
-              </Field>
+              <div className="field span-2">
+                <span className="field-label">{f.kind === 'incoming' ? 'فرستنده (سازمان، واحد یا سمت)' : 'گیرنده (سازمان، واحد یا سمت)'}</span>
+                <ContactPicker value={f.contactId} onChange={(v) => set('contactId', v)} />
+                {legacyText ? (
+                  <span className="field-hint">ثبت‌شده به‌صورت متنی: «{legacyText}»؛ با انتخاب از مخاطبین جایگزین می‌شود.</span>
+                ) : (
+                  <span className="field-hint">از ساختار مخاطبین بیرونی انتخاب کنید؛ ساختار در «مکاتبات ← مخاطبین بیرونی» نگهداری می‌شود.</span>
+                )}
+              </div>
               {f.kind === 'incoming' && (
                 <>
                   <Field label="شماره نامه فرستنده">
@@ -335,7 +359,7 @@ export function LetterFormPage() {
                           ? recipients.some((r) => r.kind === 'to')
                             ? [`به: ${recipients.filter((r) => r.kind === 'to').map((r) => r.label).join('، ')}`]
                             : []
-                          : [f.externalParty, f.externalOrg].filter(Boolean),
+                          : [party.person, party.org].filter(Boolean),
                       cc: f.kind === 'internal' ? recipients.filter((r) => r.kind === 'cc').map((r) => r.label) : [],
                       signatures: signer.name ? [{ key: 'signer', name: signer.name, position: signer.position }] : [],
                       watermark: 'پیش‌نویس',

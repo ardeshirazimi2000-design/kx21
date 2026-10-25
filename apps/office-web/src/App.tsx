@@ -22,6 +22,7 @@ import { ReportsPage } from './pages/Reports';
 import { ResolutionDetailPage, ResolutionsPage } from './pages/Resolutions';
 import { RolesPage } from './pages/Roles';
 import { SignaturesPage } from './pages/Signatures';
+import { ContactsPage } from './pages/Contacts';
 import { SmartSearchPage } from './pages/SmartSearch';
 import { UsersPage } from './pages/Users';
 import { VerifyPage } from './pages/Verify';
@@ -67,6 +68,7 @@ export function App() {
         <Route path="/letters/:id/edit" element={<LetterFormPage />} />
         <Route path="/archive" element={<ArchivePage />} />
         <Route path="/signatures" element={<SignaturesPage />} />
+        <Route path="/contacts" element={<ContactsPage />} />
         <Route path="/letter-templates" element={<LetterTemplatesPage />} />
         <Route path="/workflows" element={<WorkflowsPage />} />
         <Route path="/meetings" element={<MeetingsPage />} />
@@ -124,7 +126,7 @@ function Shell({ children }: { children: ReactNode }) {
         </Link>
         <nav className="nav">
           {item('/', 'داشبورد')}
-          <NavGroup id="letters" title="مکاتبات" paths={['/cartable', '/letters', '/smart-search', '/archive', '/signatures', '/letter-templates']}>
+          <NavGroup id="letters" title="مکاتبات" paths={['/cartable', '/letters', '/smart-search', '/archive', '/signatures', '/letter-templates', '/contacts']}>
             {item('/cartable', 'کارتابل', count(cartable.data?.length))}
             {item('/letters', 'مکاتبات')}
             {item('/letters/new', 'نامه جدید')}
@@ -132,6 +134,7 @@ function Shell({ children }: { children: ReactNode }) {
             {(can('archive.read') || can('archive.manage')) && item('/archive', 'بایگانی')}
             {can('signatures.manage') && item('/signatures', 'نمونه امضاها')}
             {can('templates.manage') && item('/letter-templates', 'قالب‌های نامه')}
+            {can('contacts.manage') && item('/contacts', 'مخاطبین بیرونی')}
           </NavGroup>
           <NavGroup id="commissions" title="کمیسیون‌ها" paths={['/resolutions', '/meetings']}>
             {item('/resolutions', 'مصوبات کمیسیون‌ها')}

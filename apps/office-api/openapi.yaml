@@ -87,6 +87,10 @@ components:
         summary: *id001
         externalParty: *id001
         externalOrg: *id001
+        contactId:
+          type: string
+          format: uuid
+          description: sender (incoming) / recipient (outgoing) from /api/contacts; fills externalOrg and externalParty
         externalNumber: *id001
         externalDate: &id004
           type: string
@@ -977,7 +981,7 @@ paths:
     get:
       tags:
       - Correspondence
-      summary: جستجوی نامه‌ها (?q&kind&status&priority&box&from&to&unitId&number&party&source&page)
+      summary: جستجوی نامه‌ها (?q&kind&status&priority&box&from&to&unitId&number&party&contactId&source&page)
       responses:
         '200':
           description: OK
@@ -1603,6 +1607,155 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: *id003
+  /api/contacts:
+    get:
+      tags:
+      - Correspondence
+      summary: 'مخاطبین بیرونی: سازمان ← واحد ← سمت (?all=1 غیرفعال‌ها هم [contacts.manage])'
+      responses:
+        '200':
+          description: OK
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Forbidden
+        '404':
+          description: Not found or not visible
+        '409':
+          description: Conflict (state / business rule)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    post:
+      tags:
+      - Correspondence
+      summary: مخاطب جدید [contacts.manage]
+      responses:
+        '200':
+          description: OK
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Forbidden
+        '404':
+          description: Not found or not visible
+        '409':
+          description: Conflict (state / business rule)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      description: Organisations are roots; units sit under an organisation or unit; positions are leaves.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                kind:
+                  type: string
+                  enum:
+                  - organization
+                  - unit
+                  - position
+                parentId: *id003
+                name: *id001
+                personName: *id001
+                phone: *id001
+                email: *id001
+                address: *id001
+                notes: *id001
+  /api/contacts/{id}:
+    patch:
+      tags:
+      - Correspondence
+      summary: ویرایش / جابه‌جایی / غیرفعال‌سازی مخاطب [contacts.manage]
+      responses:
+        '200':
+          description: OK
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Forbidden
+        '404':
+          description: Not found or not visible
+        '409':
+          description: Conflict (state / business rule)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                parentId: *id003
+                name: *id001
+                personName: *id001
+                phone: *id001
+                email: *id001
+                address: *id001
+                notes: *id001
+                isActive: *id005
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: *id003
+    delete:
+      tags:
+      - Correspondence
+      summary: حذف مخاطب استفاده‌نشده [contacts.manage]
+      responses:
+        '200':
+          description: OK
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Forbidden
+        '404':
+          description: Not found or not visible
+        '409':
+          description: Conflict (state / business rule)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      description: 409 when it has children or is used on letters (deactivate instead).
       parameters:
       - name: id
         in: path

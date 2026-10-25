@@ -12,6 +12,7 @@ import { sanitizeLetterHtml } from '../lib/html.js';
 import { body, dateStr, listParam, paged, pageParams, param, parse, uuid } from '../lib/validate.js';
 import { letterVisibleSql, loadVisibleLetter } from '../services/access.js';
 import { archiveLetter } from '../services/archive.js';
+import { contactText } from '../services/contacts.js';
 import { LETTER_HASH_VERSION, letterContentHash, letterHashes, newTrackingCode, nextLetterNumber, primaryUnitOf } from '../services/letters.js';
 import { notify, positionHolders } from '../services/notifications.js';
 import { signaturesOf, signContent, verifySignature } from '../services/signatures.js';
@@ -30,6 +31,8 @@ const letterSchema = z.object({
   summary: z.string().max(2000).nullish(),
   externalParty: z.string().max(300).nullish(),
   externalOrg: z.string().max(300).nullish(),
+  /** Sender (incoming) / recipient (outgoing) from the contacts directory; fills externalOrg / externalParty. */
+  contactId: uuid.nullish(),
   externalNumber: z.string().max(100).nullish(),
   externalDate: dateStr.nullish(),
   source: z.enum(['manual', 'email', 'scan', 'api']).default('manual'),
@@ -134,6 +137,8 @@ lettersRouter.post('/letters', async (req, res) => {
   const ownerUnit = b.ownerUnitId ?? (await primaryUnitOf(u.id, pool));
   requireCreate(u, b.kind, ownerUnit);
   if (b.confidentiality > u.clearance) throw forbidden('سطح محرمانگی بالاتر از مجوز شماست');
+  if (b.kind === 'internal') b.contactId = null;
+  if (b.contactId) Object.assign(b, await contactText(pool, b.contactId));
   if (b.kind !== 'internal' && !b.externalParty && !b.externalOrg) throw badRequest(b.kind === 'incoming' ? 'فرستنده نامه وارده را وارد کنید' : 'گیرنده نامه صادره را وارد کنید');
   const row = await tx(async (c) => {
     if (b.replyToId) await loadVisibleLetter(u, b.replyToId, c);
@@ -141,12 +146,12 @@ lettersRouter.post('/letters', async (req, res) => {
     const format = b.bodyFormat ?? 'text';
     let l = await one(
       `INSERT INTO letters (kind, tracking_code, subject, body, summary, external_party, external_org, external_number, external_date, source,
-          delivery_method, priority, confidentiality, owner_unit_id, reply_to_id, due_date, created_by, template_id, body_format, signatory_id)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20) RETURNING *`,
+          delivery_method, priority, confidentiality, owner_unit_id, reply_to_id, due_date, created_by, template_id, body_format, signatory_id, contact_id)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21) RETURNING *`,
       [
         b.kind, await newTrackingCode(c), b.subject, cleanBody(b.body, format) ?? null, b.summary ?? null, b.externalParty ?? null, b.externalOrg ?? null,
         b.externalNumber ?? null, b.externalDate ?? null, b.source, b.deliveryMethod ?? null, b.priority, b.confidentiality, ownerUnit,
-        b.replyToId ?? null, b.dueDate ?? null, u.id, b.templateId ?? null, format, b.signatoryId ?? null,
+        b.replyToId ?? null, b.dueDate ?? null, u.id, b.templateId ?? null, format, b.signatoryId ?? null, b.contactId ?? null,
       ],
       c,
     );
@@ -177,6 +182,7 @@ lettersRouter.get('/letters', async (req, res) => {
       unitId: uuid.optional(),
       number: z.string().optional(),
       party: z.string().optional(),
+      contactId: uuid.optional(),
       confidentiality: z.coerce.number().int().optional(),
       source: z.string().optional(),
     }),
@@ -199,6 +205,12 @@ lettersRouter.get('/letters', async (req, res) => {
   if (f.unitId) where.push(`l.owner_unit_id = ${add(f.unitId)}`);
   if (f.number) where.push(`(fa_normalize(l.number) ILIKE '%' || fa_normalize(${add(f.number)}) || '%' OR l.external_number ILIKE '%' || ${add(f.number)} || '%')`);
   if (f.party) where.push(`(fa_normalize(l.external_party) ILIKE '%' || fa_normalize(${add(f.party)}) || '%' OR fa_normalize(l.external_org) ILIKE '%' || fa_normalize(${add(f.party)}) || '%')`);
+  // A contact matches its whole subtree: an organisation lists the letters of its units and positions too.
+  if (f.contactId) {
+    where.push(
+      `l.contact_id IN (WITH RECURSIVE t AS (SELECT id FROM contacts WHERE id = ${add(f.contactId)} UNION SELECT x.id FROM contacts x JOIN t ON x.parent_id = t.id) SELECT id FROM t)`,
+    );
+  }
   if (f.confidentiality !== undefined) where.push(`l.confidentiality = ${add(f.confidentiality)}`);
   if (f.source) where.push(`l.source = ${add(f.source)}`);
   let rank = '';
@@ -322,16 +334,21 @@ lettersRouter.patch('/letters/:id', async (req, res) => {
     if (b.confidentiality !== undefined && b.confidentiality > u.clearance) throw forbidden('سطح محرمانگی بالاتر از مجوز شماست');
     await checkTemplateAndSignatory(c, l.kind, b.templateId, b.signatoryId);
     const format = b.bodyFormat ?? l.body_format;
+    if (l.kind === 'internal') b.contactId = undefined;
+    // A picked contact replaces both texts (a unit-level pick clears the person).
+    const picked = b.contactId ? await contactText(c, b.contactId) : null;
     const r = await one(
       `UPDATE letters SET subject = COALESCE($2, subject), body = COALESCE($3, body), summary = COALESCE($4, summary),
-         external_party = COALESCE($5, external_party), external_org = COALESCE($6, external_org), external_number = COALESCE($7, external_number),
+         external_party = CASE WHEN $19::boolean THEN $5 ELSE COALESCE($5, external_party) END, external_org = COALESCE($6, external_org), external_number = COALESCE($7, external_number),
          external_date = COALESCE($8, external_date), delivery_method = COALESCE($9, delivery_method), priority = COALESCE($10, priority),
          confidentiality = COALESCE($11, confidentiality), owner_unit_id = COALESCE($12, owner_unit_id), due_date = COALESCE($13, due_date),
          body_format = $14, template_id = CASE WHEN $15::boolean THEN $16 ELSE template_id END,
-         signatory_id = CASE WHEN $17::boolean THEN $18 ELSE signatory_id END, updated_at = now() WHERE id = $1 RETURNING *`,
+         signatory_id = CASE WHEN $17::boolean THEN $18 ELSE signatory_id END,
+         contact_id = CASE WHEN $20::boolean THEN $21 ELSE contact_id END, updated_at = now() WHERE id = $1 RETURNING *`,
       [
-        l.id, b.subject, cleanBody(b.body, format), b.summary, b.externalParty, b.externalOrg, b.externalNumber, b.externalDate, b.deliveryMethod, b.priority,
+        l.id, b.subject, cleanBody(b.body, format), b.summary, picked ? picked.externalParty : b.externalParty, picked?.externalOrg ?? b.externalOrg, b.externalNumber, b.externalDate, b.deliveryMethod, b.priority,
         b.confidentiality, b.ownerUnitId, b.dueDate, format, b.templateId !== undefined, b.templateId ?? null, b.signatoryId !== undefined, b.signatoryId ?? null,
+        !!picked, b.contactId !== undefined, b.contactId ?? null,
       ],
       c,
     );

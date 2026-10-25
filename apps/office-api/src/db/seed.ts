@@ -78,6 +78,20 @@ export async function seed() {
     const contracts = (await one(`INSERT INTO archive_folders (name, code) VALUES ('قراردادها', 'CTR') RETURNING id`, [])).id;
     await c.query(`INSERT INTO archive_folders (parent_id, name, code, retention_policy_id) VALUES ($1, 'قراردادهای ۱۴۰۵', 'CTR-1405', (SELECT id FROM retention_policies WHERE retain_years = 10))`, [contracts]);
 
+    // مخاطبین بیرونی (فرستنده نامه وارده / گیرنده نامه صادره)
+    const contact = async (kind: string, name: string, parentId: string | null = null, personName: string | null = null) =>
+      (await one(`INSERT INTO contacts (parent_id, kind, name, person_name) VALUES ($1,$2,$3,$4) RETURNING id`, [parentId, kind, name, personName])).id as string;
+    const mefa = await contact('organization', 'وزارت امور اقتصادی و دارایی');
+    const mefaDep = await contact('unit', 'معاونت امور اقتصادی', mefa);
+    await contact('position', 'معاون امور اقتصادی', mefaDep, 'جناب آقای دکتر حسینی');
+    await contact('position', 'دفتر وزیر', mefa);
+    const customs = await contact('organization', 'گمرک جمهوری اسلامی ایران');
+    const customsTech = await contact('unit', 'دفتر امور فنی و تعرفه', customs);
+    await contact('position', 'مدیرکل دفتر امور فنی و تعرفه', customsTech, 'سرکار خانم نوری');
+    await contact('position', 'رئیس کل گمرک', customs);
+    const chamber = await contact('organization', 'اتاق بازرگانی، صنایع، معادن و کشاورزی تهران');
+    await contact('position', 'دبیرکل', chamber);
+
     await c.query(`INSERT INTO integrations (kind, name, settings, is_active) VALUES ('meetings', 'سامانه جلسات کمیسیون‌ها', $1, false)`, [
       JSON.stringify({ resolutionWorkflowKey: 'resolution-followup', defaultUnitId: commissions, autoFeedback: true, auth: 'apikey' }),
     ]);

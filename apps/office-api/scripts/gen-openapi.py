@@ -30,6 +30,7 @@ schemas = {
         "required": ["kind", "subject"],
         "properties": {
             "kind": enum("incoming", "outgoing", "internal"), "subject": str_, "body": str_, "summary": str_, "externalParty": str_, "externalOrg": str_,
+            "contactId": {**uuid, "description": "sender (incoming) / recipient (outgoing) from /api/contacts; fills externalOrg and externalParty"},
             "externalNumber": str_, "externalDate": date, "source": enum("manual", "email", "scan", "api"), "deliveryMethod": str_,
             "priority": enum("low", "normal", "high", "urgent"), "confidentiality": {"type": "integer", "minimum": 0, "maximum": 2}, "ownerUnitId": uuid,
             "replyToId": uuid, "dueDate": date, "recipients": arr(ref("Recipient")), "register": bool_, "workflow": {"type": "string", "description": "workflow definition key to start"},
@@ -79,7 +80,7 @@ E = [
     ("post", "/api/roles", "Organization", "نقش جدید [roles.manage]", S(key=str_, name=str_, description=str_, permissions=arr(str_)), None),
     ("patch", "/api/roles/{id}", "Organization", "ویرایش مجوزهای نقش [roles.manage]", S(name=str_, permissions=arr(str_)), None),
 
-    ("get", "/api/letters", "Correspondence", "جستجوی نامه‌ها (?q&kind&status&priority&box&from&to&unitId&number&party&source&page)", None, "Full-text search (Persian-normalised) over subject, body, summary, parties and numbers; results are filtered by RBAC + ABAC visibility."),
+    ("get", "/api/letters", "Correspondence", "جستجوی نامه‌ها (?q&kind&status&priority&box&from&to&unitId&number&party&contactId&source&page)", None, "Full-text search (Persian-normalised) over subject, body, summary, parties and numbers; results are filtered by RBAC + ABAC visibility."),
     ("post", "/api/letters", "Correspondence", "ایجاد نامه (پیش‌نویس یا ثبت فوری؛ با شروع گردش کار)", ref("LetterCreate"), None),
     ("get", "/api/letters/{id}", "Correspondence", "جزئیات نامه با ارجاعات، گردش‌ها، امضاها و اقدام‌های مجاز (my)", None, None),
     ("patch", "/api/letters/{id}", "Correspondence", "ویرایش (فقط پیش‌نویس/ثبت‌شده و امضانشده)", ref("LetterCreate"), None),
@@ -98,6 +99,10 @@ E = [
     ("get", "/api/users/{id}/signature", "Correspondence", "تصویر نمونه امضای کاربر", None, None),
     ("post", "/api/users/{id}/signature", "Correspondence", "ثبت یا جایگزینی نمونه امضا (PNG/JPEG، حداکثر ۱ مگابایت) [خود کاربر یا signatures.manage]", None, None),
     ("delete", "/api/users/{id}/signature", "Correspondence", "حذف نمونه امضا", None, None),
+    ("get", "/api/contacts", "Correspondence", "مخاطبین بیرونی: سازمان ← واحد ← سمت (?all=1 غیرفعال‌ها هم [contacts.manage])", None, None),
+    ("post", "/api/contacts", "Correspondence", "مخاطب جدید [contacts.manage]", S(kind=enum("organization", "unit", "position"), parentId=uuid, name=str_, personName=str_, phone=str_, email=str_, address=str_, notes=str_), "Organisations are roots; units sit under an organisation or unit; positions are leaves."),
+    ("patch", "/api/contacts/{id}", "Correspondence", "ویرایش / جابه‌جایی / غیرفعال‌سازی مخاطب [contacts.manage]", S(parentId=uuid, name=str_, personName=str_, phone=str_, email=str_, address=str_, notes=str_, isActive=bool_), None),
+    ("delete", "/api/contacts/{id}", "Correspondence", "حذف مخاطب استفاده‌نشده [contacts.manage]", None, "409 when it has children or is used on letters (deactivate instead)."),
     ("get", "/api/letter-templates", "Correspondence", "قالب‌ها و سربرگ‌های نامه (?all=1 غیرفعال‌ها هم [templates.manage])", None, None),
     ("post", "/api/letter-templates", "Correspondence", "قالب جدید [templates.manage]", S(name=str_, description=str_, kinds=arr(enum("outgoing", "internal")), unitId=uuid, pageSize=enum("A4", "A5"), headerText=str_, orgName=str_, orgSubtitle=str_, footerText=str_, showLogo=bool_, marginTop=int_, marginBottom=int_, marginSide=int_, fontSize={"type": "number"}, showQr=bool_, bodyHtml=str_, isDefault=bool_, isActive=bool_), "bodyHtml is sanitised to the letter editor's HTML subset."),
     ("get", "/api/letter-templates/{id}", "Correspondence", "قالب نامه", None, None),
