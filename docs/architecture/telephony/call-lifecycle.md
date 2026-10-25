@@ -33,7 +33,7 @@ sequenceDiagram
   PBX-->>L: Newchannel (Linkedid=L1, CallerIDNum)
   L->>DB: UPSERT calls(L1, inbound, state=ringing, external_number)
   PBX-->>L: DialBegin (Dest=PJSIP/101)
-  L->>DB: call_parties(101, ringing) ؛ تطبیق شماره با contacts
+  L->>DB: call_parties(101, ringing) ؛ تطبیق شماره (با contacts در آینده)
   L-->>UI: SSE call.ringing (نام مخاطب اگر مجاز)
   PBX-->>L: DialEnd (DialStatus=ANSWER) / BridgeEnter
   L->>DB: state=answered, answered_at, extension_id=101, user_id/unit_id snapshot
@@ -65,8 +65,9 @@ sequenceDiagram
   participant P as تلفن کارمند (101)
   participant X as مقصد بیرونی
   UI->>API: POST /telephony/calls/originate {to, context, idempotencyKey}
-  API->>DB: بررسی مجوز، مالکیت داخلی، الگوی مقصد، محدودیت نرخ
-  API->>DB: INSERT click_to_call_requests(status=requested) + audit
+  API->>DB: بررسی مجوز، مالکیت داخلی، فهرست مسدود، سیاست شماره‌گیری، سقف‌ها
+  API->>DB: INSERT click_to_call_requests(status=requested یا rejected + reject_reason) ؛ بدون audit_logs
+  Note over API,AMI: قالب Channel و Context نمونه است و به درایور و dialplan واقعی بستگی دارد (نامشخص)
   API->>AMI: Originate Channel=PJSIP/101 Context=from-internal Exten=<to> Async=true ActionID=c2c-<id> Variable=KX_C2C=<id>
   AMI-->>API: Response: Success (پذیرفته شد)
   API-->>UI: 202 {requestId, status: sent}
@@ -78,6 +79,7 @@ sequenceDiagram
   API-->>UI: SSE originate.status / call.answered
 ```
 
+- هر مرحله وضعیت همان ردیف `click_to_call_requests` را جلو می‌برد (`sent` → `agent_ringing` → `connected` → `completed`) تا نتیجه هر عملیات قابل گزارش باشد.
 - اگر کارمند گوشی را برندارد: `OriginateResponse` با `Reason` ۳ یا ۵ → `failed` با `error_code='agent_no_answer'`؛ تماسی به بیرون زده نمی‌شود.
 - `Context` و قالب `Channel` (`PJSIP/` یا `SIP/`) از تنظیمات اتصال خوانده می‌شود و **باید با مدیر مرکز تلفن تأیید شود** تا مسیریابی و محدودیت‌های تماس بیرونی Issabel (Outbound Routes) دور زده نشوند. Originate همیشه به Context عادی داخلی‌ها می‌رود تا همان قوانین مسیریابی و دسترسی اعمال شوند.
 
@@ -91,6 +93,8 @@ sequenceDiagram
 4. پس از پایان، UI پیشنهاد اتصال به پرونده را نشان می‌دهد: نامه‌ها و مخاطبانی که شماره آن‌ها با `external_number` منطبق است (فقط موارد قابل دیدن برای کاربر).
 
 ## ۷. تطبیق خودکار با مخاطب
+
+> این بخش فقط پس از ساخت دفترچه مخاطبان فعال می‌شود (تصمیم D5). تا آن زمان `resolveNumber` فقط شماره‌های داخلی را به کارمند تطبیق می‌دهد و پیشنهاد پیوند فقط از نامه‌ها و اسنادی است که کاربر می‌بیند.
 
 - نرمال‌سازی شماره (`numbers.ts`): حذف فاصله و خط تیره، ارقام فارسی به لاتین (مانند `fa_normalize`)، `0098`/`98`/`0` به `+98`، شماره ثابت بدون پیش‌شماره با `settings.defaultAreaCode` (مثلاً تهران `21`).
 - `contact_phones.number = calls.external_number` → پیوند `match_method='auto_number'` فقط اگر **یک** مخاطب منطبق باشد؛ در غیر این صورت فقط پیشنهاد.

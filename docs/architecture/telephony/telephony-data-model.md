@@ -2,6 +2,20 @@
 
 > این سند **پیشنهاد** است و هیچ مهاجرتی ایجاد نشده است. پیاده‌سازی در فایل‌های بعدی `apps/office-api/src/db/migrations/005_telephony_*.sql` و به سبک مهاجرت‌های موجود (SQL ساده، یک تراکنش) خواهد بود. نام‌ها و سبک ستون‌ها با `001_init.sql` یکدست است (uuid با `gen_random_uuid()`، `timestamptz`، CHECK برای enumها، توضیح فارسی/انگلیسی کوتاه).
 
+## ۰. جدول‌ها به تفکیک فاز
+
+هر فاز فقط جداول خودش را در یک مهاجرت جدا اضافه می‌کند تا فاز بعدی بدون فاز قبلی قابل انتشار نباشد ولی فاز قبلی بدون بعدی کامل باشد.
+
+| فاز | جداول و تغییرات | دسته داده |
+|---|---|---|
+| ۱ | قید `integrations_kind_check`، `telephony_connections`، `pbx_extensions`، `extension_assignments`، `telephony_sync_runs` | پیکربندی و نگاشت |
+| ۲ | `calls`، `call_parties`، `cdr_records`، `call_links` | ثبت عملیاتی تماس (جدا از ممیزی) |
+| ۳ | `call_events`، `telephony_number_classes`، `telephony_dial_policies`، `telephony_blocked_numbers`، `click_to_call_requests` | ثبت عملیاتی تماس + سیاست |
+| ۴ | `extension_change_requests` | تغییر پیکربندی |
+| آینده (تصمیم جدا) | `contacts`، `contact_phones`، `call_recordings` | — |
+
+`audit_logs` موجود بدون تغییر ساختار استفاده می‌شود و هیچ جدول تماس به آن ارجاع نمی‌دهد.
+
 ## ۱. نمودار روابط
 
 ```mermaid
@@ -19,10 +33,12 @@ erDiagram
   call_links }o--|| letters : "entity_type=letter"
   call_links }o--|| documents : "entity_type=document"
   call_links }o--|| archive_folders : "entity_type=archive_folder"
-  call_links }o--|| contacts : "entity_type=contact"
-  contacts ||--o{ contact_phones : ""
+  call_links }o--o| contacts : "entity_type=contact (آینده)"
+  contacts ||--o{ contact_phones : "آینده"
   users ||--o{ click_to_call_requests : ""
   click_to_call_requests |o--o| calls : ""
+  telephony_dial_policies ||--o{ click_to_call_requests : ""
+  calls ||--o{ call_recordings : "در صورت وجود ضبط"
 ```
 
 ## ۲. تغییر در جداول موجود
@@ -256,7 +272,7 @@ CREATE INDEX call_links_entity_idx ON call_links (entity_type, entity_id);
 
 قید ارجاعی چندریختی در پایگاه ممکن نیست؛ سرویس هنگام درج، وجود و **قابل دیدن بودن** موجودیت برای کاربر را با `loadVisibleLetter` و `documentVisibleSql` بررسی می‌کند. با حذف موجودیت مقصد، کار شبانه پیوندهای یتیم را پاک می‌کند.
 
-### ۳.۷ مخاطبان (پیشنهادی، منوط به تصمیم)
+### ۳.۷ مخاطبان (پیش‌بینی معماری؛ خارج از فاز ۱، تصمیم D5)
 
 ```sql
 CREATE TABLE contacts (
@@ -285,28 +301,87 @@ CREATE INDEX contact_phones_number_idx ON contact_phones (number);
 -- اختیاری: ستون letters.contact_id برای پیوند طرف نامه به مخاطب (فاز بعد)
 ```
 
-### ۳.۸ تماس با یک کلیک
+### ۳.۸ عملیات تماس: سیاست شماره‌گیری و ثبت نتیجه (تصمیم D8، فاز ۳)
 
 ```sql
+-- دسته‌بندی شماره‌ها با الگو؛ ترتیب priority کمتر = اول بررسی می‌شود
+CREATE TABLE telephony_number_classes (
+  key        text PRIMARY KEY,                                    -- internal, emergency, local, mobile, national, toll_free, premium, international
+  name       text NOT NULL,
+  pattern    text NOT NULL,                                       -- regex روی شماره نرمال E.164 یا شماره داخلی
+  priority   int  NOT NULL DEFAULT 100
+);
+
+-- سیاست: چه نقش/واحدی به کدام دسته‌ها، با چه سقفی، تماس بگیرد. نبود سیاست = فقط داخلی.
+CREATE TABLE telephony_dial_policies (
+  id               uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  name             text NOT NULL,
+  role_id          uuid REFERENCES roles(id) ON DELETE CASCADE,   -- null = همه نقش‌ها
+  unit_id          uuid REFERENCES org_units(id),                 -- null = همه واحدها (زیرشاخه‌ها شامل می‌شوند)
+  allowed_classes  text[] NOT NULL DEFAULT '{internal}',
+  max_per_hour     int  NOT NULL DEFAULT 20 CHECK (max_per_hour > 0),
+  max_per_day      int  NOT NULL DEFAULT 100 CHECK (max_per_day > 0),
+  business_hours_only boolean NOT NULL DEFAULT false,
+  is_active        boolean NOT NULL DEFAULT true,
+  updated_by       uuid REFERENCES users(id),
+  updated_at       timestamptz NOT NULL DEFAULT now()
+);
+
+-- شماره‌های مسدود (همیشه بر سیاست مقدم است)
+CREATE TABLE telephony_blocked_numbers (
+  number      text PRIMARY KEY,                                   -- E.164 یا پیشوند با * در انتها
+  reason      text NOT NULL,
+  created_by  uuid REFERENCES users(id),
+  created_at  timestamptz NOT NULL DEFAULT now()
+);
+
+-- ثبت عملیاتی هر درخواست تماس، پذیرفته یا ردشده (جدا از audit_logs)
 CREATE TABLE click_to_call_requests (
   id               uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id          uuid NOT NULL REFERENCES users(id),
-  extension_id     uuid NOT NULL REFERENCES pbx_extensions(id),
-  target_number    text NOT NULL,                                -- نرمال‌شده
-  context_type     text,                                         -- letter | contact | user | document
+  extension_id     uuid REFERENCES pbx_extensions(id),            -- null اگر کاربر داخلی نداشت (رد شد)
+  target_number    text NOT NULL,                                  -- نرمال‌شده
+  number_class     text REFERENCES telephony_number_classes(key),
+  dial_policy_id   uuid REFERENCES telephony_dial_policies(id),
+  context_type     text,                                           -- letter | document | user | contact
   context_id       text,
   idempotency_key  uuid NOT NULL,
-  ami_action_id    text NOT NULL UNIQUE,
+  ami_action_id    text UNIQUE,                                    -- فقط برای درخواست ارسال‌شده
   status           text NOT NULL DEFAULT 'requested'
-                   CHECK (status IN ('requested','sent','ringing_agent','connected','failed','rejected')),
+                   CHECK (status IN ('requested','rejected','sent','agent_ringing','agent_no_answer','connected','failed','completed')),
+  reject_reason    text CHECK (reject_reason IN ('no_permission','no_extension','extension_not_owned','destination_not_allowed',
+                                                  'blocked_number','rate_limited','concurrent_limit','outside_hours','pbx_unavailable')),
+  pbx_response     text,                                           -- خلاصه پاسخ AMI (Response/Reason)، بدون اطلاعات حساس
   call_id          uuid REFERENCES calls(id),
-  error_code       text,
+  talk_seconds     int,                                            -- پس از تطبیق با calls
+  ip               text,
   created_at       timestamptz NOT NULL DEFAULT now(),
   updated_at       timestamptz NOT NULL DEFAULT now(),
   UNIQUE (user_id, idempotency_key)
 );
 CREATE INDEX c2c_user_time_idx ON click_to_call_requests (user_id, created_at DESC);
+CREATE INDEX c2c_rejected_idx ON click_to_call_requests (created_at DESC) WHERE status = 'rejected';
 ```
+
+- محدودیت نرخ با شمارش همین جدول در بازه (`created_at > now() - interval '1 hour'`) و ایندکس `c2c_user_time_idx` بررسی می‌شود؛ زیرساخت جدیدی لازم نیست.
+- تغییر سیاست‌ها، دسته‌ها و فهرست مسدود ممیزی می‌شود (کم‌حجم و مدیریتی)؛ خود درخواست‌های تماس فقط در این جدول ثبت می‌شوند.
+- دسته‌ها و الگوهای پیش‌فرض پس از پاسخ پرسش‌های E3 تا E5 در `open-questions.md` مقداردهی می‌شوند.
+
+### ۳.۸.۱ ضبط تماس (فقط پیش‌بینی؛ در صورت وجود ضبط در PBX)
+
+```sql
+-- فقط فراداده و ارجاع؛ فایل صوتی در PBX می‌ماند و هنگام پخش از سمت سرور خوانده می‌شود
+CREATE TABLE call_recordings (
+  id            uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  call_id       uuid NOT NULL REFERENCES calls(id) ON DELETE CASCADE,
+  pbx_ref       text NOT NULL,                                     -- مسیر یا شناسه فایل در PBX (هرگز به مرورگر داده نمی‌شود)
+  duration_s    int,
+  created_at    timestamptz NOT NULL DEFAULT now(),
+  UNIQUE (call_id, pbx_ref)
+);
+```
+
+دسترسی به ضبط مجوز جدا دارد (`security-and-audit.md` بخش ۲) و **هر پخش یا دریافت** در `audit_logs` ثبت می‌شود؛ حجم آن کم است و ممیزی مناسب آن است. ساخت این جدول منوط به پاسخ C7 و تصمیم سازمان است و در هیچ‌یک از فازهای ۱ تا ۵ الزامی نیست.
 
 ### ۳.۹ اجرای همگام‌سازی
 

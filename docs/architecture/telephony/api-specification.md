@@ -10,6 +10,16 @@
 
 **رابط پیکربندی و رابط کنترل تماس جدا هستند:** مسیرهای `/telephony/admin/*` (پیکربندی و اتصال) و `/telephony/extensions/*` (آینه و تخصیص) هرگز Originate نمی‌کنند؛ مسیرهای `/telephony/calls/*` هرگز پیکربندی PBX را تغییر نمی‌دهند.
 
+## فازبندی مسیرها
+
+| فاز | مسیرها |
+|---|---|
+| ۱ | بخش ۱ (اتصال، آزمون، قابلیت‌ها، سلامت)، بخش ۲ به‌جز «درخواست تغییر پیکربندی»؛ هیچ مسیری در این فاز چیزی در Issabel تغییر نمی‌دهد |
+| ۲ | بخش ۳ (تاریخچه، گزارش، اتصال به پرونده) |
+| ۳ | بخش ۴ (تماس با یک کلیک و سیاست شماره‌گیری) و بخش ۵ (لحظه‌ای) |
+| ۴ | «درخواست تغییر پیکربندی» در بخش ۲ |
+| آینده | مخاطبان و ضبط تماس (بخش ۳)، صف‌ها (فاز ۵) |
+
 ## ۱. اتصال و تنظیمات (`telephony.settings.manage`)
 
 | روش و مسیر | توضیح | ممیزی |
@@ -17,7 +27,7 @@
 | `GET /telephony/admin/connections` | فهرست اتصال‌ها؛ به‌جای `secret_enc` فقط `hasSecret: boolean` | — |
 | `PUT /telephony/admin/connections/:purpose` | ایجاد/به‌روزرسانی اتصال `config_api`، `ami` یا `cdr_db` | `telephony.connection.updated` (بدون راز؛ فقط `secretChanged: true`) |
 | `POST /telephony/admin/connections/:purpose/test` | آزمون اتصال با Timeout ۱۰ ثانیه؛ برای AMI فقط Login و `Ping`؛ برای API فقط خواندن نسخه؛ برای CDR فقط `SELECT 1` و شمارش | `telephony.connection.tested` |
-| `GET /telephony/admin/capabilities` | خروجی `PbxConfigAdapter.capabilities()` و نسخه‌های کشف‌شده | — |
+| `GET /telephony/admin/capabilities` | خروجی `PbxConfigAdapter.capabilities()` و نسخه‌ها و رابط‌های کشف‌شده (نسخه Issabel/Asterisk، درایور، وجود API مدیریتی، ستون‌های CDR)؛ مبنای تصمیم درباره فاز ۴ | — |
 | `PUT /telephony/admin/settings` | محدوده داخلی‌ها، پیش‌شماره‌ها، الگوی مقصد مجاز، فواصل همگام‌سازی، نگهداری | `telephony.settings.updated` |
 | `GET /telephony/admin/sync-runs` | تاریخچه `telephony_sync_runs` | — |
 | `GET /telephony/health` | برای همه کاربران واردشده: `{ available, ami, configApi, cdr }` فقط به‌صورت `ok/degraded/down` | — |
@@ -51,7 +61,7 @@
 | `POST /telephony/assignments/:id/end` | `telephony.extensions.assign` | `{ reason }` → ۲۰۰ |
 | `POST /telephony/extensions/:id/reassign` | `telephony.extensions.assign` | بستن تخصیص فعلی و ایجاد جدید در یک تراکنش |
 
-### درخواست تغییر پیکربندی
+### درخواست تغییر پیکربندی (فاز ۴؛ تا آن زمان این مسیرها وجود ندارند)
 
 | روش و مسیر | مجوز | توضیح |
 |---|---|---|
@@ -83,11 +93,20 @@
 | `POST /telephony/calls/:id/links` | `telephony.calls.link` + دیدن تماس + دیدن موجودیت | `{ entityType, entityId, note? }`؛ ۴۰۴ اگر موجودیت برای کاربر نامرئی باشد (افشا نشود)؛ ۴۰۹ `duplicate` |
 | `DELETE /telephony/calls/:id/links/:linkId` | ایجادکننده یا `telephony.calls.annotate` | — |
 | `GET /letters/:id/calls` | دیدن نامه | تماس‌های پیوندشده به نامه، با اعمال دامنه تماس |
-| `GET /archive/documents/:id/calls`، `GET /contacts/:id/calls` | دیدن موجودیت | همان الگو |
+| `GET /archive/documents/:id/calls`، `GET /archive/folders/:id/calls` | دیدن موجودیت | همان الگو |
+| `GET /contacts/:id/calls` | دیدن مخاطب | فقط پس از ساخت دفترچه مخاطبان |
 
-### مخاطبان (در صورت تأیید)
+### مخاطبان (آینده؛ خارج از فاز ۱)
 
-`GET/POST /contacts`، `GET/PATCH /contacts/:id`، `POST /contacts/:id/phones`، `GET /contacts/lookup?number=` با مجوزهای `contacts.view` و `contacts.manage`.
+`GET/POST /contacts`، `GET/PATCH /contacts/:id`، `POST /contacts/:id/phones`، `GET /contacts/lookup?number=` با مجوزهای `contacts.view` و `contacts.manage`. تا پیش از ساخت، `entityType='contact'` با ۴۲۲ `capability_not_supported` رد می‌شود.
+
+### ضبط تماس (فقط اگر PBX ضبط داشته باشد و سازمان تصمیم بگیرد)
+
+| روش و مسیر | مجوز | توضیح |
+|---|---|---|
+| `GET /telephony/calls/:id/recordings` | `telephony.recordings.listen` + دیدن تماس | فقط فراداده |
+| `GET /telephony/recordings/:id/stream` | `telephony.recordings.listen` + دیدن تماس | سرور فایل را از PBX می‌خواند و جریان می‌دهد؛ مسیر فایل در PBX هرگز به مرورگر داده نمی‌شود. هر پخش ممیزی می‌شود (`telephony.recording.played`) |
+| `GET /telephony/recordings/:id/download` | `telephony.recordings.download` (جدا از شنیدن) + دیدن تماس | ممیزی `telephony.recording.downloaded` با دلیل الزامی در `?reason=` |
 
 ## ۴. تماس با یک کلیک
 
@@ -99,13 +118,28 @@
 
 قواعد سمت سرور:
 
+قواعد سمت سرور، به همین ترتیب (اولین شرط ناموفق، درخواست را رد می‌کند):
+
 1. `fromExtensionId` باید یکی از داخلی‌های **فعال تخصیص‌یافته به خود کاربر** باشد (پیش‌فرض: داخلی اصلی). هیچ کاربری نمی‌تواند از داخلی دیگری تماس بگیرد. خطا: ۴۲۲ `no_extension_assigned` یا ۴۰۳ `extension_not_owned`.
-2. `to` نرمال می‌شود (`services/telephony/numbers.ts`) و باید با الگوهای مجاز `settings.dialAllow` بخواند و با `settings.dialDeny` نخواند (پیش‌فرض: بین‌المللی و شماره‌های ویژه/پولی ممنوع). خطا: ۴۲۲ `destination_not_allowed`.
-3. اگر `context` داده شود، کاربر باید آن موجودیت را ببیند؛ پس از ایجاد تماس، پیوند `call_links` با `match_method='click_to_call'` خودکار ساخته می‌شود.
-4. محدودیت نرخ اختصاصی: ۶ درخواست در دقیقه برای هر کاربر، ۱ درخواست هم‌زمان در حال زنگ. خطا: ۴۲۹ `too_many_calls`.
-5. تکرار `idempotencyKey` همان پاسخ قبلی را برمی‌گرداند.
-6. AMI `Originate` با `Async: true` و Timeout ۵ ثانیه؛ پاسخ ۲۰۲ `{ requestId, status: 'sent' }`. خطاها: ۵۰۳ `pbx_unavailable`، ۵۰۲ `pbx_rejected`.
-7. ممیزی: `telephony.call.originated` با کاربر، داخلی، مقصد پوشانده‌شده و زمینه.
+2. `to` نرمال می‌شود (`services/telephony/numbers.ts`) و دسته آن از `telephony_number_classes` تعیین می‌شود.
+3. اگر شماره یا پیشوند آن در `telephony_blocked_numbers` باشد: ۴۲۲ `blocked_number`.
+4. سیاست مؤثر کاربر از `telephony_dial_policies` (اجتماع سیاست‌های فعال نقش‌ها و واحدهای کاربر؛ نبود سیاست = فقط داخلی). دسته شماره باید در `allowed_classes` باشد: ۴۲۲ `destination_not_allowed`. دسته‌های `international` و `premium` در هیچ سیاست پیش‌فرضی نیستند.
+5. سقف ساعتی و روزانه سیاست (شمارش `click_to_call_requests` همان کاربر): ۴۲۹ `rate_limited`. بیش از یک درخواست هم‌زمان در حال زنگ: ۴۲۹ `concurrent_limit`. خارج از ساعت کاری در صورت `business_hours_only`: ۴۲۲ `outside_hours`.
+6. اگر `context` داده شود، کاربر باید آن موجودیت را ببیند؛ پس از ایجاد تماس، پیوند `call_links` با `match_method='click_to_call'` خودکار ساخته می‌شود.
+7. تکرار `idempotencyKey` همان پاسخ قبلی را برمی‌گرداند.
+8. AMI `Originate` با `Async: true` و Timeout ۵ ثانیه؛ پاسخ ۲۰۲ `{ requestId, status: 'sent' }`. خطاها: ۵۰۳ `pbx_unavailable`، ۵۰۲ `pbx_rejected`.
+
+**ثبت نتیجه:** هر درخواست، **چه پذیرفته چه ردشده**، یک ردیف در `click_to_call_requests` دارد (`status`، `reject_reason`، `pbx_response`، `number_class`، `dial_policy_id`). وضعیت پس از رویدادهای AMI و تطبیق CDR به `agent_no_answer`، `connected`، `failed` یا `completed` می‌رسد. این ثبت عملیاتی است و در `audit_logs` نوشته نمی‌شود (تصمیم D6). بیش از ۵ رد پیاپی `destination_not_allowed` یا `blocked_number` از یک کاربر در یک ساعت، اعلان `telephony.dial_abuse_suspected` به دارندگان `telephony.settings.manage` می‌فرستد.
+
+### سیاست شماره‌گیری (`telephony.dial_policy.manage`)
+
+| روش و مسیر | توضیح | ممیزی |
+|---|---|---|
+| `GET /telephony/admin/number-classes` و `PUT /telephony/admin/number-classes/:key` | دسته‌ها و الگوها | `telephony.number_class.updated` |
+| `GET/POST /telephony/admin/dial-policies`، `PATCH/DELETE /telephony/admin/dial-policies/:id` | سیاست بر اساس نقش و واحد | `telephony.dial_policy.created/updated/deleted` |
+| `GET/POST /telephony/admin/blocked-numbers`، `DELETE /telephony/admin/blocked-numbers/:number` | فهرست مسدود | `telephony.blocked_number.added/removed` |
+| `GET /telephony/admin/call-operations?status=rejected` | گزارش درخواست‌های تماس ردشده و ناموفق | — |
+| `GET /telephony/me/dial-policy` | (هر کاربر با `telephony.call`) دسته‌های مجاز و سهمیه باقی‌مانده خودش | — |
 
 `GET /telephony/calls/originate/:requestId` وضعیت درخواست را برمی‌گرداند.
 
@@ -138,7 +172,10 @@
 | `no_extension_assigned` | 422 | — |
 | `extension_not_owned` | 403 | — |
 | `destination_not_allowed` | 422 | — |
-| `too_many_calls` | 429 | — |
+| `blocked_number` | 422 | — |
+| `rate_limited` | 429 | — |
+| `concurrent_limit` | 429 | — |
+| `outside_hours` | 422 | — |
 
 ## ۷. مسیرهای ممنوع
 
