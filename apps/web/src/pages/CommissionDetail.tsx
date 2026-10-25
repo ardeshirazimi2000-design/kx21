@@ -8,6 +8,7 @@ import { useAuth } from '../lib/auth';
 import { useApi, useRoles } from '../lib/hooks';
 import { ActivityReport, CommissionArchive } from './CommissionArchive';
 import { CommissionDashboard } from './Home';
+import { ArchivalMeetingModal } from '../components/Archival';
 import { NewMeetingModal } from './Meetings';
 import { PersonModal } from './Structure';
 
@@ -260,15 +261,30 @@ function ChangePositionModal({ m, isAdmin, onClose, onSaved }: { m: any; isAdmin
 function Meetings({ commission }: { commission: any }) {
   const { data, reload } = useApi(`/meetings?commissionId=${commission.id}&order=desc&pageSize=50`);
   const [open, setOpen] = useState(false);
+  const [recording, setRecording] = useState(false);
   const canCreate = commission.capabilities.includes('meeting.manage');
   return (
-    <Card title="جلسات کمیسیون" actions={canCreate && <Button onClick={() => setOpen(true)}>جلسه جدید</Button>}>
+    <Card
+      title="جلسات کمیسیون"
+      actions={
+        canCreate && (
+          <>
+            <Button variant="secondary" onClick={() => setRecording(true)}>
+              ثبت جلسهٔ برگزارشده (سوابق)
+            </Button>
+            <Button onClick={() => setOpen(true)}>جلسه جدید</Button>
+          </>
+        )
+      }
+    >
+      {recording && <ArchivalMeetingModal commissions={[{ id: commission.id, name: commission.name }]} commissionId={commission.id} onClose={() => setRecording(false)} />}
       {data?.items.length === 0 && <Empty>جلسه‌ای ثبت نشده است.</Empty>}
       <ul className="list">
         {data?.items.map((m: any) => (
           <li key={m.id} className="row between gap">
             <Link to={`/meetings/${m.id}`}>
               جلسه {fa(m.number)}: {m.title}
+              {m.archival && <span className="muted small"> (ثبت از سوابق)</span>}
             </Link>
             <span className="row gap-sm">
               <span className="muted small">{dateTimeFa(m.scheduled_at)}</span>

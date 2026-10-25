@@ -1,6 +1,7 @@
 import { formatTime, JALALI_MONTHS, jalaliMonthLength, MEETING_TYPE_LABELS, MEETING_TYPES, toGregorian, toJalali, type MeetingType } from '@kx/shared';
 import { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { ArchivalMeetingModal } from '../components/Archival';
 import { MeetingStatusBadge } from '../components/status';
 import { dateOfJalali, firstColumn, jalaliOf, WEEK_HEADER } from '../components/JalaliPicker';
 import { Badge, Button, Card, dateTimeFa, Empty, ErrorBox, Field, fa, JalaliDateTimeInput, Loading, Modal, PageHeader } from '../components/ui';
@@ -32,6 +33,7 @@ export function MeetingsPage() {
   const { data, loading, reload } = useApi(`/meetings?from=${range.from}&to=${range.to}&pageSize=100&mine=${mine}`);
   const holidays = useApi<Holiday[]>(`/holidays?${chamberId ? `chamberId=${chamberId}&` : ''}from=${gDay(jy, jm, 1)}&to=${gDay(jy, jm, jalaliMonthLength(jy, jm))}`);
   const [open, setOpen] = useState<false | { date?: string }>(false);
+  const [recording, setRecording] = useState(false);
   // Meetings are created by each commission's secretary/chair (executive work), not by the chamber admin.
   const canCreate = me!.memberships.some((m) => ['chair', 'vice_chair', 'secretary'].includes(m.position));
   const shift = (d: number) => {
@@ -58,10 +60,23 @@ export function MeetingsPage() {
             <label className="check" style={{ margin: 0 }}>
               <input type="checkbox" checked={mine} onChange={(e) => setMine(e.target.checked)} /> فقط جلسات من
             </label>
+            {canCreate && (
+              <Button variant="secondary" onClick={() => setRecording(true)}>
+                ثبت جلسهٔ برگزارشده (سوابق)
+              </Button>
+            )}
             {canCreate && <Button onClick={() => setOpen({})}>جلسه جدید</Button>}
           </>
         }
       />
+      {recording && (
+        <ArchivalMeetingModal
+          commissions={me!.memberships
+            .filter((m) => ['chair', 'vice_chair', 'secretary'].includes(m.position))
+            .map((m) => ({ id: m.commission_id, name: m.commission_name }))}
+          onClose={() => setRecording(false)}
+        />
+      )}
       <Card>
         <div className="row between wrap gap-sm mb cal-nav">
           <span className="row gap-sm">

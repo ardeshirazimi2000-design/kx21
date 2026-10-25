@@ -395,7 +395,7 @@ function ResolutionEditModal({ r, onClose, onSaved }: { r: any; onClose: () => v
           </select>
         </Field>
       </div>
-      <Field label="دستگاه‌های اجرایی" hint="دستگاه‌هایی که می‌مانند، پیشرفت ثبت‌شده‌شان را حفظ می‌کنند">
+      <Field group label="دستگاه‌های اجرایی" hint="دستگاه‌هایی که می‌مانند، پیشرفت ثبت‌شده‌شان را حفظ می‌کنند">
         <ExecutorsEditor chamberId={r.chamber_id} value={executors} onChange={setExecutors} />
       </Field>
     </Modal>

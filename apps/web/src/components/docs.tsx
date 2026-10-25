@@ -10,6 +10,7 @@ export const DOC_KINDS: Record<string, { label: string; tone: Tone; icon: string
   letter: { label: 'نامه', tone: 'warning', icon: '✉️' },
   evidence: { label: 'مستند اقدام', tone: 'info', icon: '📎' },
   recording: { label: 'فیلم جلسه', tone: 'accent', icon: '🎬' },
+  minutes_scan: { label: 'صورتجلسهٔ امضاشده', tone: 'success', icon: '✍️' },
 };
 
 export const ACCEPT = '.pdf,.ppt,.pptx,.ppsx,.doc,.docx,.xls,.xlsx,.png,.jpg,.jpeg,.webp,.heic,.txt,.webm,.mp4';
@@ -86,7 +87,7 @@ export function UploadFiles({ target, onDone, withKind = true }: { target: Recor
         {withKind && (
           <select className="input" style={{ maxWidth: 190 }} value={kind} onChange={(e) => setKind(e.target.value)} aria-label="نوع سند">
             <option value="">نوع: تشخیص خودکار</option>
-            {['presentation', 'photo', 'attachment', 'report', 'recording'].map((k) => (
+            {['presentation', 'photo', 'attachment', 'report', 'minutes_scan', 'recording'].map((k) => (
               <option key={k} value={k}>
                 {DOC_KINDS[k].label}
               </option>
@@ -184,7 +185,7 @@ export function DocActions({ d, onDone }: { d: { id: string; kind: string; title
           {d.kind !== 'recording' && (
             <Field label="نوع سند">
               <select className="input" value={kind} onChange={(e) => setKind(e.target.value)}>
-                {['presentation', 'photo', 'attachment', 'report', 'letter', 'evidence'].map((k) => (
+                {['presentation', 'photo', 'attachment', 'report', 'letter', 'evidence', 'minutes_scan'].map((k) => (
                   <option key={k} value={k}>
                     {DOC_KINDS[k].label}
                   </option>

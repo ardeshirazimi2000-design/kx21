@@ -3,6 +3,7 @@ import {
   ATTENDANCE_STATUSES,
   MEETING_TYPE_LABELS,
   MEETING_TYPES,
+  isArchivalOpen,
   isEditable,
   roleLabel,
   VOTE_OPTION_LABELS,
@@ -16,6 +17,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { DocActions, DocKind, UploadFiles, ViewButton } from '../components/docs';
 import { cleanExecutors, ExecutorsEditor, type ExecutorDraft } from '../components/Executors';
+import { ArchivalPanel, ItemSummaryModal, ManualVoteModal } from '../components/Archival';
 import { PresentationCard } from '../components/Presentation';
 import { KPI_HINT, KPI_LABEL } from './Resolutions';
 import { AgendaBadge, AttendanceBadge, MeetingStatusBadge, MinutesBadge, ResolutionBadge } from '../components/status';
@@ -124,9 +126,11 @@ export function MeetingRoomPage() {
               </Button>
             )}
             {attending && <AttendanceBadge status={myAtt!} />}
-            <Button variant="secondary" onClick={() => download(`/meetings/${id}/ics`, 'meeting.ics')}>
-              افزودن به تقویم
-            </Button>
+            {!m.archival && (
+              <Button variant="secondary" onClick={() => download(`/meetings/${id}/ics`, 'meeting.ics')}>
+                افزودن به تقویم
+              </Button>
+            )}
             {can('meeting.manage') && act('schedule') && <Button onClick={() => run(() => post(`/meetings/${id}/schedule`))}>نهایی‌سازی برنامه</Button>}
             {can('meeting.manage') && act('send_invitations') && <Button onClick={() => run(() => post(`/meetings/${id}/invite`))}>ارسال دعوت‌نامه</Button>}
             {can('meeting.manage') && act('open_checkin') && <Button variant="secondary" onClick={() => run(() => post(`/meetings/${id}/checkin/open`))}>باز کردن اعلام حضور</Button>}
@@ -168,9 +172,15 @@ export function MeetingRoomPage() {
           {m.my.delegateFor.organization ? ` (${m.my.delegateFor.organization})` : ''} در این جلسه حضور دارید. اعلام حضور و رأی شما به نام ایشان ثبت می‌شود.
         </div>
       )}
-      {m.webinar && (m.my.role || can('meeting.manage') || can('meeting.control')) && <WebinarCard m={m} onJoined={reload} />}
-      {m.status !== 'cancelled' && <PresentationCard meetingId={m.id} />}
-      {m.my.role && !m.my.delegateFor && m.settings.allowProxy && OPEN_FOR_DELEGATES.includes(m.status) && <MyDelegate m={m} reload={reload} />}
+      {m.archival && can('meeting.manage') && <ArchivalPanel m={m} onChanged={() => void reload()} onTab={(t) => setTab(t as Tab)} />}
+      {m.archival && !can('meeting.manage') && (
+        <div className="alert alert-info">
+          <Badge tone="info">ثبت از سوابق</Badge> این جلسه پیش از استفاده از سامانه برگزار شده و اطلاعات آن از سوابق ثبت شده است.
+        </div>
+      )}
+      {!m.archival && m.webinar && (m.my.role || can('meeting.manage') || can('meeting.control')) && <WebinarCard m={m} onJoined={reload} />}
+      {!m.archival && m.status !== 'cancelled' && <PresentationCard meetingId={m.id} />}
+      {!m.archival && m.my.role && !m.my.delegateFor && m.settings.allowProxy && OPEN_FOR_DELEGATES.includes(m.status) && <MyDelegate m={m} reload={reload} />}
       <QuorumPanel quorum={m.quorum} detailed={can('attendance.view_all')} />
       <div className="mt" />
       <Tabs tabs={tabs} value={tab} onChange={setTab} />
@@ -211,8 +221,11 @@ function QuorumPanel({ quorum, detailed }: { quorum: any; detailed: boolean }) {
 function Agenda({ m, run, reload }: { m: any; run: (fn: () => Promise<unknown>) => Promise<void>; reload: () => Promise<void> }) {
   const can = (c: string) => m.capabilities.includes(c);
   const live = ['in_progress', 'agenda_processing'].includes(m.status);
-  const editable = ['draft', 'scheduled', 'invitation_sent', 'checkin_open'].includes(m.status) || live;
+  const archivalOpen = isArchivalOpen(m);
+  const editable = ['draft', 'scheduled', 'invitation_sent', 'checkin_open'].includes(m.status) || live || archivalOpen;
   const [newItem, setNewItem] = useState('');
+  const [voting, setVoting] = useState<any | null>(null);
+  const [summarizing, setSummarizing] = useState<any | null>(null);
   const [completing, setCompleting] = useState<any | null>(null);
   const [commentsFor, setCommentsFor] = useState<string | null>(null);
   const active = m.agenda.find((a: any) => a.status === 'active');
@@ -255,8 +268,20 @@ function Agenda({ m, run, reload }: { m: any; run: (fn: () => Promise<unknown>) 
                       </Button>
                     </>
                   )}
-                  {can('meeting.manage') && editable && item.status === 'pending' && !live && (
-                    <Button size="sm" variant="ghost" onClick={() => run(() => del(`/agenda-items/${item.id}`))}>
+                  {can('meeting.manage') && archivalOpen && (
+                    <>
+                      <Button size="sm" variant="secondary" onClick={() => setSummarizing(item)}>
+                        مذاکرات و تصمیم
+                      </Button>
+                      {!votes.length && (
+                        <Button size="sm" variant="secondary" onClick={() => setVoting(item)}>
+                          ثبت نتیجهٔ رأی
+                        </Button>
+                      )}
+                    </>
+                  )}
+                  {can('meeting.manage') && editable && (archivalOpen || (item.status === 'pending' && !live)) && (
+                    <Button size="sm" variant="ghost" onClick={() => confirm(`آیتم «${item.title}» حذف شود؟`) && run(() => del(`/agenda-items/${item.id}`))}>
                       حذف
                     </Button>
                   )}
@@ -276,9 +301,11 @@ function Agenda({ m, run, reload }: { m: any; run: (fn: () => Promise<unknown>) 
               {votes.map((v: any) => (
                 <VotePanel key={v.id} v={v} m={m} run={run} />
               ))}
-              <Button size="sm" variant="ghost" onClick={() => setCommentsFor(commentsFor === item.id ? null : item.id)}>
-                نظرات ({fa(item.comment_count)})
-              </Button>
+              {!m.archival && (
+                <Button size="sm" variant="ghost" onClick={() => setCommentsFor(commentsFor === item.id ? null : item.id)}>
+                  نظرات ({fa(item.comment_count)})
+                </Button>
+              )}
               {commentsFor === item.id && <Comments itemId={item.id} canPost={can('comment.create') && m.settings.allowComments} onPosted={reload} />}
             </div>
           );
@@ -312,6 +339,8 @@ function Agenda({ m, run, reload }: { m: any; run: (fn: () => Promise<unknown>) 
         </ul>
       </Card>
       {completing && <CompleteModal item={completing} m={m} onClose={() => setCompleting(null)} onDone={() => { setCompleting(null); void reload(); }} />}
+      {voting && <ManualVoteModal item={voting} onClose={() => setVoting(null)} onSaved={() => { setVoting(null); void reload(); }} />}
+      {summarizing && <ItemSummaryModal item={summarizing} onClose={() => setSummarizing(null)} onSaved={() => { setSummarizing(null); void reload(); }} />}
     </div>
   );
 }
@@ -399,7 +428,9 @@ function VotePanel({ v, m, run }: { v: any; m: any; run: (fn: () => Promise<unkn
           <div className="row gap-sm wrap small">
             <Badge tone={r.passed ? 'success' : 'danger'}>{r.passed ? 'تصویب شد' : 'تصویب نشد'}</Badge>
             <span className="muted">
-              مشارکت {fa(r.participationPercent)}٪ — {fa(r.totalCast)} رأی از {fa(r.eligiblePresent)} حاضر
+              {r.manual
+                ? `مجموع ${fa(r.totalCast)} رأی — ثبت‌شده از صورتجلسهٔ کاغذی`
+                : `مشارکت ${fa(r.participationPercent)}٪ — ${fa(r.totalCast)} رأی از ${fa(r.eligiblePresent)} حاضر`}
             </span>
             {v.my_choice && <span>رأی من: {VOTE_OPTION_LABELS[v.my_choice]}</span>}
           </div>
@@ -569,6 +600,7 @@ function Attendance({ m, flash, run }: { m: any; flash: Set<string>; run: (fn: (
         <AttendanceModal
           a={editing}
           allowProxy={m.settings.allowProxy}
+          defaultReason={m.archival ? 'ثبت از سوابق' : ''}
           onClose={() => setEditing(null)}
           onSave={(body) => run(() => post(`/meetings/${m.id}/attendance/${editing.user_id}/confirm`, body)).then(() => setEditing(null))}
         />
@@ -577,9 +609,9 @@ function Attendance({ m, flash, run }: { m: any; flash: Set<string>; run: (fn: (
   );
 }
 
-function AttendanceModal({ a, allowProxy, onClose, onSave }: { a: any; allowProxy: boolean; onClose: () => void; onSave: (b: any) => void }) {
+function AttendanceModal({ a, allowProxy, defaultReason = '', onClose, onSave }: { a: any; allowProxy: boolean; defaultReason?: string; onClose: () => void; onSave: (b: any) => void }) {
   const [status, setStatus] = useState<AttendanceStatus>(a.status === 'pending' ? 'manual_present' : a.status);
-  const [reason, setReason] = useState('');
+  const [reason, setReason] = useState(defaultReason);
   const [proxyName, setProxyName] = useState(a.proxy_name ?? '');
   return (
     <Modal title={`ثبت/اصلاح حضور — ${a.full_name}`} onClose={onClose} footer={<Button disabled={reason.trim().length < 2} onClick={() => onSave({ status, reason, proxyName: status === 'proxy' ? proxyName : undefined })}>ثبت</Button>}>
@@ -608,7 +640,8 @@ function AttendanceModal({ a, allowProxy, onClose, onSave }: { a: any; allowProx
 
 function Invitees({ m, run }: { m: any; run: (fn: () => Promise<unknown>) => Promise<void> }) {
   const { chamberId } = useAuth();
-  const canManage = m.capabilities.includes('meeting.manage') && ['draft', 'scheduled', 'invitation_sent', 'checkin_open', 'in_progress', 'agenda_processing'].includes(m.status);
+  // Until the minutes are sent for approval; after the meeting no invitation goes out.
+  const canManage = m.capabilities.includes('meeting.manage') && ['draft', 'scheduled', 'invitation_sent', 'checkin_open', 'in_progress', 'agenda_processing', 'minutes_draft'].includes(m.status);
   const [q, setQ] = useState('');
   const [role, setRole] = useState<string>('guest');
   const roles = useRoles(m.chamber_id);
@@ -896,7 +929,7 @@ function Minutes({ m, reloadMeeting }: { m: any; reloadMeeting: () => Promise<vo
               <Button variant="secondary" onClick={() => act(() => post(`/meetings/${m.id}/minutes`, { regenerate: true }))}>
                 تولید مجدد از داده‌های جلسه
               </Button>
-              <Button onClick={() => act(() => post(`/minutes/${data.id}/submit`))}>ارسال برای تأیید رئیس</Button>
+              {!m.archival && <Button onClick={() => act(() => post(`/minutes/${data.id}/submit`))}>ارسال برای تأیید رئیس</Button>}
             </>
           )}
           {can('minutes.approve') && data.status === 'pending_approval' && (
@@ -994,6 +1027,7 @@ function NewResolutionModal({ m, vote, onClose, onSaved }: { m: any; vote?: any;
     dueDate: '',
     priority: 'normal',
     kpi: '',
+    number: '',
   });
   const [executors, setExecutors] = useState<ExecutorDraft[]>([]);
   const members = useApi<any[]>(`/commissions/${m.commission.id}/members`);
@@ -1018,6 +1052,7 @@ function NewResolutionModal({ m, vote, onClose, onSaved }: { m: any; vote?: any;
         dueDate: form.dueDate || null,
         priority: form.priority,
         kpi: form.kpi || null,
+        ...(m.archival && form.number.trim() ? { number: form.number.trim() } : {}),
       });
       onSaved();
     } catch (e) {
@@ -1025,8 +1060,13 @@ function NewResolutionModal({ m, vote, onClose, onSaved }: { m: any; vote?: any;
     }
   };
   return (
-    <Modal title="ثبت مصوبه" wide onClose={onClose} footer={<Button onClick={save}>ثبت مصوبه و ایجاد وظیفه</Button>}>
+    <Modal title="ثبت مصوبه" wide onClose={onClose} footer={<Button onClick={save}>{m.archival ? 'ثبت مصوبه' : 'ثبت مصوبه و ایجاد وظیفه'}</Button>}>
       <ErrorBox error={err} />
+      {m.archival && (
+        <Field label="شمارهٔ مصوبه در صورتجلسهٔ کاغذی" hint="خالی بگذارید تا خودکار شماره‌گذاری شود">
+          <input className="input" value={form.number} onChange={(e) => setForm({ ...form, number: e.target.value })} />
+        </Field>
+      )}
       <Field label="دستور جلسه مرتبط">
         <select className="input" value={form.agendaItemId} onChange={(e) => setForm({ ...form, agendaItemId: e.target.value })}>
           <option value="">—</option>
@@ -1073,7 +1113,7 @@ function NewResolutionModal({ m, vote, onClose, onSaved }: { m: any; vote?: any;
           </select>
         </Field>
       </div>
-      <Field label="دستگاه‌های اجرایی" hint="یک دستگاه مسئول اصلی و بقیه همکار؛ هر دستگاه گزارش پیشرفت خود را جداگانه دارد">
+      <Field group label="دستگاه‌های اجرایی" hint="یک دستگاه مسئول اصلی و بقیه همکار؛ هر دستگاه گزارش پیشرفت خود را جداگانه دارد">
         <ExecutorsEditor chamberId={m.chamber_id} value={executors} onChange={setExecutors} />
       </Field>
       <Field label={KPI_LABEL} hint={KPI_HINT}>

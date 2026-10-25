@@ -590,3 +590,12 @@ table.table { width: 100%; border-collapse: collapse; }
 .exec-row { display: flex; align-items: center; gap: 10px; }
 .exec-row .input { flex: 1; min-width: 0; }
 @media (max-width: 640px) { .exec-row { flex-wrap: wrap; } .exec-row .input { flex-basis: 100%; } }
+
+/* Recording a meeting from the archive */
+.arch-panel { border-inline-start: 4px solid var(--info); }
+.arch-steps { list-style: none; margin: 12px 0; padding: 0; display: grid; gap: 6px; }
+.arch-steps li { display: flex; align-items: baseline; gap: 8px; }
+.arch-mark { display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 20px; border-radius: 50%; background: var(--surface-2); border: 1px solid var(--border); font-size: 0.75rem; flex-shrink: 0; }
+.arch-done .arch-mark { background: var(--success-soft); color: var(--success); border-color: transparent; }
+.link-btn { background: none; border: 0; padding: 0; font: inherit; color: var(--primary); cursor: pointer; text-align: start; }
+.link-btn:hover { text-decoration: underline; }

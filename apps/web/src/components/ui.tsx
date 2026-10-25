@@ -83,14 +83,16 @@ export function PageHeader({ title, subtitle, actions }: { title: ReactNode; sub
   );
 }
 
-export function Field({ label, hint, children, error }: { label: string; hint?: string; children: ReactNode; error?: string }) {
+/** `group` renders a div: a <label> around several controls would forward clicks on its text to the first one. */
+export function Field({ label, hint, children, error, group }: { label: string; hint?: string; children: ReactNode; error?: string; group?: boolean }) {
+  const Tag = group ? 'div' : 'label';
   return (
-    <label className="field">
+    <Tag className="field" role={group ? 'group' : undefined} aria-label={group ? label : undefined}>
       <span className="field-label">{label}</span>
       {children}
       {hint && !error && <span className="field-hint">{hint}</span>}
       {error && <span className="field-error">{error}</span>}
-    </label>
+    </Tag>
   );
 }
 
