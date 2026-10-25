@@ -5,7 +5,7 @@ import {
   toLatinDigits,
   toPersianDigits,
 } from '@kx/shared';
-import { useEffect, useState, type ButtonHTMLAttributes, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ButtonHTMLAttributes, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import type { ApiError } from '../lib/api';
 import { JalaliPicker } from './JalaliPicker';
@@ -96,16 +96,50 @@ export function Field({ label, hint, children, error, group }: { label: string; 
   );
 }
 
+/**
+ * Moving a window by dragging its title bar, so the page behind it can be seen. The title bar always stays
+ * on screen; a double click puts the window back.
+ */
+function useDragOffset() {
+  const ref = useRef<HTMLDivElement>(null);
+  const [pos, setPos] = useState({ x: 0, y: 0 });
+  const start = useRef<{ px: number; py: number; x: number; y: number; rect: DOMRect } | null>(null);
+  const onPointerDown = (e: ReactPointerEvent<HTMLElement>) => {
+    if (e.button !== 0 || (e.target as HTMLElement).closest('button, a, input, select, textarea') || !ref.current) return;
+    start.current = { px: e.clientX, py: e.clientY, ...pos, rect: ref.current.getBoundingClientRect() };
+    e.currentTarget.setPointerCapture(e.pointerId);
+    e.preventDefault();
+  };
+  const onPointerMove = (e: ReactPointerEvent<HTMLElement>) => {
+    const s = start.current;
+    if (!s) return;
+    const margin = 40;
+    // Keep at least part of the window, and its whole title bar, within the viewport.
+    const dx = Math.min(Math.max(e.clientX - s.px, margin - s.rect.right), window.innerWidth - margin - s.rect.left);
+    const dy = Math.min(Math.max(e.clientY - s.py, -s.rect.top), window.innerHeight - margin - s.rect.top);
+    setPos({ x: s.x + dx, y: s.y + dy });
+  };
+  const onPointerUp = () => {
+    start.current = null;
+  };
+  return {
+    ref,
+    style: pos.x || pos.y ? { transform: `translate(${pos.x}px, ${pos.y}px)` } : undefined,
+    handle: { onPointerDown, onPointerMove, onPointerUp, onPointerCancel: onPointerUp, onDoubleClick: () => setPos({ x: 0, y: 0 }) },
+  };
+}
+
 export function Modal({ title, onClose, children, footer, wide }: { title: string; onClose: () => void; children: ReactNode; footer?: ReactNode; wide?: boolean }) {
   useEffect(() => {
     const h = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
     window.addEventListener('keydown', h);
     return () => window.removeEventListener('keydown', h);
   }, [onClose]);
+  const drag = useDragOffset();
   return (
     <div className="modal-backdrop" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
-      <div className={`modal ${wide ? 'modal-wide' : ''}`} role="dialog" aria-modal aria-label={title}>
-        <header className="modal-head">
+      <div className={`modal ${wide ? 'modal-wide' : ''}`} role="dialog" aria-modal aria-label={title} ref={drag.ref} style={drag.style}>
+        <header className="modal-head" {...drag.handle} title="برای جابجایی، بکشید (دوبار کلیک: بازگشت به جای اول)">
           <h3>{title}</h3>
           <button className="icon-btn" onClick={onClose} aria-label="بستن">
             ×

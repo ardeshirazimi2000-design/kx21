@@ -267,7 +267,7 @@ table.table { width: 100%; border-collapse: collapse; }
 .modal-backdrop { position: fixed; inset: 0; background: rgba(10, 20, 25, 0.45); display: flex; align-items: flex-start; justify-content: center; padding: 6vh 16px; z-index: 50; overflow-y: auto; }
 .modal { background: var(--surface); border-radius: 12px; width: 100%; max-width: 520px; box-shadow: 0 20px 50px rgba(0, 0, 0, 0.25); }
 .modal-wide { max-width: 820px; }
-.modal-head { display: flex; justify-content: space-between; align-items: center; padding: 14px 18px; border-bottom: 1px solid var(--border); }
+.modal-head { cursor: move; user-select: none; touch-action: none; display: flex; justify-content: space-between; align-items: center; padding: 14px 18px; border-bottom: 1px solid var(--border); }
 .modal-body { padding: 18px; }
 .modal-foot { padding: 12px 18px; border-top: 1px solid var(--border); display: flex; gap: 8px; justify-content: flex-end; }
 
