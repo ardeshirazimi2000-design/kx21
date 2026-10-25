@@ -309,7 +309,9 @@ describe('meeting lifecycle', () => {
     const edit = await as('secretary').post(`/api/meetings/${meetingId}/minutes`, { body: '# صورتجلسه ویرایش‌شده\n\nمتن نهایی صورتجلسه.' });
     expect(edit.body.version).toBe(2);
     expect((await as('secretary').post(`/api/minutes/${ids.minutes}/approve`)).status).toBe(403);
-    expect((await as('secretary').post(`/api/minutes/${ids.minutes}/submit`)).status).toBe(204);
+    // The rewritten text no longer has the attendance section: submitting needs an explicit confirmation.
+    expect((await as('secretary').post(`/api/minutes/${ids.minutes}/submit`)).body.error.code).toBe('attendance_mismatch');
+    expect((await as('secretary').post(`/api/minutes/${ids.minutes}/submit`, { ignoreAttendanceMismatch: true })).status).toBe(204);
     expect((await as('chair').post(`/api/minutes/${ids.minutes}/return`, { reason: 'اسامی غایبین اضافه شود' })).status).toBe(204);
     expect((await as('secretary').post(`/api/meetings/${meetingId}/minutes`, { regenerate: true })).body.version).toBe(3);
     expect((await as('secretary').post(`/api/minutes/${ids.minutes}/submit`)).status).toBe(204);

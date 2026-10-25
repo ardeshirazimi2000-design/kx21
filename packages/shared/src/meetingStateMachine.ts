@@ -16,6 +16,8 @@ export type MeetingAction =
   | 'submit_minutes'
   | 'return_minutes'
   | 'approve_minutes'
+  | 'withdraw_minutes'
+  | 'reopen_minutes'
   | 'archive'
   | 'cancel';
 
@@ -36,6 +38,10 @@ export const MEETING_TRANSITIONS: Record<MeetingAction, Transition> = {
   submit_minutes: { from: ['minutes_draft'], to: 'pending_approval' },
   return_minutes: { from: ['pending_approval'], to: 'minutes_draft' },
   approve_minutes: { from: ['pending_approval'], to: 'approved' },
+  // The secretary takes the minutes back before the chair decides.
+  withdraw_minutes: { from: ['pending_approval'], to: 'minutes_draft' },
+  // Approved minutes are reopened only by the chamber admin, with a reason (see routes/minutes.ts).
+  reopen_minutes: { from: ['approved', 'archived'], to: 'minutes_draft' },
   archive: { from: ['approved'], to: 'archived' },
   cancel: { from: ['draft', 'scheduled', 'invitation_sent', 'checkin_open'], to: 'cancelled' },
 };

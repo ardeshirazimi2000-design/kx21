@@ -9,7 +9,7 @@ import { badRequest, conflict } from '../lib/errors.js';
 import { body, param, uuid } from '../lib/validate.js';
 import { commissionAccess, meetingAccess } from '../services/access.js';
 import { ensureAttendanceRows } from '../services/meetings.js';
-import { generateMinutesDraft } from '../services/minutes.js';
+import { generateMinutesDraft, syncMinutesAttendance } from '../services/minutes.js';
 import { tehranDate } from '../services/holidays.js';
 
 /**
@@ -92,6 +92,7 @@ archivalRouter.post('/meetings/:id/attendance/bulk', async (req, res) => {
       [id, b.status, u.id, b.userIds ?? null, b.onlyUnset],
     );
     await audit(c, req, { chamberId: a.meeting.chamber_id, action: 'attendance.bulk', entity: 'meeting', entityId: id, after: { status: b.status, count: r.rowCount } });
+    await syncMinutesAttendance(c, req, id);
     return r.rowCount ?? 0;
   });
   res.json({ updated: n });

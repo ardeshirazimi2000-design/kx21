@@ -4,7 +4,8 @@ import { setRememberMe } from '../lib/api';
 import { useAuth } from '../lib/auth';
 
 /** Support line shown under the login form. */
-const SUPPORT_PHONE = '۰۲۱-۸۶۷۶۷۸۹۰';
+const SUPPORT_PHONE = '۰۹۱۸ ۱۷۱ ۱۵۹۸';
+const SUPPORT_TEL = '09181711598';
 
 const Icon = ({ d, size = 20 }: { d: string; size?: number }) => (
   <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -133,7 +134,7 @@ export function LoginPage() {
               راهنمای ورود
             </button>
             <span className="lg-foot-sep" />
-            <a className="lg-foot-item" href={`tel:${SUPPORT_PHONE.replace(/[^\d۰-۹]/g, '')}`}>
+            <a className="lg-foot-item" href={`tel:${SUPPORT_TEL}`}>
               <Icon d={PHONE} />
               <span>
                 <small>پشتیبانی سامانه</small>
@@ -174,7 +175,7 @@ export function LoginPage() {
           <p style={{ marginTop: 0 }}>رمز عبور هر کاربر را مدیر اتاق مربوط تعریف می‌کند. برای دریافت رمز جدید:</p>
           <ul>
             <li>اعضا، دبیران و رؤسای کمیسیون‌ها: با دبیرخانهٔ اتاق خود یا مدیر اتاق تماس بگیرید.</li>
-            <li>مدیران اتاق‌ها: با پشتیبانی سامانه ({SUPPORT_PHONE}) تماس بگیرید.</li>
+            <li>مدیران اتاق‌ها: با پشتیبانی سامانه (<span className="lg-phone">{SUPPORT_PHONE}</span>) تماس بگیرید.</li>
           </ul>
           <p className="muted small" style={{ marginBottom: 0 }}>
             پس از ورود با رمز جدید، آن را از «پروفایل و امنیت» به رمز دلخواه خود تغییر دهید.

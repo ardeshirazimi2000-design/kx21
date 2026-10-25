@@ -647,6 +647,8 @@ function Invitees({ m, run }: { m: any; run: (fn: () => Promise<unknown>) => Pro
   const roles = useRoles(m.chamber_id);
   const people = useApi(canManage && q.length >= 2 ? `/people?chamberId=${chamberId}&q=${encodeURIComponent(q)}&pageSize=6` : null);
   const preStart = ['draft', 'scheduled', 'invitation_sent', 'checkin_open'].includes(m.status);
+  // After the meeting, someone listed by mistake can still be removed while the minutes are drafted.
+  const removable = preStart || m.status === 'minutes_draft';
   const canRequestLetters = m.capabilities.includes('meeting.manage') && !['draft', 'cancelled'].includes(m.status) && m.invitees.length > 0;
   const [lettersOpen, setLettersOpen] = useState(false);
   const [lettersDone, setLettersDone] = useState<string | null>(null);
@@ -690,8 +692,15 @@ function Invitees({ m, run }: { m: any; run: (fn: () => Promise<unknown>) => Pro
               <td>{roleLabel(a.role, a.role_title)}</td>
               {a.status !== undefined && <td>{a.has_vote ? '✓' : '—'}</td>}
               <td>
-                {canManage && preStart && (
-                  <Button size="sm" variant="ghost" onClick={() => run(() => del(`/meetings/${m.id}/invitees/${a.user_id}`))}>
+                {canManage && removable && (
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={() =>
+                      (preStart || confirm(`${a.full_name} از فهرست مدعوین و حاضرین این جلسه و صورتجلسهٔ آن حذف شود؟`)) &&
+                      run(() => del(`/meetings/${m.id}/invitees/${a.user_id}`))
+                    }
+                  >
                     حذف
                   </Button>
                 )}
@@ -895,6 +904,7 @@ function Minutes({ m, reloadMeeting }: { m: any; reloadMeeting: () => Promise<vo
   const { data, error, reload } = useApi(`/meetings/${m.id}/minutes`);
   const [editing, setEditing] = useState(false);
   const [body, setBody] = useState('');
+  const [reopening, setReopening] = useState(false);
   const [err, setErr] = useState<Error | null>(null);
   if (error) return <ErrorBox error={error} />;
   if (!data) return <Loading />;
@@ -916,7 +926,7 @@ function Minutes({ m, reloadMeeting }: { m: any; reloadMeeting: () => Promise<vo
       title={
         <span className="row gap-sm">
           صورتجلسه <MinutesBadge status={data.status} /> <span className="muted small">نسخه {fa(data.version)}</span>
-          {data.minutes_number && <Badge tone="success">شماره {fa(data.minutes_number)}</Badge>}
+          {data.minutes_number && data.status === 'approved' && <Badge tone="success">شماره {fa(data.minutes_number)}</Badge>}
         </span>
       }
       actions={
@@ -929,8 +939,28 @@ function Minutes({ m, reloadMeeting }: { m: any; reloadMeeting: () => Promise<vo
               <Button variant="secondary" onClick={() => act(() => post(`/meetings/${m.id}/minutes`, { regenerate: true }))}>
                 تولید مجدد از داده‌های جلسه
               </Button>
-              {!m.archival && <Button onClick={() => act(() => post(`/minutes/${data.id}/submit`))}>ارسال برای تأیید رئیس</Button>}
+              {!m.archival && (
+                <Button
+                  onClick={() => {
+                    // The server refuses minutes whose attendance differs from the record unless the secretary confirms.
+                    const ok = data.attendanceSynced === true || confirm('بخش «حاضرین و غایبین» صورتجلسه با حضور و غیاب ثبت‌شده یکسان نیست. با همین متن ارسال شود؟');
+                    if (ok) void act(() => post(`/minutes/${data.id}/submit`, { ignoreAttendanceMismatch: data.attendanceSynced !== true }));
+                  }}
+                >
+                  ارسال برای تأیید رئیس
+                </Button>
+              )}
             </>
+          )}
+          {can('meeting.manage') && data.status === 'pending_approval' && (
+            <Button variant="secondary" onClick={() => confirm('صورتجلسه از تأیید پس گرفته و برای اصلاح به پیش‌نویس برگردد؟') && act(() => post(`/minutes/${data.id}/withdraw`))}>
+              پس گرفتن برای اصلاح
+            </Button>
+          )}
+          {data.canReopen && (
+            <Button variant="danger" onClick={() => setReopening(true)}>
+              بازگشایی برای اصلاح
+            </Button>
           )}
           {can('minutes.approve') && data.status === 'pending_approval' && (
             <>
@@ -953,6 +983,32 @@ function Minutes({ m, reloadMeeting }: { m: any; reloadMeeting: () => Promise<vo
     >
       <ErrorBox error={err} />
       {data.return_reason && data.status !== 'approved' && <div className="alert alert-warning">برگشت داده شد: {data.return_reason}</div>}
+      {data.reopened_at && data.status !== 'approved' && (
+        <div className="alert alert-warning">
+          صورتجلسهٔ تأییدشده در {dateTimeFa(data.reopened_at)} برای اصلاح بازگشایی شد: {data.reopen_reason}
+          <br />
+          <span className="small">پس از اصلاح، دوباره برای تأیید رئیس ارسال کنید؛ متن تأییدشدهٔ قبلی در تاریخچهٔ نسخه‌ها می‌ماند.</span>
+        </div>
+      )}
+      {draft && can('meeting.manage') && data.attendanceSynced === false && (
+        <div className="alert alert-warning row between wrap gap-sm">
+          <span>بخش «حاضرین و غایبین» صورتجلسه با حضور و غیاب ثبت‌شده یکسان نیست.</span>
+          <Button size="sm" onClick={() => act(() => post(`/meetings/${m.id}/minutes/sync-attendance`))}>
+            به‌روزرسانی از حضور و غیاب
+          </Button>
+        </div>
+      )}
+      {draft && can('meeting.manage') && data.attendanceSynced === null && (
+        <div className="alert alert-warning">
+          بخش «حاضرین و غایبین» در متن صورتجلسه پیدا نشد؛ اسامی حاضرین و غایبین را با زبانهٔ «حاضرین و نصاب» مقایسه کنید.
+        </div>
+      )}
+      {reopening && (
+        <ReopenMinutesModal
+          onClose={() => setReopening(false)}
+          onSave={(reason) => act(() => post(`/minutes/${data.id}/reopen`, { reason })).then(() => setReopening(false))}
+        />
+      )}
       {editing ? (
         <>
           <textarea className="input" style={{ minHeight: 420, fontFamily: 'inherit' }} value={body} onChange={(e) => setBody(e.target.value)} />
@@ -973,6 +1029,31 @@ function Minutes({ m, reloadMeeting }: { m: any; reloadMeeting: () => Promise<vo
         </p>
       )}
     </Card>
+  );
+}
+
+/** The chamber admin reopens approved minutes; the reason is told to everyone invited and kept in the log. */
+function ReopenMinutesModal({ onClose, onSave }: { onClose: () => void; onSave: (reason: string) => Promise<void> }) {
+  const [reason, setReason] = useState('');
+  const [busy, setBusy] = useState(false);
+  return (
+    <Modal
+      title="بازگشایی صورتجلسهٔ تأییدشده"
+      onClose={onClose}
+      footer={
+        <Button variant="danger" busy={busy} disabled={reason.trim().length < 5} onClick={() => { setBusy(true); void onSave(reason.trim()).finally(() => setBusy(false)); }}>
+          بازگشایی
+        </Button>
+      }
+    >
+      <p className="muted small" style={{ marginTop: 0 }}>
+        صورتجلسه به پیش‌نویس برمی‌گردد تا دبیر اصلاح کند و دوباره به تأیید رئیس برسد. متن تأییدشدهٔ فعلی در تاریخچهٔ نسخه‌ها می‌ماند و
+        بازگشایی با دلیل آن به همهٔ مدعوین اطلاع داده می‌شود.
+      </p>
+      <Field label="دلیل بازگشایی (الزامی)">
+        <textarea className="input" value={reason} maxLength={500} onChange={(e) => setReason(e.target.value)} placeholder="مثلاً: نام یکی از حاضرین اشتباه ثبت شده است" />
+      </Field>
+    </Modal>
   );
 }
 

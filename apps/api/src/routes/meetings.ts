@@ -30,7 +30,7 @@ import {
   quorumSummary,
   transition,
 } from '../services/meetings.js';
-import { generateMinutesDraft } from '../services/minutes.js';
+import { generateMinutesDraft, syncMinutesAttendance } from '../services/minutes.js';
 import { listDelegates } from './delegates.js';
 import { adminBrowsableChambers, assertRole, browsableCommissionIds, defaultHasVote } from '../services/roles.js';
 import { notify } from '../services/notifications.js';
@@ -326,6 +326,7 @@ meetingsRouter.post('/meetings/:id/invitees', async (req, res) => {
     const sent = !held && a.meeting.status !== 'draft' && a.meeting.status !== 'scheduled';
     if (sent || held) await ensureAttendanceRows(id, c);
     await audit(c, req, { chamberId: a.meeting.chamber_id, action: 'meeting.invitee_added', entity: 'meeting', entityId: id, after: { ...b, hasVote } });
+    if (held) await syncMinutesAttendance(c, req, id);
     return sent ? a.meeting : null;
   });
   if (sendNow) {
@@ -350,10 +351,17 @@ meetingsRouter.delete('/meetings/:id/invitees/:userId', async (req, res) => {
   await tx(async (c) => {
     const a = await meetingAccess(u, id, c, { forUpdate: true });
     a.require('meeting.manage');
-    if (!isEditable(a.meeting.status) && !isArchivalOpen(a.meeting)) throw conflict('حذف مدعو فقط پیش از شروع جلسه ممکن است');
+    // Before the meeting, or while its minutes are drafted (someone listed by mistake); never during it.
+    const held = a.meeting.status === 'minutes_draft';
+    if (!isEditable(a.meeting.status) && !held) throw conflict('حذف مدعو فقط پیش از شروع جلسه یا تا پیش از ارسال صورتجلسه ممکن است');
+    if (held && !a.meeting.archival) {
+      const voted = await one('SELECT 1 FROM votes v JOIN vote_sessions s ON s.id = v.vote_session_id WHERE s.meeting_id = $1 AND v.voter_id = $2 LIMIT 1', [id, userId], c);
+      if (voted) throw conflict('این فرد در رأی‌گیری جلسه شرکت کرده است؛ به‌جای حذف، حضور او را اصلاح کنید');
+    }
     await c.query('DELETE FROM attendance WHERE meeting_id = $1 AND user_id = $2', [id, userId]);
     await c.query('DELETE FROM meeting_invitees WHERE meeting_id = $1 AND user_id = $2', [id, userId]);
     await audit(c, req, { chamberId: a.meeting.chamber_id, action: 'meeting.invitee_removed', entity: 'meeting', entityId: id, before: { userId } });
+    if (held) await syncMinutesAttendance(c, req, id);
   });
   res.status(204).end();
 });
@@ -686,7 +694,9 @@ meetingsRouter.post('/meetings/:id/attendance/:memberId/confirm', async (req, re
       after: row,
       reason: b.reason,
     });
-    return { row, settings: a.settings };
+    // A correction after the meeting is carried into the minutes draft (only its attendance section).
+    const minutes = a.meeting.status === 'minutes_draft' ? await syncMinutesAttendance(c, req, id) : 'none';
+    return { row: { ...row, minutes }, settings: a.settings };
   });
   await broadcastAttendance(id, settings);
   res.json(row);
