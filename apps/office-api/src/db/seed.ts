@@ -5,13 +5,18 @@
 import bcrypt from 'bcryptjs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { ensureBaseData } from './bootstrap.js';
+import { config } from '../config.js';
+import { DEMO_PASSWORD, ensureBaseData } from './bootstrap.js';
 import { migrate } from './migrate.js';
 import { pool } from './pool.js';
 
-export const SEED_PASSWORD = 'Passw0rd!';
+export const SEED_PASSWORD = DEMO_PASSWORD;
 
 export async function seed() {
+  // Demo accounts share a published password: never in production unless explicitly asked for (trial installs).
+  if (config.isProd && process.env.ALLOW_DEMO_SEED !== '1') {
+    throw new Error('Refusing to load demo data (accounts with a public password) in production. Set ALLOW_DEMO_SEED=1 only on a trial install.');
+  }
   await migrate(false);
   await ensureBaseData();
   const c = await pool.connect();

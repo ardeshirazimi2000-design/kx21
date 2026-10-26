@@ -1,7 +1,12 @@
 #!/usr/bin/env bash
 # Trial install with Docker:  bash deploy/docker-install.sh
 # Creates .env with random secrets (once), builds and starts the stack on $WEB_PORT (default 8000)
-# and loads demo data on first install (SEED=0 to skip).
+# and loads demo data of the meetings system on first install (SEED=0 to skip).
+# Office automation starts empty with one administrator ($OFFICE_ADMIN_USERNAME, default admin) whose random
+# password is written to office-admin-password.txt (mode 600, never printed); OFFICE_SEED=1 loads its demo
+# accounts (password Passw0rd!) instead — trial installs only.
+# MEETINGS_ADMIN_EMAIL / MEETINGS_ADMIN_PASSWORD: a meetings admin, to connect the two systems on first install
+# (defaults to the demo admin when SEED=1).
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -54,24 +59,44 @@ if [ "${FIRST_INSTALL:-0}" = "1" ] && [ "${SEED:-1}" = "1" ]; then
   docker compose exec -T api node dist/db/seed.js
 fi
 
-if [ "${OFFICE_FIRST_INSTALL:-0}" = "1" ] && [ "${SEED:-1}" = "1" ]; then
+OFFICE_ADMIN_FILE=office-admin-password.txt
+if [ "${OFFICE_FIRST_INSTALL:-0}" = "1" ]; then
   echo "Waiting for office automation..."
   for _ in $(seq 1 60); do
     curl -fs "http://127.0.0.1:${OFFICE_WEB_PORT}/health" >/dev/null && break
     sleep 2
   done
-  docker compose exec -T office-api node dist/db/seed.js
-  # Connect office automation to the meetings system (API key + signed webhooks).
-  # MEETINGS_ADMIN_EMAIL / MEETINGS_ADMIN_PASSWORD: a chamber admin of the meetings system.
-  docker compose exec -T -e MEETINGS_URL=http://api:4000 \
-    -e MEETINGS_ADMIN_EMAIL="${MEETINGS_ADMIN_EMAIL:-admin@kx.local}" -e MEETINGS_ADMIN_PASSWORD="${MEETINGS_ADMIN_PASSWORD:-Passw0rd!}" \
-    -e OFFICE_WEBHOOK_URL=http://office-api:4100/api/integrations/meetings/webhook office-api node dist/db/connect-meetings.js \
-    || echo "Could not connect to the meetings system automatically; connect it from the office automation «یکپارچه‌سازی» page."
+  if [ "${OFFICE_SEED:-0}" = "1" ]; then
+    docker compose exec -T -e ALLOW_DEMO_SEED=1 office-api node dist/db/seed.js
+  else
+    # Random password, kept only in a file readable by this user (never printed or put in the container environment).
+    (umask 077; openssl rand -base64 24 | tr -d '/+=' | cut -c1-24 > "$OFFICE_ADMIN_FILE")
+    docker compose exec -T -e ADMIN_USERNAME="${OFFICE_ADMIN_USERNAME:-admin}" office-api node dist/db/create-admin.js < "$OFFICE_ADMIN_FILE"
+  fi
+  # Connect office automation to the meetings system (API key + signed webhooks); needs a chamber admin of the
+  # meetings system: the demo one when its demo data was loaded, otherwise MEETINGS_ADMIN_EMAIL / MEETINGS_ADMIN_PASSWORD.
+  if [ "${SEED:-1}" = "1" ]; then
+    MEETINGS_ADMIN_EMAIL="${MEETINGS_ADMIN_EMAIL:-admin@kx.local}"
+    MEETINGS_ADMIN_PASSWORD="${MEETINGS_ADMIN_PASSWORD:-Passw0rd!}"
+  fi
+  if [ -n "${MEETINGS_ADMIN_EMAIL:-}" ] && [ -n "${MEETINGS_ADMIN_PASSWORD:-}" ]; then
+    docker compose exec -T -e MEETINGS_URL=http://api:4000 \
+      -e MEETINGS_ADMIN_EMAIL="$MEETINGS_ADMIN_EMAIL" -e MEETINGS_ADMIN_PASSWORD="$MEETINGS_ADMIN_PASSWORD" \
+      -e OFFICE_WEBHOOK_URL=http://office-api:4100/api/integrations/meetings/webhook office-api node dist/db/connect-meetings.js \
+      || echo "Could not connect to the meetings system automatically; connect it from the office automation «یکپارچه‌سازی» page."
+  else
+    echo "Connect office automation to the meetings system from its «یکپارچه‌سازی» page."
+  fi
 fi
 
 IP="$(hostname -I 2>/dev/null | awk '{print $1}')"
 echo
 echo "Ready:  http://${IP:-localhost}:${WEB_PORT}"
 echo "Demo login: admin@kx.local / Passw0rd!   (also chair@, secretary@, member1@kx.local)"
-echo "Office automation: http://${IP:-localhost}:${OFFICE_WEB_PORT:-8100}   (admin, clerk, cmshead, expert … / Passw0rd!)"
+echo "Office automation: http://${IP:-localhost}:${OFFICE_WEB_PORT:-8100}"
+if [ "${OFFICE_SEED:-0}" = "1" ]; then
+  echo "  demo accounts: admin, clerk, cmshead, expert … / Passw0rd!  (trial only: change or remove before real use)"
+elif [ "${OFFICE_FIRST_INSTALL:-0}" = "1" ]; then
+  echo "  administrator: ${OFFICE_ADMIN_USERNAME:-admin} — password in $(pwd)/$OFFICE_ADMIN_FILE. Change it after signing in, then delete the file."
+fi
 echo "Logs:   docker compose logs -f api"

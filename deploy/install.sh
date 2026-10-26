@@ -12,6 +12,12 @@
 #   APP_DIR=/opt/kx21    install location
 #   OFFICE=1             also install office automation (اتوماسیون اداری) on $OFFICE_PORT — use 0 to skip
 #   OFFICE_PORT=8100     office automation port
+#   OFFICE_SEED=0        office automation starts empty with one administrator whose random password is written
+#                        to $OFFICE_ADMIN_FILE (root only); OFFICE_SEED=1 loads demo accounts (password Passw0rd!)
+#                        instead — trial installs only
+#   OFFICE_ADMIN_USERNAME=admin
+#   MEETINGS_ADMIN_EMAIL / MEETINGS_ADMIN_PASSWORD   a meetings admin, to connect the two systems on first install
+#                        (defaults to the demo admin when SEED=1)
 set -euo pipefail
 
 PORT="${PORT:-8000}"
@@ -22,6 +28,9 @@ ENV_FILE=/etc/kx21.env
 OFFICE="${OFFICE:-1}"
 OFFICE_PORT="${OFFICE_PORT:-8100}"
 OFFICE_ENV_FILE=/etc/kx21-office.env
+OFFICE_SEED="${OFFICE_SEED:-0}"
+OFFICE_ADMIN_USERNAME="${OFFICE_ADMIN_USERNAME:-admin}"
+OFFICE_ADMIN_FILE=/root/kx21-office-admin.txt
 SRC_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 
 [ "$(id -u)" -eq 0 ] || { echo "Run as root (sudo)."; exit 1; }
@@ -128,9 +137,15 @@ ENV
   chown -R "$APP_USER:$APP_USER" /var/lib/kx21
   log "Office automation: migrations"
   sudo -u "$APP_USER" env $(grep -v '^#' "$OFFICE_ENV_FILE" | xargs) node "$APP_DIR/apps/office-api/dist/db/migrate.js"
-  if [ "$SEED" = "1" ] && [ "$OFFICE_FIRST" = "1" ]; then
-    log "Office automation: demo data"
-    sudo -u "$APP_USER" env $(grep -v '^#' "$OFFICE_ENV_FILE" | xargs) node "$APP_DIR/apps/office-api/dist/db/seed.js"
+  if [ "$OFFICE_FIRST" = "1" ] && [ "$OFFICE_SEED" = "1" ]; then
+    log "Office automation: demo data (trial install)"
+    sudo -u "$APP_USER" env $(grep -v '^#' "$OFFICE_ENV_FILE" | xargs) ALLOW_DEMO_SEED=1 node "$APP_DIR/apps/office-api/dist/db/seed.js"
+  elif [ "$OFFICE_FIRST" = "1" ]; then
+    log "Office automation: first administrator"
+    # Random password, kept only in a root-only file (never printed or put in an environment variable).
+    (umask 077; openssl rand -base64 24 | tr -d '/+=' | cut -c1-24 > "$OFFICE_ADMIN_FILE")
+    sudo -u "$APP_USER" env $(grep -v '^#' "$OFFICE_ENV_FILE" | xargs) ADMIN_USERNAME="$OFFICE_ADMIN_USERNAME" \
+      node "$APP_DIR/apps/office-api/dist/db/create-admin.js" < "$OFFICE_ADMIN_FILE"
   fi
 fi
 
@@ -199,10 +214,15 @@ if [ "$OFFICE" = "1" ]; then
     sleep 1
   done
   curl -fs "http://127.0.0.1:$OFFICE_PORT/health" >/dev/null || { journalctl -u kx21-office -n 50 --no-pager; exit 1; }
-  if [ "$SEED" = "1" ] && [ "$OFFICE_FIRST" = "1" ]; then
+  # Connecting needs a meetings admin: the demo one when the meetings demo data was loaded, otherwise given explicitly.
+  if [ "$SEED" = "1" ]; then
+    MEETINGS_ADMIN_EMAIL="${MEETINGS_ADMIN_EMAIL:-admin@kx.local}"
+    MEETINGS_ADMIN_PASSWORD="${MEETINGS_ADMIN_PASSWORD:-Passw0rd!}"
+  fi
+  if [ "$OFFICE_FIRST" = "1" ] && [ -n "${MEETINGS_ADMIN_EMAIL:-}" ] && [ -n "${MEETINGS_ADMIN_PASSWORD:-}" ]; then
     log "Connecting office automation to the meetings system"
     sudo -u "$APP_USER" env $(grep -v '^#' "$OFFICE_ENV_FILE" | xargs) MEETINGS_URL="http://127.0.0.1:$PORT" \
-      MEETINGS_ADMIN_EMAIL=admin@kx.local MEETINGS_ADMIN_PASSWORD='Passw0rd!' \
+      MEETINGS_ADMIN_EMAIL="$MEETINGS_ADMIN_EMAIL" MEETINGS_ADMIN_PASSWORD="$MEETINGS_ADMIN_PASSWORD" \
       OFFICE_WEBHOOK_URL="http://127.0.0.1:$OFFICE_PORT/api/integrations/meetings/webhook" \
       node "$APP_DIR/apps/office-api/dist/db/connect-meetings.js" || echo "Connect later from the office automation «یکپارچه‌سازی» page."
   fi
@@ -216,6 +236,10 @@ echo "Config:   $ENV_FILE   (after editing: systemctl restart kx21)"
 if [ "$OFFICE" = "1" ]; then
   echo
   echo "Office automation:  http://$SERVER_IP:$OFFICE_PORT"
-  [ "$SEED" = "1" ] && echo "Demo login: admin, clerk, cmshead, expert, president … / Passw0rd!"
+  if [ "$OFFICE_SEED" = "1" ]; then
+    echo "Demo login: admin, clerk, cmshead, expert, president … / Passw0rd!  (trial only: change or remove before real use)"
+  elif [ "$OFFICE_FIRST" = "1" ]; then
+    echo "Administrator: $OFFICE_ADMIN_USERNAME — password in $OFFICE_ADMIN_FILE (root only). Change it after signing in, then delete the file."
+  fi
   echo "Logs:     journalctl -u kx21-office -f    Config: $OFFICE_ENV_FILE"
 fi

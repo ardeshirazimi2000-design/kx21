@@ -2,7 +2,7 @@ import bcrypt from 'bcryptjs';
 import { logger } from '../lib/logger.js';
 import { PERMISSIONS, SYSTEM_ROLES } from '../services/permissions.js';
 import type { WorkflowDefinition } from '../services/workflow.js';
-import { tx } from './pool.js';
+import { tx, type Db } from './pool.js';
 
 /** Built-in workflows created on first start (editable afterwards; edits create new versions). */
 export const DEFAULT_WORKFLOWS: { key: string; name: string; description: string; appliesTo: string[]; definition: WorkflowDefinition }[] = [
@@ -80,16 +80,48 @@ export async function ensureBaseData() {
       await c.query(`INSERT INTO retention_policies (name, retain_years, action) VALUES ($1,$2,$3) ON CONFLICT (name) DO NOTHING`, [name, years, action]);
     }
     await c.query(`INSERT INTO users (username, full_name) VALUES ('system', 'سامانه (خودکار)') ON CONFLICT DO NOTHING`);
-    const users = (await c.query(`SELECT count(*)::int AS n FROM users WHERE username <> 'system'`)).rows[0].n;
-    if (!users && process.env.ADMIN_USERNAME && process.env.ADMIN_PASSWORD) {
-      const u = (
-        await c.query(`INSERT INTO users (username, full_name, password_hash, clearance) VALUES ($1, 'مدیر سیستم', $2, 2) RETURNING id`, [
-          process.env.ADMIN_USERNAME,
-          await bcrypt.hash(process.env.ADMIN_PASSWORD, 10),
-        ])
-      ).rows[0];
-      await c.query(`INSERT INTO user_roles (user_id, role_id) SELECT $1, id FROM roles WHERE key = 'admin'`, [u.id]);
-      logger.info({ username: process.env.ADMIN_USERNAME }, 'created first administrator');
-    }
+    if (process.env.ADMIN_USERNAME && process.env.ADMIN_PASSWORD) await createFirstAdmin(c, process.env.ADMIN_USERNAME, process.env.ADMIN_PASSWORD);
   });
+}
+
+/** The password every demo account of `seed` has; never acceptable for a real account. */
+export const DEMO_PASSWORD = 'Passw0rd!';
+/** Usernames of the demo accounts created by `seed`. */
+export const DEMO_USERNAMES = ['admin', 'president', 'deputy', 'sechead', 'clerk', 'cmshead', 'cmsexpert', 'reshead', 'expert', 'it'];
+
+/** Why a first-administrator password is not acceptable, or null. */
+export function weakAdminPassword(password: string): string | null {
+  if (password.length < 12) return 'the first administrator password must be at least 12 characters';
+  if (password.toLowerCase().includes(DEMO_PASSWORD.toLowerCase())) return 'the first administrator password must not contain the demo password';
+  if (new Set(password).size < 6) return 'the first administrator password is too repetitive';
+  return null;
+}
+
+/**
+ * The first administrator of an empty installation (no users other than `system`); does nothing once anybody exists.
+ * Returns whether the account was created. The password is never logged.
+ */
+export async function createFirstAdmin(c: Db, username: string, password: string): Promise<boolean> {
+  const users = (await c.query(`SELECT count(*)::int AS n FROM users WHERE username <> 'system'`)).rows[0].n;
+  if (users) return false;
+  const weak = weakAdminPassword(password);
+  if (weak) throw new Error(weak);
+  if (!/^[a-zA-Z0-9._-]{3,60}$/.test(username)) throw new Error('the first administrator username may contain only latin letters, digits and . _ -');
+  const u = (
+    await c.query(`INSERT INTO users (username, full_name, password_hash, clearance) VALUES ($1, 'مدیر سیستم', $2, 2) RETURNING id`, [
+      username,
+      await bcrypt.hash(password, 10),
+    ])
+  ).rows[0];
+  await c.query(`INSERT INTO user_roles (user_id, role_id) SELECT $1, id FROM roles WHERE key = 'admin'`, [u.id]);
+  logger.info({ username }, 'created first administrator');
+  return true;
+}
+
+/** Active accounts that still sign in with the demo password (checked by username: the demo accounts' names). */
+export async function demoPasswordAccounts(db: Db, usernames: string[]): Promise<string[]> {
+  const rows = (await db.query(`SELECT username, password_hash FROM users WHERE is_active AND password_hash IS NOT NULL AND username = ANY($1)`, [usernames])).rows;
+  const out: string[] = [];
+  for (const r of rows) if (await bcrypt.compare(DEMO_PASSWORD, r.password_hash)) out.push(r.username);
+  return out;
 }
