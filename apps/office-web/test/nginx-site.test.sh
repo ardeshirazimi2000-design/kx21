@@ -132,7 +132,7 @@ check "TLS 1.1 is refused" bash -c "$(declare -f sc); HTTPS_PORT=$HTTPS_PORT; ! 
 check "TLS 1.0 is refused" bash -c "$(declare -f sc); HTTPS_PORT=$HTTPS_PORT; ! sc -tls1 -cipher DEFAULT@SECLEVEL=0 | grep -q 'Cipher is ECDHE'"
 check "a CBC/SHA1 suite outside the configured list is refused" bash -c "$(declare -f sc); HTTPS_PORT=$HTTPS_PORT; ! sc -tls1_2 -cipher ECDHE-ECDSA-AES128-SHA | grep -q 'Cipher is ECDHE-ECDSA-AES128-SHA'"
 # The client offers X25519 first and P-256 too (the test certificate is P-256, so P-256 must be offered for it to be usable).
-check "key exchange uses an allowed NIST curve, not X25519" bash -c "$(declare -f sc); HTTPS_PORT=$HTTPS_PORT; out=\"\$(sc -tls1_2 -curves X25519:prime256v1)\"; grep -qE '(Server|Peer) Temp Key: ECDH, (prime256v1|P-256)' <<<\"\$out\" || { grep -E 'Temp Key|Cipher is|alert|error' <<<\"\$out\" >&2; false; }"
+check "key exchange uses an allowed NIST curve, not X25519" bash -c "$(declare -f sc); HTTPS_PORT=$HTTPS_PORT; out=\"\$(sc -tls1_2 -curves X25519:prime256v1)\"; grep -qE '(Temp Key: ECDH,|group:) (prime256v1|P-256|secp256r1)' <<<\"\$out\" || { grep -E 'Temp Key|group|Cipher is|alert|error' <<<\"\$out\" >&2; false; }"
 check "ECDHE-ECDSA-AES128-GCM-SHA256 is accepted" bash -c "$(declare -f sc); HTTPS_PORT=$HTTPS_PORT; sc -tls1_2 -cipher ECDHE-ECDSA-AES128-GCM-SHA256 | grep -q 'Cipher is ECDHE-ECDSA-AES128-GCM-SHA256'"
 
 check "TLS 1.3 handshake (allowed by default)" bash -c "$(declare -f sc); HTTPS_PORT=$HTTPS_PORT; sc -tls1_3 | grep -q 'New, TLSv1.3'"
