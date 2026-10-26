@@ -1,0 +1,17 @@
+# HTTPS served by the office-web container itself (docs/office/05-https.md, option B). Enable it with
+#   COMPOSE_FILE=docker-compose.yml:docker-compose.office-tls.yml
+# in .env, plus OFFICE_TLS_DIR (a folder outside the repository holding fullchain.pem and privkey.pem) and
+# OFFICE_PUBLIC_URL=https://<name>:<OFFICE_HTTPS_PORT>. The HTTP port then only redirects to HTTPS (and serves /health).
+# The default HTTPS port is 8443, not 443, so a web server already on 443 (another project) is left alone.
+services:
+  office-web:
+    environment:
+      OFFICE_TLS: "1"
+      OFFICE_HTTPS_PUBLIC_PORT: ${OFFICE_HTTPS_PORT:-8443}
+    ports:
+      - "${OFFICE_HTTPS_BIND:-}${OFFICE_HTTPS_BIND:+:}${OFFICE_HTTPS_PORT:-8443}:443"
+    volumes:
+      - ${OFFICE_TLS_DIR:?set OFFICE_TLS_DIR to the folder with fullchain.pem and privkey.pem}:/etc/nginx/tls:ro
+  office-api:
+    environment:
+      PUBLIC_HTTPS: "true"

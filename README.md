@@ -104,4 +104,4 @@ npm run dev:office-api     # http://localhost:4100
 npm run dev:office-web     # http://localhost:5174 — ورود: admin، clerk، cmshead، expert، president … / Passw0rd!
 npm test -w @kx/office-api
 ```
-در نصب Docker و `deploy/install.sh` اتوماسیون روی پورت `8100` نصب و خودکار به سامانه جلسات وصل می‌شود (`OFFICE=0` برای صرف‌نظر). مستندات: [docs/office](docs/office/README.md)
+در نصب Docker و `deploy/install.sh` اتوماسیون روی پورت `8100` نصب و خودکار به سامانه جلسات وصل می‌شود (`OFFICE=0` برای صرف‌نظر). راه‌اندازی HTTPS: [docs/office/05-https.md](docs/office/05-https.md). مستندات: [docs/office](docs/office/README.md)

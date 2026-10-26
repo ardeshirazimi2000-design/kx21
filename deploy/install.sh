@@ -21,6 +21,12 @@
 #   OFFICE_ADMIN_USERNAME=admin
 #   MEETINGS_ADMIN_EMAIL / MEETINGS_ADMIN_PASSWORD   a meetings admin, to connect the two systems on first install
 #                        (defaults to the demo admin when SEED=1)
+#   Office automation behind HTTPS (docs/office/05-https.md); kept from the previous run when not given:
+#   OFFICE_PUBLIC_URL=https://office.example.ir   address users open (default http://<server IP>:$OFFICE_PORT)
+#   OFFICE_PUBLIC_HTTPS=true   sign-in only over HTTPS, HSTS on (only once HTTPS works end to end)
+#   OFFICE_HOST=127.0.0.1      listen only locally: a reverse proxy on this server is the only way in
+#   OFFICE_TRUST_PROXY=loopback   that proxy (on this server) may report the client address and scheme;
+#                        empty (default) = no proxy, X-Forwarded-For from clients is ignored
 set -euo pipefail
 
 PORT="${PORT:-8000}"
@@ -75,6 +81,12 @@ if [ "$OFFICE" = "1" ]; then
   if [ -f "$OFFICE_ENV_FILE" ]; then
     OFFICE_JWT_SECRET="$(grep '^JWT_SECRET=' "$OFFICE_ENV_FILE" | cut -d= -f2-)"
     OFFICE_DATA_KEY="$(grep '^DATA_ENCRYPTION_KEY=' "$OFFICE_ENV_FILE" | cut -d= -f2-)"
+    # HTTPS settings of the previous run stay unless given again.
+    prev() { grep "^$1=" "$OFFICE_ENV_FILE" | cut -d= -f2- || true; }
+    OFFICE_PUBLIC_URL="${OFFICE_PUBLIC_URL:-$(prev PUBLIC_URL)}"
+    OFFICE_PUBLIC_HTTPS="${OFFICE_PUBLIC_HTTPS:-$(prev PUBLIC_HTTPS)}"
+    OFFICE_HOST="${OFFICE_HOST:-$(prev HOST)}"
+    OFFICE_TRUST_PROXY="${OFFICE_TRUST_PROXY:-$(prev TRUST_PROXY)}"
     OFFICE_FIRST=0
   else
     OFFICE_JWT_SECRET="$(openssl rand -hex 32)"
@@ -132,6 +144,7 @@ elif [ "$FIRST" = "1" ]; then
 fi
 
 if [ "$OFFICE" = "1" ]; then
+  OFFICE_PUBLIC_URL="${OFFICE_PUBLIC_URL:-http://$SERVER_IP:$OFFICE_PORT}"
   cat > "$OFFICE_ENV_FILE" <<ENV
 NODE_ENV=production
 TZ=Asia/Tehran
@@ -141,10 +154,13 @@ JWT_SECRET=$OFFICE_JWT_SECRET
 DATA_ENCRYPTION_KEY=$OFFICE_DATA_KEY
 WEB_DIST_DIR=$APP_DIR/apps/office-web/dist
 STORAGE_DIR=/var/lib/kx21/office-storage
-PUBLIC_URL=http://$SERVER_IP:$OFFICE_PORT
-CORS_ORIGINS=http://$SERVER_IP:$OFFICE_PORT,http://localhost:$OFFICE_PORT
+PUBLIC_URL=$OFFICE_PUBLIC_URL
+CORS_ORIGINS=$OFFICE_PUBLIC_URL,http://localhost:$OFFICE_PORT
 SMS_PROVIDER=log
 EMAIL_PROVIDER=log
+PUBLIC_HTTPS=${OFFICE_PUBLIC_HTTPS:-false}
+HOST=${OFFICE_HOST:-}
+TRUST_PROXY=${OFFICE_TRUST_PROXY:-}
 ENV
   chmod 600 "$OFFICE_ENV_FILE"
   chown -R "$APP_USER:$APP_USER" /var/lib/kx21
@@ -211,7 +227,8 @@ fi
 
 if command -v ufw >/dev/null && ufw status | grep -q "Status: active"; then
   ufw allow "$PORT/tcp"
-  [ "$OFFICE" = "1" ] && ufw allow "$OFFICE_PORT/tcp"
+  # Not opened when only a local reverse proxy may reach it.
+  [ "$OFFICE" = "1" ] && [ "${OFFICE_HOST:-}" != "127.0.0.1" ] && ufw allow "$OFFICE_PORT/tcp"
 fi
 
 log "Waiting for the service"
