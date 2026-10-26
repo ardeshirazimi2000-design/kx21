@@ -29,9 +29,15 @@ const openapiPath = path.join(path.dirname(fileURLToPath(import.meta.url)), '..'
 
 export function createApp() {
   const app = express();
-  app.set('trust proxy', 1);
+  // Only the configured proxies may set the client address and scheme (X-Forwarded-For / -Proto); see TRUST_PROXY.
+  app.set('trust proxy', config.trustProxy);
   app.disable('x-powered-by');
-  app.use(helmet({ hsts: config.publicHttps, contentSecurityPolicy: { directives: { upgradeInsecureRequests: config.publicHttps ? [] : null } } }));
+  app.use(
+    helmet({
+      hsts: config.publicHttps && config.hstsMaxAge !== null ? { maxAge: config.hstsMaxAge, includeSubDomains: config.hstsIncludeSubDomains, preload: false } : false,
+      contentSecurityPolicy: { directives: { upgradeInsecureRequests: config.publicHttps ? [] : null } },
+    }),
+  );
   app.use(cors({ origin: config.corsOrigins, credentials: true }));
 
   // Request id, access log and metrics (route pattern, not the raw path).
@@ -60,9 +66,32 @@ export function createApp() {
     res.type('text/yaml').send(readFileSync(openapiPath, 'utf8'));
   });
 
+  // Content-Security-Policy violation reports from the browser (office-web sends the policy in report-only mode first).
+  app.post(
+    '/api/csp-report',
+    rateLimit({ windowMs: 60 * 1000, limit: config.isTest ? 100000 : 30, standardHeaders: 'draft-8', legacyHeaders: false }),
+    express.json({ type: ['application/csp-report', 'application/reports+json', 'application/json'], limit: '16kb' }),
+    (req, res) => {
+      const reports = Array.isArray(req.body) ? req.body.map((r: any) => r?.body) : [req.body?.['csp-report']];
+      for (const r of reports.slice(0, 10)) {
+        if (!r || typeof r !== 'object') continue;
+        const directive = String(r['effective-directive'] ?? r.effectiveDirective ?? r['violated-directive'] ?? '').slice(0, 100);
+        const blocked = String(r['blocked-uri'] ?? r.blockedURL ?? '').slice(0, 200);
+        logger.warn({ csp: { directive, blocked } }, 'content security policy violation');
+      }
+      res.status(204).end();
+    },
+  );
+
   // Routes with their own body parsing / authentication (webhook needs the raw body).
   app.use('/api', integrationPublicRouter);
   app.use(express.json({ limit: '2mb' }));
+  // With PUBLIC_HTTPS, passwords, codes and tokens are never accepted over plain HTTP. req.secure is true only for a
+  // TLS connection or when a trusted proxy (TRUST_PROXY) reports X-Forwarded-Proto: https.
+  app.use('/api/auth', (req, _res, next) => {
+    if (config.publicHttps && !req.secure) throw new HttpError(403, 'https_required', 'ورود و احراز هویت فقط از طریق اتصال امن (HTTPS) ممکن است');
+    next();
+  });
   app.use('/api/auth', authRouter);
   app.use('/api', publicLettersRouter);
 

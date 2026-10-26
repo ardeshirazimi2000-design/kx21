@@ -52,6 +52,15 @@ jobs:
       - run: npm run build -w @kx/office-api
       - run: npm run build -w @kx/office-web
 
+  office-web-nginx:
+    # The office-web nginx site in the real nginx image: HTTP→HTTPS redirect, TLS versions and suites, HSTS, CSP,
+    # forwarded headers only from trusted proxies, Docker Compose port defaults. Throwaway certificates only.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker pull nginx:1.27-alpine && docker pull node:22-alpine
+      - run: bash apps/office-web/test/nginx-site.test.sh
+
   mobile:
     runs-on: ubuntu-latest
     steps:

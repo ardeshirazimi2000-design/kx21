@@ -100,6 +100,11 @@ services:
       SMTP_URL: ${OFFICE_SMTP_URL:-}
       ADMIN_USERNAME: ${OFFICE_ADMIN_USERNAME:-}
       ADMIN_PASSWORD: ${OFFICE_ADMIN_PASSWORD:-}
+      # HTTPS (docs/office/05-https.md). The office-web nginx is the only hop in front of the API and overwrites
+      # X-Forwarded-For / -Proto, so the API trusts exactly one proxy.
+      TRUST_PROXY: ${OFFICE_TRUST_PROXY:-1}
+      PUBLIC_HTTPS: ${OFFICE_PUBLIC_HTTPS:-false}
+      HSTS_MAX_AGE: ${OFFICE_HSTS_MAX_AGE:-86400}
     volumes:
       - office-storage:/data/storage
     depends_on:
@@ -112,8 +117,15 @@ services:
       dockerfile: apps/office-web/Dockerfile
     depends_on:
       - office-api
+    environment:
+      # A reverse proxy in front (e.g. Caddy), as seen by this container: only it may report the client and scheme.
+      OFFICE_TRUSTED_PROXIES: ${OFFICE_TRUSTED_PROXIES:-}
+      OFFICE_HSTS_MAX_AGE: ${OFFICE_HSTS_MAX_AGE:-86400}
+      OFFICE_CSP_MODE: ${OFFICE_CSP_MODE:-report-only}
     ports:
-      - "${OFFICE_WEB_PORT:-8100}:80"
+      # Empty OFFICE_BIND = all interfaces (as before); OFFICE_BIND=127.0.0.1 when a reverse proxy on this server is the only way in. HTTPS on the container itself:
+      # docker-compose.office-tls.yml.
+      - "${OFFICE_BIND:-}${OFFICE_BIND:+:}${OFFICE_WEB_PORT:-8100}:80"
 
 volumes:
   db-data:

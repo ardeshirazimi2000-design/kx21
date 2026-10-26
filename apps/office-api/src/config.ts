@@ -1,3 +1,4 @@
+import net from 'node:net';
 import { sampleSecretProblems } from '@kx/shared';
 
 // Dates in letters/notifications are rendered in Iran time unless configured otherwise.
@@ -7,6 +8,33 @@ function env(name: string, fallback?: string): string {
   const v = process.env[name] ?? fallback;
   if (v === undefined) throw new Error(`Missing environment variable ${name}`);
   return v;
+}
+
+/**
+ * Which reverse proxies may set X-Forwarded-For / X-Forwarded-Proto (Express `trust proxy`):
+ *  unset, "", "false", "0" → none: the client address is the TCP peer (systemd install with no proxy in front);
+ *  a number → that many proxy hops in front of the app (Docker: 1 = the office-web nginx);
+ *  a comma list of addresses, CIDR ranges or loopback / linklocal / uniquelocal → only those proxies.
+ * "true" (trust whoever connects) is refused: any client could then choose its own address.
+ */
+export function parseTrustProxy(raw: string | undefined): false | number | string[] {
+  const v = (raw ?? '').trim();
+  if (v === '' || v === 'false' || v === '0') return false;
+  if (/^\d+$/.test(v)) return Number(v);
+  if (v === 'true') throw new Error('TRUST_PROXY=true would trust a client-chosen address; give the number of proxies or their addresses');
+  const items = v.split(',').map((s) => s.trim()).filter(Boolean);
+  for (const item of items) {
+    const [addr, bits, extra] = item.split('/');
+    const keyword = ['loopback', 'linklocal', 'uniquelocal'].includes(item);
+    const family = net.isIP(addr);
+    const prefixOk = bits === undefined || (/^\d+$/.test(bits) && Number(bits) <= (family === 6 ? 128 : 32));
+    if (!keyword && (!family || !prefixOk || extra !== undefined)) throw new Error(`TRUST_PROXY: "${item}" is not an address, a CIDR range or loopback/linklocal/uniquelocal`);
+  }
+  return items;
+}
+
+function flag(name: string): boolean {
+  return ['true', '1'].includes((process.env[name] ?? '').trim().toLowerCase());
 }
 
 const isProd = process.env.NODE_ENV === 'production';
@@ -43,8 +71,23 @@ export const config = {
   workerIntervalSeconds: Number(env('WORKER_INTERVAL_SECONDS', '5')),
   schedulerIntervalSeconds: Number(env('SCHEDULER_INTERVAL_SECONDS', '300')),
   webDistDir: process.env.WEB_DIST_DIR,
-  publicHttps: process.env.PUBLIC_HTTPS === 'true',
+  /** Interface the API listens on; unset = all interfaces (as before). 127.0.0.1 when a proxy on this server is the only entry. */
+  host: process.env.HOST || undefined,
+  trustProxy: parseTrustProxy(process.env.TRUST_PROXY),
+  /**
+   * The system is reached over HTTPS (TLS ends at the office-web nginx or a reverse proxy in front): sign-in refuses
+   * plain-HTTP requests and responses carry Strict-Transport-Security.
+   */
+  publicHttps: flag('PUBLIC_HTTPS'),
+  /** HSTS lifetime in seconds ("off" = no header); start short (one day) and raise it once HTTPS is known to work. */
+  hstsMaxAge: env('HSTS_MAX_AGE', '86400') === 'off' ? null : Number(env('HSTS_MAX_AGE', '86400')),
+  /** Off by default: other sites under the same domain may still be on HTTP. */
+  hstsIncludeSubDomains: flag('HSTS_INCLUDE_SUBDOMAINS'),
 };
+
+if (config.hstsMaxAge !== null && (!Number.isInteger(config.hstsMaxAge) || config.hstsMaxAge < 0)) {
+  throw new Error('HSTS_MAX_AGE must be a whole number of seconds or off');
+}
 
 if (config.dataEncryptionKey && !/^[0-9a-f]{64}$/i.test(config.dataEncryptionKey)) {
   throw new Error('DATA_ENCRYPTION_KEY must be 64 hex characters (openssl rand -hex 32)');

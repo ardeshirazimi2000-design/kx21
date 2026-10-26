@@ -15,11 +15,12 @@ async function main() {
   if (config.isProd) {
     const demo = await demoPasswordAccounts(pool, DEMO_USERNAMES);
     if (demo.length) logger.warn({ accounts: demo }, 'accounts still use the public demo password: change their passwords or deactivate them');
+    if (!config.publicHttps) logger.warn('PUBLIC_HTTPS is not set: sign-in is accepted over plain HTTP; set up HTTPS (docs/office/05-https.md)');
   }
   const server = http.createServer(createApp());
   if (config.workerEnabled) startWorker();
   if (process.env.SCHEDULER_ENABLED !== 'false') startScheduler();
-  server.listen(config.port, () => logger.info(`Office automation API listening on :${config.port}`));
+  server.listen(config.port, config.host, () => logger.info(`Office automation API listening on ${config.host ?? ''}:${config.port}`));
 }
 
 main().catch((e) => {
