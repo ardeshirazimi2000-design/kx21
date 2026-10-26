@@ -45,6 +45,7 @@
 .nav-chevron { transition: transform 0.2s ease; transform: rotate(90deg); opacity: 0.7; }
 .nav-section.open .nav-chevron { transform: rotate(0deg); }
 .nav-items { display: flex; flex-direction: column; gap: 2px; margin-top: 2px; }
+.nav-flat { margin-top: 2px; }
 
 .nav-link { position: relative; display: flex; gap: 12px; align-items: center; padding: 9px 12px; border-radius: 10px; color: var(--sidebar-ink); font-size: 0.92rem;
   transition: background 0.15s, color 0.15s; }

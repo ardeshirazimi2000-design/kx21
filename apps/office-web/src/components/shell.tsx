@@ -7,7 +7,8 @@ import { fa } from './ui';
 
 type Badge = 'cartable' | 'unread';
 type MenuItem = { to: string; label: string; icon: IconName; perm?: string | string[]; badge?: Badge; end?: boolean };
-type MenuGroup = { id: string; title: string; icon: IconName; items: MenuItem[] };
+/** flat: the items sit directly under the dashboard, with no group heading (used for the main letters group). */
+type MenuGroup = { id: string; title: string; icon: IconName; items: MenuItem[]; flat?: boolean };
 
 /** The whole menu in one place: groups, icons and the permission each page needs. Pages without a perm are open to every user. */
 export const MENU: MenuGroup[] = [
@@ -15,6 +16,7 @@ export const MENU: MenuGroup[] = [
     id: 'letters',
     title: 'مکاتبات',
     icon: 'mail',
+    flat: true,
     items: [
       { to: '/cartable', label: 'کارتابل', icon: 'inbox', badge: 'cartable' },
       { to: '/letters', label: 'مکاتبات', icon: 'mail', end: true },
@@ -315,6 +317,7 @@ function NavGroup({ group, mini, children }: { group: MenuGroup; mini: boolean; 
     writeJson(NAV_KEY, [...set]);
   };
   const shown = open || mini;
+  if (group.flat) return <div className="nav-items nav-flat">{children}</div>;
   return (
     <div className={`nav-section ${shown ? 'open' : ''} ${holdsCurrent ? 'current' : ''}`}>
       <button type="button" className="nav-group" aria-expanded={shown} aria-controls={`nav-${id}`} onClick={toggle} title={title}>
