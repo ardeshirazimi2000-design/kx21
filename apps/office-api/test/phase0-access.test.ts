@@ -28,7 +28,7 @@ const PDF = Buffer.from('%PDF-1.4\n1 0 obj<<>>endobj\ntrailer<<>>\n%%EOF');
 beforeAll(async () => {
   await pool.query('DROP SCHEMA public CASCADE; CREATE SCHEMA public;');
   await seed();
-  for (const u of ['admin', 'president', 'deputy', 'clerk', 'cmsexpert', 'reshead', 'expert', 'it']) await login(u);
+  for (const u of ['admin', 'president', 'deputy', 'sechead', 'clerk', 'cmsexpert', 'reshead', 'expert', 'it']) await login(u);
 });
 
 afterAll(async () => {
@@ -96,6 +96,21 @@ describe('R1: confidentiality is enforced on every path', () => {
     const r = await as('president').post('/api/letters', { kind: 'internal', subject: 'سری با امضاکننده', body: 'x', confidentiality: 1, signatoryId: me.reshead.id });
     expect(r.status).toBe(400);
     expect((await as('president').post('/api/letters', { kind: 'internal', subject: 'سری با امضاکننده', body: 'x', confidentiality: 1, signatoryId: me.deputy.id })).status).toBe(201);
+  });
+
+  it('a workflow step is not handed to someone without clearance', async () => {
+    const research = (await pool.query(`SELECT id FROM org_units WHERE code = 'RES'`)).rows[0].id;
+    expect(me.sechead.clearance).toBe(1);
+    const body = { kind: 'incoming', subject: 'وارده محرمانه پژوهش', externalOrg: 'وزارت', ownerUnitId: research, register: true };
+    // The research manager (clearance 0) is the first step's assignee: starting is refused and nothing is left behind.
+    const secret = (await as('sechead').post('/api/letters', { ...body, confidentiality: 1 })).body;
+    const r = await as('sechead').post(`/api/letters/${secret.id}/workflow`, { definition: 'incoming-handling' });
+    expect(r.status).toBe(400);
+    expect(r.body.error.message).toContain(me.reshead.fullName ?? 'دکتر علی رضایی');
+    expect((await pool.query('SELECT count(*)::int AS n FROM workflow_instances WHERE letter_id = $1', [secret.id])).rows[0].n).toBe(0);
+    // The same letter unclassified goes through as before.
+    const plain = (await as('sechead').post('/api/letters', { ...body, confidentiality: 0 })).body;
+    expect((await as('sechead').post(`/api/letters/${plain.id}/workflow`, { definition: 'incoming-handling' })).status).toBe(201);
   });
 
   it('no notification about a secret letter reaches a user without clearance', async () => {
