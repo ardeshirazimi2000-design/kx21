@@ -79,7 +79,9 @@ export interface NotifyInput {
 export async function notify(n: NotifyInput, db: Db = pool) {
   const ids = [...new Set(n.userIds.filter(Boolean))] as string[];
   if (!ids.length) return;
-  const users = await query('SELECT id, full_name, email, mobile FROM users WHERE id = ANY($1::uuid[]) AND is_active', [ids], db);
+  // A letter's notification carries its subject: nobody below the letter's confidentiality receives it.
+  const letter = n.data?.letterId ? await one('SELECT confidentiality FROM letters WHERE id = $1', [n.data.letterId], db) : null;
+  const users = await query('SELECT id, full_name, email, mobile FROM users WHERE id = ANY($1::uuid[]) AND is_active AND clearance >= $2', [ids, letter?.confidentiality ?? 0], db);
   const link = n.data?.letterId ? `${config.publicUrl}/letters/${n.data.letterId}` : config.publicUrl;
   const inApp = await template(n.event, 'in_app', db);
   const email = await template(n.event, 'email', db);
