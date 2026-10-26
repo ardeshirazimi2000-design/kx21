@@ -21,6 +21,7 @@ import { ReportsPage } from './pages/Reports';
 import { ResolutionDetailPage, ResolutionsPage } from './pages/Resolutions';
 import { RolesPage } from './pages/Roles';
 import { SignaturesPage } from './pages/Signatures';
+import { ContactsPage } from './pages/Contacts';
 import { SmartSearchPage } from './pages/SmartSearch';
 import { UsersPage } from './pages/Users';
 import { VerifyPage } from './pages/Verify';
@@ -66,6 +67,7 @@ export function App() {
         <Route path="/letters/:id/edit" element={<LetterFormPage />} />
         <Route path="/archive" element={<ArchivePage />} />
         <Route path="/signatures" element={<SignaturesPage />} />
+        <Route path="/contacts" element={<ContactsPage />} />
         <Route path="/letter-templates" element={<LetterTemplatesPage />} />
         <Route path="/workflows" element={<WorkflowsPage />} />
         <Route path="/meetings" element={<MeetingsPage />} />

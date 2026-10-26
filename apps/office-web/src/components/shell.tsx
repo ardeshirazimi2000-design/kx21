@@ -25,6 +25,7 @@ export const MENU: MenuGroup[] = [
       { to: '/archive', label: 'بایگانی', icon: 'archive', perm: ['archive.read', 'archive.manage'] },
       { to: '/signatures', label: 'نمونه امضاها', icon: 'signature', perm: 'signatures.manage' },
       { to: '/letter-templates', label: 'قالب‌های نامه', icon: 'template', perm: 'templates.manage' },
+      { to: '/contacts', label: 'مخاطبین بیرونی', icon: 'contacts', perm: 'contacts.manage' },
     ],
   },
   {

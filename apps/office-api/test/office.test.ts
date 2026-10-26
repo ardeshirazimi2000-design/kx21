@@ -364,6 +364,55 @@ describe('letter templates and rich-text letters (قالب و سربرگ نام�
   });
 });
 
+describe('external contacts (مخاطبین بیرونی)', () => {
+  it('the secretariat maintains an organisation → unit → position tree; letters pick from it', async () => {
+    expect(me.clerk.permissions).toContain('contacts.manage');
+    expect((await as('cmsexpert').post('/api/contacts', { kind: 'organization', name: 'سازمان آزمایشی' })).status).toBe(403);
+    const org = await as('clerk').post('/api/contacts', { kind: 'organization', name: 'سازمان صنعت، معدن و تجارت استان' });
+    expect(org.status).toBe(201);
+    expect((await as('clerk').post('/api/contacts', { kind: 'organization', name: 'سازمان صنعت، معدن و تجارت استان' })).status).toBe(409);
+    expect((await as('clerk').post('/api/contacts', { kind: 'unit', name: 'بی‌ریشه' })).status).toBe(400);
+    const unit = await as('clerk').post('/api/contacts', { kind: 'unit', parentId: org.body.id, name: 'معاونت بازرگانی' });
+    const pos = await as('clerk').post('/api/contacts', { kind: 'position', parentId: unit.body.id, name: 'معاون بازرگانی', personName: 'جناب آقای رضایی' });
+    expect(pos.status).toBe(201);
+    expect((await as('clerk').post('/api/contacts', { kind: 'unit', parentId: pos.body.id, name: 'زیر سمت' })).status).toBe(400);
+    expect((await as('clerk').patch(`/api/contacts/${org.body.id}`, { parentId: unit.body.id })).status).toBe(400);
+    const list = await as('cmsexpert').get('/api/contacts');
+    expect(list.body.map((c: any) => c.id)).toEqual(expect.arrayContaining([org.body.id, unit.body.id, pos.body.id]));
+
+    // Incoming: the sender comes from the tree and the texts are composed from its path.
+    const inc = await as('clerk').post('/api/letters', { kind: 'incoming', subject: 'اعلام نرخ تعرفه جدید', contactId: pos.body.id, register: true });
+    expect(inc.status).toBe(201);
+    expect(inc.body.contact_id).toBe(pos.body.id);
+    expect(inc.body.external_org).toBe('سازمان صنعت، معدن و تجارت استان — معاونت بازرگانی');
+    expect(inc.body.external_party).toBe('جناب آقای رضایی — معاون بازرگانی');
+
+    // Outgoing draft to the unit, then switched to the organisation itself (the person is cleared).
+    const out = await as('cmsexpert').post('/api/letters', { kind: 'outgoing', subject: 'پاسخ تعرفه', contactId: unit.body.id });
+    expect(out.status).toBe(201);
+    expect(out.body.external_party).toBeNull();
+    const ed = await as('cmsexpert').patch(`/api/letters/${out.body.id}`, { contactId: org.body.id });
+    expect(ed.body.contact_id).toBe(org.body.id);
+    expect(ed.body.external_org).toBe('سازمان صنعت، معدن و تجارت استان');
+
+    // Filter by contact covers its subtree.
+    const byOrg = await as('clerk').get(`/api/letters?contactId=${org.body.id}`);
+    expect(byOrg.body.items.map((l: any) => l.id)).toEqual(expect.arrayContaining([inc.body.id, out.body.id]));
+    const byPos = await as('clerk').get(`/api/letters?contactId=${pos.body.id}`);
+    expect(byPos.body.items.map((l: any) => l.id)).toEqual([inc.body.id]);
+
+    // Used contacts cannot be deleted, only deactivated; inactive ones can't be picked.
+    const del = (id: string) => request(app).delete(`/api/contacts/${id}`).set('authorization', `Bearer ${tokens.clerk}`);
+    expect((await del(pos.body.id)).status).toBe(409);
+    expect((await as('clerk').patch(`/api/contacts/${pos.body.id}`, { isActive: false })).status).toBe(200);
+    expect((await as('clerk').post('/api/letters', { kind: 'incoming', subject: 'نامه دوم', contactId: pos.body.id })).status).toBe(400);
+    expect((await as('cmsexpert').get('/api/contacts')).body.some((c: any) => c.id === pos.body.id)).toBe(false);
+    expect((await as('clerk').get('/api/contacts?all=1')).body.some((c: any) => c.id === pos.body.id)).toBe(true);
+    const spare = await as('clerk').post('/api/contacts', { kind: 'position', parentId: unit.body.id, name: 'کارشناس تعرفه' });
+    expect((await del(spare.body.id)).status).toBe(204);
+  });
+});
+
 describe('workflow engine (گردش کار)', () => {
   let outgoing: any;
 
