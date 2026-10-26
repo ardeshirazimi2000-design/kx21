@@ -2,6 +2,7 @@
 # (creates .env with secrets, starts everything on WEB_PORT=8000, loads demo data)
 services:
   db:
+    restart: unless-stopped
     image: postgres:16-alpine
     environment:
       POSTGRES_USER: kx
@@ -15,6 +16,7 @@ services:
       retries: 10
 
   api:
+    restart: unless-stopped
     build:
       context: .
       dockerfile: apps/api/Dockerfile
@@ -60,6 +62,7 @@ services:
       - ai-models:/root/.ollama
 
   web:
+    restart: unless-stopped
     build:
       context: .
       dockerfile: apps/web/Dockerfile
@@ -70,6 +73,7 @@ services:
 
   # ───── Office automation (اتوماسیون اداری): separate service and database, integrated over REST + webhooks ─────
   office-db:
+    restart: unless-stopped
     image: postgres:16-alpine
     environment:
       POSTGRES_USER: kx
@@ -83,6 +87,7 @@ services:
       retries: 10
 
   office-api:
+    restart: unless-stopped
     build:
       context: .
       dockerfile: apps/office-api/Dockerfile
@@ -107,6 +112,7 @@ services:
         condition: service_healthy
 
   office-web:
+    restart: unless-stopped
     build:
       context: .
       dockerfile: apps/office-web/Dockerfile
