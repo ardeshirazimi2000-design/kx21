@@ -33,14 +33,16 @@ export function LoginPage() {
     <div className="login">
       <aside className="login-side">
         <div className="login-brand">
-          <img src="/iran-chamber-logo.png" width={72} height={72} alt="لوگوی اتاق ایران" />
+          <span className="brand-tile brand-tile-lg">
+            <img src="/rasa-mark.png" width={64} height={64} alt="" />
+          </span>
           <div>
-            <h1>اتاق بازرگانی، صنایع، معادن و کشاورزی ایران</h1>
-            <p>سامانه اتوماسیون اداری</p>
+            <h1>رسا</h1>
+            <p>سامانه هوشمند اتوماسیون و مدیریت سازمانی</p>
           </div>
         </div>
         <div className="login-pitch">
-          <h2>مکاتبات، کارتابل و مصوبات کمیسیون‌ها در یک سامانه</h2>
+          <h2>هر فرایند، روشن؛ هر تصمیم، به‌موقع.</h2>
           <ul>
             <li>
               <Icon name="mail" /> ثبت، ارجاع و پیگیری نامه‌های وارده، صادره و داخلی
@@ -61,8 +63,7 @@ export function LoginPage() {
       <main className="login-main">
         <form className="login-form" onSubmit={submit}>
           <div className="login-mobile-brand">
-            <img src="/iran-chamber-logo.png" width={72} height={72} alt="لوگوی اتاق ایران" />
-            <strong>سامانه اتوماسیون اداری اتاق ایران</strong>
+            <img src="/rasa-logo.png" width={200} height={219} alt="رسا — سامانه هوشمند اتوماسیون و مدیریت سازمانی" />
           </div>
           <h2>{mfaToken ? 'تأیید دومرحله‌ای' : 'ورود به سامانه'}</h2>
           <p className="muted">{mfaToken ? 'کد برنامه Authenticator خود را وارد کنید.' : 'با حساب کاربری سازمانی خود وارد شوید.'}</p>

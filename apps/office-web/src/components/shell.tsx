@@ -123,7 +123,7 @@ export function Shell({ children }: { children: ReactNode }) {
   }, [loc.pathname]);
   const where = locate(loc.pathname);
   useEffect(() => {
-    document.title = `${where.page} — اتوماسیون اداری اتاق ایران`;
+    document.title = `${where.page} — رسا`;
   }, [where.page]);
 
   const counts: Record<Badge, number | undefined> = { cartable: cartable.data?.length, unread: unread.data?.total };
@@ -144,11 +144,13 @@ export function Shell({ children }: { children: ReactNode }) {
   return (
     <div className={`shell ${mini ? 'shell-mini' : ''}`}>
       <aside className={`sidebar ${open ? 'open' : ''}`} aria-label="منوی اصلی">
-        <Link to="/" className="brand" title="اتوماسیون اداری اتاق ایران">
-          <img src="/iran-chamber-logo.png" width={46} height={46} alt="لوگوی اتاق ایران" />
+        <Link to="/" className="brand" title="رسا — سامانه هوشمند اتوماسیون و مدیریت سازمانی">
+          <span className="brand-tile">
+            <img src="/rasa-mark.png" width={38} height={38} alt="لوگوی رسا" />
+          </span>
           <span className="brand-text">
-            اتاق بازرگانی، صنایع، معادن و کشاورزی ایران
-            <small>سامانه اتوماسیون اداری</small>
+            <span className="brand-name">رسا</span>
+            <small>سامانه هوشمند اتوماسیون و مدیریت سازمانی</small>
           </span>
         </Link>
         <nav className="nav">
