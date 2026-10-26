@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { Icon } from '../components/icons';
 import { Button, ErrorBox, Field } from '../components/ui';
 import { useAuth } from '../lib/auth';
 
@@ -30,31 +31,75 @@ export function LoginPage() {
 
   return (
     <div className="login">
-      <div className="login-brand">
-        <img src="/iran-chamber-logo.png" width={96} height={96} alt="لوگوی اتاق ایران" />
-        <h1>اتاق بازرگانی، صنایع، معادن و کشاورزی ایران</h1>
-        <p>سامانه اتوماسیون اداری</p>
-      </div>
-      <form className="card" onSubmit={submit}>
-        <ErrorBox error={error} />
-        {!mfaToken ? (
-          <>
-            <Field label="نام کاربری، ایمیل یا موبایل">
-              <input className="input ltr" autoComplete="username" value={identifier} onChange={(e) => setIdentifier(e.target.value)} required />
+      <aside className="login-side">
+        <div className="login-brand">
+          <img src="/iran-chamber-logo.png" width={72} height={72} alt="لوگوی اتاق ایران" />
+          <div>
+            <h1>اتاق بازرگانی، صنایع، معادن و کشاورزی ایران</h1>
+            <p>سامانه اتوماسیون اداری</p>
+          </div>
+        </div>
+        <div className="login-pitch">
+          <h2>مکاتبات، کارتابل و مصوبات کمیسیون‌ها در یک سامانه</h2>
+          <ul>
+            <li>
+              <Icon name="mail" /> ثبت، ارجاع و پیگیری نامه‌های وارده، صادره و داخلی
+            </li>
+            <li>
+              <Icon name="signature" /> امضای الکترونیک و چاپ روی سربرگ رسمی
+            </li>
+            <li>
+              <Icon name="resolution" /> پیگیری اجرای مصوبات کمیسیون‌های تخصصی
+            </li>
+            <li>
+              <Icon name="shield" /> ورود امن با تأیید دومرحله‌ای
+            </li>
+          </ul>
+        </div>
+        <small>© اتاق بازرگانی، صنایع، معادن و کشاورزی ایران</small>
+      </aside>
+      <main className="login-main">
+        <form className="login-form" onSubmit={submit}>
+          <div className="login-mobile-brand">
+            <img src="/iran-chamber-logo.png" width={72} height={72} alt="لوگوی اتاق ایران" />
+            <strong>سامانه اتوماسیون اداری اتاق ایران</strong>
+          </div>
+          <h2>{mfaToken ? 'تأیید دومرحله‌ای' : 'ورود به سامانه'}</h2>
+          <p className="muted">{mfaToken ? 'کد برنامه Authenticator خود را وارد کنید.' : 'با حساب کاربری سازمانی خود وارد شوید.'}</p>
+          <ErrorBox error={error} />
+          {!mfaToken ? (
+            <>
+              <Field label="نام کاربری، ایمیل یا موبایل">
+                <input className="input ltr" autoComplete="username" value={identifier} onChange={(e) => setIdentifier(e.target.value)} required />
+              </Field>
+              <Field label="رمز عبور">
+                <input
+                  className="input ltr"
+                  type="password"
+                  autoComplete="current-password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  required
+                />
+              </Field>
+            </>
+          ) : (
+            <Field label="کد تأیید دومرحله‌ای" hint="کد ۶ رقمی برنامه Authenticator را وارد کنید">
+              <input
+                className="input ltr"
+                inputMode="numeric"
+                autoFocus
+                maxLength={6}
+                value={code}
+                onChange={(e) => setCode(e.target.value.replace(/\D/g, ''))}
+              />
             </Field>
-            <Field label="رمز عبور">
-              <input className="input ltr" type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} required />
-            </Field>
-          </>
-        ) : (
-          <Field label="کد تأیید دومرحله‌ای" hint="کد ۶ رقمی برنامه Authenticator را وارد کنید">
-            <input className="input ltr" inputMode="numeric" autoFocus maxLength={6} value={code} onChange={(e) => setCode(e.target.value.replace(/\D/g, ''))} />
-          </Field>
-        )}
-        <Button type="submit" busy={busy} className="btn-lg" style={{ width: '100%', justifyContent: 'center' }}>
-          {mfaToken ? 'تأیید' : 'ورود'}
-        </Button>
-      </form>
+          )}
+          <Button type="submit" busy={busy} className="btn-lg" style={{ width: '100%', justifyContent: 'center' }}>
+            {mfaToken ? 'تأیید' : 'ورود'}
+          </Button>
+        </form>
+      </main>
     </div>
   );
 }
