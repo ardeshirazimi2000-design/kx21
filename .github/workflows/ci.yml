@@ -28,6 +28,16 @@ jobs:
           cache: npm
       # Poppler renders presented PDF pages; the API tests exercise it.
       - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends poppler-utils
+      # The backup/restore test runs pg_dump/pg_restore/psql: they must be the major version of the database service
+      # (a newer pg_dump writes settings an older server rejects), so install the 16 client from the PostgreSQL apt
+      # repository and put it first on PATH.
+      - name: PostgreSQL 16 client tools
+        run: |
+          sudo apt-get install -y --no-install-recommends postgresql-common
+          sudo /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh -y
+          sudo apt-get install -y --no-install-recommends postgresql-client-16
+          echo /usr/lib/postgresql/16/bin >> "$GITHUB_PATH"
+          /usr/lib/postgresql/16/bin/pg_dump --version
       - run: npm ci
       - run: npm run build -w @kx/shared
       - run: npm run typecheck

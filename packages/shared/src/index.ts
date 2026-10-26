@@ -7,3 +7,4 @@ export * from './jalali.js';
 export * from './labels.js';
 export * from './identity.js';
 export * from './notificationSettings.js';
+export * from './secrets.js';

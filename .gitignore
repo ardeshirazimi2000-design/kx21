@@ -15,3 +15,5 @@ apps/mobile/android/
 .test-uploads-e2e/
 .test-storage/
 storage/
+office-admin-password.txt
+admin-password.txt

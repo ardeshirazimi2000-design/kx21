@@ -10,7 +10,7 @@ import { scanFile, sendFile, upload, uploadedName, validateFile } from '../lib/f
 import { getFile, putFile } from '../lib/storage.js';
 import { sanitizeLetterHtml } from '../lib/html.js';
 import { body, dateStr, listParam, paged, pageParams, param, parse, uuid } from '../lib/validate.js';
-import { letterVisibleSql, loadVisibleLetter } from '../services/access.js';
+import { letterVisibleSql, loadVisibleLetter, requireCleared } from '../services/access.js';
 import { archiveLetter } from '../services/archive.js';
 import { LETTER_HASH_VERSION, letterContentHash, letterHashes, newTrackingCode, nextLetterNumber, primaryUnitOf } from '../services/letters.js';
 import { notify, positionHolders } from '../services/notifications.js';
@@ -72,6 +72,15 @@ async function checkTemplateAndSignatory(c: Db, kind: string, templateId: string
   }
 }
 
+type Recipient = z.infer<typeof recipientSchema>;
+
+/** Internal recipients and the designated signatory: everybody a letter is handed to by name. */
+const handedTo = (recipients: Recipient[], signatoryId?: string | null) => ({
+  userIds: [...recipients.map((r) => r.userId), signatoryId].filter(Boolean) as string[],
+  positionIds: recipients.map((r) => r.positionId).filter(Boolean) as string[],
+  unitIds: recipients.map((r) => r.unitId).filter(Boolean) as string[],
+});
+
 const cleanBody = (text: string | null | undefined, format: string) => (text && format === 'html' ? sanitizeLetterHtml(text) || null : text);
 
 /**
@@ -85,7 +94,7 @@ async function lockReason(c: Db, l: any): Promise<string | null> {
   return null;
 }
 
-async function setRecipients(c: Db, letterId: string, recipients: z.infer<typeof recipientSchema>[] | undefined) {
+async function setRecipients(c: Db, letterId: string, recipients: Recipient[] | undefined) {
   if (!recipients) return;
   await c.query('DELETE FROM letter_recipients WHERE letter_id = $1', [letterId]);
   for (const r of recipients) {
@@ -138,6 +147,7 @@ lettersRouter.post('/letters', async (req, res) => {
   const row = await tx(async (c) => {
     if (b.replyToId) await loadVisibleLetter(u, b.replyToId, c);
     await checkTemplateAndSignatory(c, b.kind, b.templateId, b.signatoryId);
+    await requireCleared(c, b.confidentiality, handedTo(b.recipients ?? [], b.signatoryId));
     const format = b.bodyFormat ?? 'text';
     let l = await one(
       `INSERT INTO letters (kind, tracking_code, subject, body, summary, external_party, external_org, external_number, external_date, source,
@@ -321,6 +331,12 @@ lettersRouter.patch('/letters/:id', async (req, res) => {
     if (l.created_by !== u.id && !u.can('letter.register_incoming', l.owner_unit_id)) throw forbidden();
     if (b.confidentiality !== undefined && b.confidentiality > u.clearance) throw forbidden('سطح محرمانگی بالاتر از مجوز شماست');
     await checkTemplateAndSignatory(c, l.kind, b.templateId, b.signatoryId);
+    const current: Recipient[] = b.recipients
+      ? []
+      : (await query('SELECT user_id, position_id, unit_id, kind FROM letter_recipients WHERE letter_id = $1', [l.id], c)).map((r) => ({
+          userId: r.user_id, positionId: r.position_id, unitId: r.unit_id, kind: r.kind,
+        }));
+    await requireCleared(c, b.confidentiality ?? l.confidentiality, handedTo(b.recipients ?? current, b.signatoryId !== undefined ? b.signatoryId : l.signatory_id));
     const format = b.bodyFormat ?? l.body_format;
     const r = await one(
       `UPDATE letters SET subject = COALESCE($2, subject), body = COALESCE($3, body), summary = COALESCE($4, summary),
@@ -442,6 +458,10 @@ lettersRouter.post('/letters/:id/routes', async (req, res) => {
   const rows = await tx(async (c) => {
     const l = await loadVisibleLetter(u, param(req, 'id'), c, true);
     if (['cancelled', 'archived'].includes(l.status)) throw conflict('نامه در این وضعیت ارجاع نمی‌شود');
+    await requireCleared(c, l.confidentiality, {
+      userIds: b.targets.map((t) => t.userId).filter(Boolean) as string[],
+      positionIds: b.targets.map((t) => t.positionId).filter(Boolean) as string[],
+    });
     const out = [];
     for (const t of b.targets) {
       const r = await one(
@@ -505,9 +525,9 @@ lettersRouter.get('/cartable', async (req, res) => {
             ws.name AS step_name, ws.type AS step_type, (r.due_at IS NOT NULL AND r.due_at < now()) AS overdue
        FROM letter_routing r JOIN letters l ON l.id = r.letter_id LEFT JOIN users fu ON fu.id = r.from_user_id
        LEFT JOIN positions p ON p.id = r.to_position_id LEFT JOIN workflow_steps ws ON ws.id = r.workflow_step_id
-      WHERE r.status IN ('pending','seen') AND (r.to_user_id = $1 OR r.to_position_id = ANY($2::uuid[]))
+      WHERE r.status IN ('pending','seen') AND (r.to_user_id = $1 OR r.to_position_id = ANY($2::uuid[])) AND l.confidentiality <= $3
       ORDER BY overdue DESC, CASE l.priority WHEN 'urgent' THEN 0 WHEN 'high' THEN 1 ELSE 2 END, r.created_at DESC LIMIT 500`,
-    [u.id, positions],
+    [u.id, positions, u.clearance],
   );
   res.json(items);
 });

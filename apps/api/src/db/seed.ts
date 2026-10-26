@@ -4,15 +4,32 @@
  * All accounts use the password printed at the end.
  */
 import bcrypt from 'bcryptjs';
-import { DEFAULT_COMMISSION_SETTINGS } from '@kx/shared';
+import { DEFAULT_COMMISSION_SETTINGS, DEMO_PASSWORD } from '@kx/shared';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
+import { config } from '../config.js';
 import { migrate } from './migrate.js';
 import { pool } from './pool.js';
 
-export const SEED_PASSWORD = 'Passw0rd!';
+export const SEED_PASSWORD = DEMO_PASSWORD;
+
+/** Emails of the demo accounts created by `seed` (all with the public SEED_PASSWORD). */
+export const DEMO_EMAILS = ['root@kx.local', 'admin@kx.local', 'admin.isf@kx.local', 'chair@kx.local', 'vice@kx.local', 'secretary@kx.local',
+  ...[1, 2, 3, 4, 5, 6].map((i) => `member${i}@kx.local`), 'expert@kx.local', 'guest@kx.local'];
+
+/** Active demo accounts that still have the public demo password. */
+export async function demoPasswordAccounts(): Promise<string[]> {
+  const rows = (await pool.query(`SELECT email, password_hash FROM users WHERE is_active AND password_hash IS NOT NULL AND lower(email) = ANY($1)`, [DEMO_EMAILS])).rows;
+  const out: string[] = [];
+  for (const r of rows) if (await bcrypt.compare(SEED_PASSWORD, r.password_hash)) out.push(r.email);
+  return out;
+}
 
 export async function seed() {
+  // Demo accounts share a password published in the README: never on a production install by accident.
+  if (config.isProd && process.env.ALLOW_DEMO_SEED !== '1') {
+    throw new Error('Refusing to load demo data in production (its accounts share a public password). Set ALLOW_DEMO_SEED=1 for a trial install.');
+  }
   await migrate(false);
   const c = await pool.connect();
   try {

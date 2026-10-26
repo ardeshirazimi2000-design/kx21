@@ -1,3 +1,5 @@
+import { sampleSecretProblems } from '@kx/shared';
+
 // Dates in letters/notifications are rendered in Iran time unless configured otherwise.
 process.env.TZ ??= 'Asia/Tehran';
 
@@ -47,5 +49,9 @@ export const config = {
 if (config.dataEncryptionKey && !/^[0-9a-f]{64}$/i.test(config.dataEncryptionKey)) {
   throw new Error('DATA_ENCRYPTION_KEY must be 64 hex characters (openssl rand -hex 32)');
 }
-if (isProd && config.jwtSecret.length < 32) throw new Error('JWT_SECRET must be at least 32 characters in production');
+// Refuse to run in production with a sample or weak secret (the message names the variable, never the value).
+if (isProd) {
+  const problems = sampleSecretProblems({ jwtSecret: config.jwtSecret, dataEncryptionKey: config.dataEncryptionKey, databaseUrl: config.databaseUrl });
+  if (problems.length) throw new Error(`Refusing to start in production:\n- ${problems.join('\n- ')}`);
+}
 if (isProd && !config.dataEncryptionKey) throw new Error('DATA_ENCRYPTION_KEY is required in production');
