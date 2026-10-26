@@ -7,7 +7,10 @@
 #
 # Options (environment variables):
 #   PORT=8000            listening port
-#   SEED=1               load demo data (accounts with password Passw0rd!) — use 0 for an empty install
+#   SEED=0               the meetings system starts empty with one super admin ($ADMIN_EMAIL) whose random password
+#                        is written to $ADMIN_FILE (root only); SEED=1 loads demo data instead (accounts with
+#                        password Passw0rd!) — trial installs only
+#   ADMIN_EMAIL=root@kx.local
 #   NPM_REGISTRY=...     npm mirror if registry.npmjs.org is not reachable
 #   APP_DIR=/opt/kx21    install location
 #   OFFICE=1             also install office automation (اتوماسیون اداری) on $OFFICE_PORT — use 0 to skip
@@ -21,7 +24,9 @@
 set -euo pipefail
 
 PORT="${PORT:-8000}"
-SEED="${SEED:-1}"
+SEED="${SEED:-0}"
+ADMIN_EMAIL="${ADMIN_EMAIL:-root@kx.local}"
+ADMIN_FILE=/root/kx21-admin.txt
 APP_DIR="${APP_DIR:-/opt/kx21}"
 APP_USER=kx
 ENV_FILE=/etc/kx21.env
@@ -54,7 +59,9 @@ if [ -f "$ENV_FILE" ]; then
   # shellcheck disable=SC1090
   source "$ENV_FILE"
   DB_PASS="$(echo "$DATABASE_URL" | sed -E 's|.*://[^:]+:([^@]+)@.*|\1|')"
+  FIRST=0
 else
+  FIRST=1
   DB_PASS="$(openssl rand -hex 16)"
   JWT_SECRET="$(openssl rand -hex 32)"
 fi
@@ -114,8 +121,14 @@ chown -R "$APP_USER:$APP_USER" "$APP_DIR" /var/lib/kx21
 log "Running database migrations"
 sudo -u "$APP_USER" env $(grep -v '^#' "$ENV_FILE" | xargs) node "$APP_DIR/apps/api/dist/db/migrate.js"
 if [ "$SEED" = "1" ]; then
-  log "Loading demo data"
-  sudo -u "$APP_USER" env $(grep -v '^#' "$ENV_FILE" | xargs) node "$APP_DIR/apps/api/dist/db/seed.js"
+  log "Loading demo data (trial install)"
+  sudo -u "$APP_USER" env $(grep -v '^#' "$ENV_FILE" | xargs) ALLOW_DEMO_SEED=1 node "$APP_DIR/apps/api/dist/db/seed.js"
+elif [ "$FIRST" = "1" ]; then
+  log "First super admin"
+  # Random password, kept only in a root-only file (never printed or put in an environment variable).
+  (umask 077; openssl rand -base64 24 | tr -d '/+=' | cut -c1-24 > "$ADMIN_FILE")
+  sudo -u "$APP_USER" env $(grep -v '^#' "$ENV_FILE" | xargs) ADMIN_EMAIL="$ADMIN_EMAIL" \
+    node "$APP_DIR/apps/api/dist/db/create-admin.js" < "$ADMIN_FILE"
 fi
 
 if [ "$OFFICE" = "1" ]; then
@@ -219,7 +232,9 @@ if [ "$OFFICE" = "1" ]; then
     MEETINGS_ADMIN_EMAIL="${MEETINGS_ADMIN_EMAIL:-admin@kx.local}"
     MEETINGS_ADMIN_PASSWORD="${MEETINGS_ADMIN_PASSWORD:-Passw0rd!}"
   fi
-  if [ "$OFFICE_FIRST" = "1" ] && [ -n "${MEETINGS_ADMIN_EMAIL:-}" ] && [ -n "${MEETINGS_ADMIN_PASSWORD:-}" ]; then
+  if [ "$OFFICE_FIRST" = "1" ] && { [ -z "${MEETINGS_ADMIN_EMAIL:-}" ] || [ -z "${MEETINGS_ADMIN_PASSWORD:-}" ]; }; then
+    echo "Connect office automation to the meetings system later, from its «یکپارچه‌سازی» page (after the chamber exists)."
+  elif [ "$OFFICE_FIRST" = "1" ]; then
     log "Connecting office automation to the meetings system"
     sudo -u "$APP_USER" env $(grep -v '^#' "$OFFICE_ENV_FILE" | xargs) MEETINGS_URL="http://127.0.0.1:$PORT" \
       MEETINGS_ADMIN_EMAIL="$MEETINGS_ADMIN_EMAIL" MEETINGS_ADMIN_PASSWORD="$MEETINGS_ADMIN_PASSWORD" \
@@ -230,7 +245,11 @@ fi
 
 echo
 echo "Installed. Open:  http://$SERVER_IP:$PORT"
-[ "$SEED" = "1" ] && echo "Demo login: admin@kx.local / Passw0rd!   (also chair@, secretary@, member1@kx.local)"
+if [ "$SEED" = "1" ]; then
+  echo "Demo login: admin@kx.local / Passw0rd!   (also chair@, secretary@, member1@kx.local — trial only)"
+elif [ "$FIRST" = "1" ]; then
+  echo "Super admin: $ADMIN_EMAIL — password in $ADMIN_FILE (root only). Sign in, change it, delete the file, then create the chamber and its administrators."
+fi
 echo "Logs:     journalctl -u kx21 -f"
 echo "Config:   $ENV_FILE   (after editing: systemctl restart kx21)"
 if [ "$OFFICE" = "1" ]; then

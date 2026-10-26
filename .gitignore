@@ -16,3 +16,4 @@ apps/mobile/android/
 .test-storage/
 storage/
 office-admin-password.txt
+admin-password.txt

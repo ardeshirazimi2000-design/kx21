@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Trial install with Docker:  bash deploy/docker-install.sh
 # Creates .env with random secrets (once), builds and starts the stack on $WEB_PORT (default 8000)
-# and loads demo data of the meetings system on first install (SEED=0 to skip).
+# The meetings system starts empty with one super admin ($ADMIN_EMAIL, default root@kx.local) whose random password
+# is written to admin-password.txt (mode 600, never printed); SEED=1 loads its demo data instead — trial installs only.
 # Office automation starts empty with one administrator ($OFFICE_ADMIN_USERNAME, default admin) whose random
 # password is written to office-admin-password.txt (mode 600, never printed); OFFICE_SEED=1 loads its demo
 # accounts (password Passw0rd!) instead — trial installs only.
@@ -55,8 +56,13 @@ for _ in $(seq 1 60); do
 done
 curl -fs "http://127.0.0.1:${WEB_PORT}/health" >/dev/null || { docker compose logs --tail 50 api; exit 1; }
 
-if [ "${FIRST_INSTALL:-0}" = "1" ] && [ "${SEED:-1}" = "1" ]; then
-  docker compose exec -T api node dist/db/seed.js
+ADMIN_FILE=admin-password.txt
+if [ "${FIRST_INSTALL:-0}" = "1" ] && [ "${SEED:-0}" = "1" ]; then
+  docker compose exec -T -e ALLOW_DEMO_SEED=1 api node dist/db/seed.js
+elif [ "${FIRST_INSTALL:-0}" = "1" ]; then
+  # Random password, kept only in a file readable by this user (never printed or put in the container environment).
+  (umask 077; openssl rand -base64 24 | tr -d '/+=' | cut -c1-24 > "$ADMIN_FILE")
+  docker compose exec -T -e ADMIN_EMAIL="${ADMIN_EMAIL:-root@kx.local}" api node dist/db/create-admin.js < "$ADMIN_FILE"
 fi
 
 OFFICE_ADMIN_FILE=office-admin-password.txt
@@ -75,7 +81,7 @@ if [ "${OFFICE_FIRST_INSTALL:-0}" = "1" ]; then
   fi
   # Connect office automation to the meetings system (API key + signed webhooks); needs a chamber admin of the
   # meetings system: the demo one when its demo data was loaded, otherwise MEETINGS_ADMIN_EMAIL / MEETINGS_ADMIN_PASSWORD.
-  if [ "${SEED:-1}" = "1" ]; then
+  if [ "${SEED:-0}" = "1" ]; then
     MEETINGS_ADMIN_EMAIL="${MEETINGS_ADMIN_EMAIL:-admin@kx.local}"
     MEETINGS_ADMIN_PASSWORD="${MEETINGS_ADMIN_PASSWORD:-Passw0rd!}"
   fi
@@ -85,14 +91,18 @@ if [ "${OFFICE_FIRST_INSTALL:-0}" = "1" ]; then
       -e OFFICE_WEBHOOK_URL=http://office-api:4100/api/integrations/meetings/webhook office-api node dist/db/connect-meetings.js \
       || echo "Could not connect to the meetings system automatically; connect it from the office automation «یکپارچه‌سازی» page."
   else
-    echo "Connect office automation to the meetings system from its «یکپارچه‌سازی» page."
+    echo "Connect office automation to the meetings system later, from its «یکپارچه‌سازی» page (after the chamber exists)."
   fi
 fi
 
 IP="$(hostname -I 2>/dev/null | awk '{print $1}')"
 echo
 echo "Ready:  http://${IP:-localhost}:${WEB_PORT}"
-echo "Demo login: admin@kx.local / Passw0rd!   (also chair@, secretary@, member1@kx.local)"
+if [ "${SEED:-0}" = "1" ]; then
+  echo "Demo login: admin@kx.local / Passw0rd!   (also chair@, secretary@, member1@kx.local — trial only)"
+elif [ "${FIRST_INSTALL:-0}" = "1" ]; then
+  echo "Super admin: ${ADMIN_EMAIL:-root@kx.local} — password in $(pwd)/$ADMIN_FILE. Sign in, change it, delete the file, then create the chamber and its administrators."
+fi
 echo "Office automation: http://${IP:-localhost}:${OFFICE_WEB_PORT:-8100}"
 if [ "${OFFICE_SEED:-0}" = "1" ]; then
   echo "  demo accounts: admin, clerk, cmshead, expert … / Passw0rd!  (trial only: change or remove before real use)"

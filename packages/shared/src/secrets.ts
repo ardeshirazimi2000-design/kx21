@@ -41,3 +41,14 @@ export function sampleSecretProblems(s: SecretsToCheck): string[] {
   }
   return problems;
 }
+
+/** Password of the demo accounts created by the seed scripts (public: it is in the README). */
+export const DEMO_PASSWORD = 'Passw0rd!';
+
+/** Why a first administrator password is unacceptable, or null when it is fine. */
+export function weakAdminPassword(password: string): string | null {
+  if (password.length < 12) return 'the first administrator password must be at least 12 characters';
+  if (password.toLowerCase().includes(DEMO_PASSWORD.toLowerCase())) return 'the first administrator password must not contain the demo password';
+  if (new Set(password).size < 6) return 'the first administrator password is too repetitive';
+  return null;
+}

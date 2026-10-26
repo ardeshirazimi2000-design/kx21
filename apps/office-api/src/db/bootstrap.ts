@@ -1,4 +1,5 @@
 import bcrypt from 'bcryptjs';
+import { DEMO_PASSWORD, weakAdminPassword } from '@kx/shared';
 import { logger } from '../lib/logger.js';
 import { PERMISSIONS, SYSTEM_ROLES } from '../services/permissions.js';
 import type { WorkflowDefinition } from '../services/workflow.js';
@@ -84,18 +85,9 @@ export async function ensureBaseData() {
   });
 }
 
-/** The password every demo account of `seed` has; never acceptable for a real account. */
-export const DEMO_PASSWORD = 'Passw0rd!';
+export { DEMO_PASSWORD, weakAdminPassword };
 /** Usernames of the demo accounts created by `seed`. */
 export const DEMO_USERNAMES = ['admin', 'president', 'deputy', 'sechead', 'clerk', 'cmshead', 'cmsexpert', 'reshead', 'expert', 'it'];
-
-/** Why a first-administrator password is not acceptable, or null. */
-export function weakAdminPassword(password: string): string | null {
-  if (password.length < 12) return 'the first administrator password must be at least 12 characters';
-  if (password.toLowerCase().includes(DEMO_PASSWORD.toLowerCase())) return 'the first administrator password must not contain the demo password';
-  if (new Set(password).size < 6) return 'the first administrator password is too repetitive';
-  return null;
-}
 
 /**
  * The first administrator of an empty installation (no users other than `system`); does nothing once anybody exists.
