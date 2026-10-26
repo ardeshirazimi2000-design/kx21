@@ -114,6 +114,10 @@ if [ "$MODE" = "systemd" ]; then
   fi
 
   psql_q() { $PG_RUN psql -X -v ON_ERROR_STOP=1 -tA -d "$1" -c "$2"; }
+  # A dump from a newer pg_dump carries settings an older server rejects: client and server must be the same major.
+  CLIENT_MAJOR="$($PG_RUN pg_restore --version | sed -E 's/[^0-9]*([0-9]+).*/\1/')"
+  SERVER_MAJOR="$(psql_q postgres "SHOW server_version_num" | cut -c1-2)"
+  [ "$CLIENT_MAJOR" = "$SERVER_MAJOR" ] || die "pg_restore is version $CLIENT_MAJOR but the server is $SERVER_MAJOR: use the PostgreSQL $SERVER_MAJOR client tools"
   db_tables() { psql_q postgres "SELECT 1 FROM pg_database WHERE datname = '$1'" | grep -q 1 || { echo 0; return; }; psql_q "$1" "SELECT count(*) FROM pg_tables WHERE schemaname = 'public'"; }
   dir_used() { [ -d "$1" ] && [ -n "$(ls -A "$1" 2>/dev/null)" ]; }
 

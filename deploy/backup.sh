@@ -59,6 +59,10 @@ if [ "$MODE" = "systemd" ]; then
   if [ -z "${PG_RUN+x}" ]; then
     if [ "$(id -u)" -eq 0 ] && id postgres >/dev/null 2>&1; then PG_RUN="sudo -u postgres"; else PG_RUN=""; fi
   fi
+  # A newer pg_dump writes settings the server itself would reject on restore: same major version only.
+  CLIENT_MAJOR="$($PG_RUN pg_dump --version | sed -E 's/[^0-9]*([0-9]+).*/\1/')"
+  SERVER_MAJOR="$($PG_RUN psql -X -tA -d postgres -c "SHOW server_version_num" | cut -c1-2)"
+  [ "$CLIENT_MAJOR" = "$SERVER_MAJOR" ] || die "pg_dump is version $CLIENT_MAJOR but the server is $SERVER_MAJOR: use the PostgreSQL $SERVER_MAJOR client tools"
   MEETINGS_DB="${BACKUP_MEETINGS_DB:-$(db_name "$(env_value "$ENV_FILE" DATABASE_URL)")}"
   UPLOAD_DIR="${BACKUP_UPLOAD_DIR:-$(env_value "$ENV_FILE" UPLOAD_DIR)}"
   # Databases first, then files: every file a database row points to is already on disk when it is copied.
