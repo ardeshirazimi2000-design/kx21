@@ -154,7 +154,7 @@ export function register(router, { db, keys, platform, config, limiter, domain }
         const role = intent ?? 'patient';
         const terms = TERMS[role === 'doctor' ? 'doctor' : 'patient'];
         if (ctx.body.terms_version !== terms.version) throw badRequest('برای ثبت‌نام، پذیرش همه موارد صفحه شرایط لازم است', 'terms_required');
-        limiter.hit(`shahkar:${ctx.tenantId}:${phone}`, 5, 60 * 60 * 1000);
+        limiter.hitShared(`shahkar:${ctx.tenantId}:${phone}`, 5, 60 * 60 * 1000);
         const nidHash = lookupHash(keys, `${ctx.tenantId}:${nid}`);
         const taken = db.get('SELECT 1 FROM users WHERE tenant_id = ? AND national_id_hash = ? AND role = ? AND deleted_at IS NULL', ctx.tenantId, nidHash, role);
         if (taken) throw new ApiError(409, 'national_id_taken', 'برای این کد ملی قبلاً حساب ایجاد شده است؛ با شماره ثبت‌شده وارد شوید');
@@ -165,7 +165,7 @@ export function register(router, { db, keys, platform, config, limiter, domain }
         }
         payload = { role, nid, source: v.source, terms: terms.version };
       }
-      limiter.hit(`otp:${ctx.tenantId}:${phone}`, 3, 10 * 60 * 1000);
+      limiter.hitShared(`otp:${ctx.tenantId}:${phone}`, 3, 10 * 60 * 1000);
       const code = issueOtp(ctx, phone, 'login', payload && { ...payload, nid: seal(keys, payload.nid).toString('base64') });
       try {
         await deliverCode(ctx, phone, code, 'login');
@@ -241,7 +241,7 @@ export function register(router, { db, keys, platform, config, limiter, domain }
     const claims = verifyJwt(keys, ctx.body.mfa_token);
     if (!claims || claims.typ !== 'mfa') throw new ApiError(401, 'invalid_mfa_token', 'نشست تأیید دومرحله‌ای منقضی شده است');
     ctx.tenantId = claims.tid;
-    limiter.hit(`mfa:${claims.sub}`, 10, 5 * 60 * 1000);
+    limiter.hitShared(`mfa:${claims.sub}`, 10, 5 * 60 * 1000);
     consumeOtp(ctx, `mfa:${claims.sub}`, 'mfa', ctx.body.code);
     const user = db.get('SELECT * FROM users WHERE id = ? AND deleted_at IS NULL', claims.sub);
     if (!user) throw new ApiError(401, 'unauthenticated', 'کاربر یافت نشد');
@@ -310,7 +310,7 @@ export function register(router, { db, keys, platform, config, limiter, domain }
       throw badRequest('تاریخ تولد معتبر نیست');
     }
     if (!u.national_id_enc) throw badRequest('کد ملی تأییدشده‌ای برای این حساب ثبت نشده است');
-    limiter.hit(`person:${ctx.user.sub}`, 5, 24 * 3600 * 1000);
+    limiter.hitShared(`person:${ctx.user.sub}`, 5, 24 * 3600 * 1000);
     const nid = unseal(keys, u.national_id_enc);
     const p = await domain.identity.inquirePerson({ nationalId: nid, dobIso });
     if (!p.found) {

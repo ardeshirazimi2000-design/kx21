@@ -139,7 +139,7 @@ export function register(router, { db, platform, domain, limiter, config }) {
   // { body } — a question, or { topic } — a topic button.
   router.post('/v1/support/messages', async (ctx) => {
     requireUser(ctx);
-    limiter.hit(`support:${ctx.user.sub}`, 40, 10 * 60 * 1000);
+    limiter.hitShared(`support:${ctx.user.sub}`, 40, 10 * 60 * 1000);
     const topic = ctx.body.topic ? byId.get(String(ctx.body.topic)) : null;
     if (ctx.body.topic && (!topic || !topicsFor(ctx.user.role).some((x) => x.id === topic.id))) throw badRequest('موضوع نامعتبر است');
     const text = topic ? topic.title : String(ctx.body.body ?? '').trim();

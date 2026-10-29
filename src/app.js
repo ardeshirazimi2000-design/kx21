@@ -3,7 +3,7 @@
 // tables and talks to the others through the domain objects / events defined here, so it can be
 // split into its own deployable later (design doc §1, "5 services in MVP").
 import http from 'node:http';
-import { tmpdir } from 'node:os';
+import { tmpdir, availableParallelism } from 'node:os';
 import { readFile, stat } from 'node:fs/promises';
 import { gzipSync } from 'node:zlib';
 import { dirname, extname, join, normalize } from 'node:path';
@@ -90,6 +90,8 @@ export function loadConfig(env = process.env) {
     visionLlmBaseUrl: env.VISION_LLM_BASE_URL || '',
     visionLlmModel: env.VISION_LLM_MODEL || 'qwen2.5-vl-7b-instruct',
     disableSweeper: false,
+    // Server processes (one per CPU core, at most 4, in production); WORKERS=1 runs a single process.
+    workers: Math.max(1, Number(env.WORKERS) || (env.NODE_ENV === 'production' ? Math.min(availableParallelism(), 4) : 1)),
     // Visit room opens only around the appointment time (production default; ENFORCE_JOIN_WINDOW=false turns it off).
     enforceJoinWindow: env.ENFORCE_JOIN_WINDOW ? env.ENFORCE_JOIN_WINDOW === 'true' : !devMode,
     streamDelayMs: Number(env.STREAM_DELAY_MS ?? 12),
@@ -113,7 +115,8 @@ export function createApp(overrides = {}) {
   const keys = createKeyring(config);
   const sms = createSms(config);
   const platform = createPlatform({ db, config, sms });
-  const limiter = new RateLimiter();
+  const limiter = new RateLimiter(db);
+  if (!config.disableSweeper) setInterval(() => { try { limiter.sweepShared(); } catch (e) { console.error('[limits]', e.message); } }, 10 * 60_000).unref();
   // Loopback is always a trusted proxy; TRUSTED_PROXIES adds address prefixes (e.g. the Docker bridge "172.").
   const proxyPrefixes = ['127.', '::ffff:127.', ...(config.trustedProxies ?? []).flatMap((p) => [p, `::ffff:${p}`])];
   const isTrustedProxy = (peer) => peer === '::1' || proxyPrefixes.some((p) => peer.startsWith(p));
@@ -161,9 +164,12 @@ export function createApp(overrides = {}) {
     body: { dev_mode: config.devMode, sms: sms.enabled, llm: config.llmBaseUrl ? 'self-hosted' : 'template', livekit: !!config.livekitUrl, cxr: !!config.cxrUrl },
   }));
 
-  if (config.seed) seed({ db, config, domain });
-  if (!config.devMode) bootstrapProduction({ db, config });
-  domain.magazine.seedDrafts(config.defaultTenant);
+  // In multi-core mode the primary process does this once, before the workers start.
+  if (config.bootstrap !== false) {
+    if (config.seed) seed({ db, config, domain });
+    if (!config.devMode) bootstrapProduction({ db, config });
+    domain.magazine.seedDrafts(config.defaultTenant);
+  }
 
   // Static files: an ETag for cheap revalidation (304), long caching for fonts and images, and
   // gzip for text files (kept in memory per file version).
@@ -202,8 +208,9 @@ export function createApp(overrides = {}) {
   const SECURITY_HEADERS = {
     'X-Content-Type-Options': 'nosniff',
     'X-Frame-Options': 'DENY',
-    'Referrer-Policy': 'no-referrer',
-    'Content-Security-Policy': "default-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; connect-src 'self'; img-src 'self' data: https://trustseal.enamad.ir",
+    // Cross-origin requests carry only the site origin (the Enamad seal checks it); paths never leave.
+    'Referrer-Policy': 'strict-origin-when-cross-origin',
+    'Content-Security-Policy': "default-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; connect-src 'self'; img-src 'self' data: https://trustseal.enamad.ir https://*.enamad.ir",
   };
 
   const server = http.createServer(async (req, res) => {

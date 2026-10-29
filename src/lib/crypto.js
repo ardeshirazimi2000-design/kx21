@@ -129,12 +129,18 @@ export function sealBuffer(keys, buf) {
 
 export function unsealBuffer(keys, blob) {
   const n = blob.readUInt32BE(0);
-  const env = JSON.parse(blob.subarray(4, 4 + n).toString());
+  const d = fileDecipher(keys, JSON.parse(blob.subarray(4, 4 + n).toString()));
+  return Buffer.concat([d.update(blob.subarray(4 + n)), d.final()]);
+}
+
+// Decipher for a sealed file's header; feed it the ciphertext (whole or as a stream). The auth tag
+// is checked at the end, so a streamed response is cut off if the file was altered.
+export function fileDecipher(keys, env) {
   const wrapped = Buffer.from(env.w, 'base64url');
   const w = crypto.createDecipheriv('aes-256-gcm', keys.kek, wrapped.subarray(0, 12));
   w.setAuthTag(wrapped.subarray(wrapped.length - 16));
   const dek = Buffer.concat([w.update(wrapped.subarray(12, wrapped.length - 16)), w.final()]);
   const d = crypto.createDecipheriv('aes-256-gcm', dek, Buffer.from(env.i, 'base64url'));
   d.setAuthTag(Buffer.from(env.t, 'base64url'));
-  return Buffer.concat([d.update(blob.subarray(4 + n)), d.final()]);
+  return d;
 }

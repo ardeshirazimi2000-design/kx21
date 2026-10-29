@@ -566,12 +566,31 @@ CREATE TABLE IF NOT EXISTS mag_subscribers (
   unsubscribed_at  TEXT,
   UNIQUE (tenant_id, contact)
 );
+
+-- State shared by all server processes (multi-core mode): video-call signaling between the two
+-- sides of a visit (short-lived, cleaned up after 30 idle minutes) and request-rate counters.
+CREATE TABLE IF NOT EXISTS call_signals (
+  seq             INTEGER PRIMARY KEY AUTOINCREMENT,
+  consultation_id TEXT NOT NULL,
+  from_role       TEXT NOT NULL,
+  type            TEXT NOT NULL,
+  data            TEXT,
+  at              INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_call_signals ON call_signals (consultation_id, seq);
+CREATE TABLE IF NOT EXISTS rate_limits (
+  key    TEXT PRIMARY KEY,
+  count  INTEGER NOT NULL,
+  reset  INTEGER NOT NULL
+);
 `;
 
 export function openDb(path) {
   if (path !== ':memory:') mkdirSync(dirname(path), { recursive: true });
   const db = new DatabaseSync(path);
   if (path !== ':memory:') db.exec('PRAGMA journal_mode = WAL;');
+  // Several server processes share the file: wait for another writer instead of failing at once.
+  db.exec('PRAGMA busy_timeout = 5000;');
   db.exec(SCHEMA);
   migrate(db);
   return wrap(db);

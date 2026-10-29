@@ -11,9 +11,10 @@ export const COMPANY = {
   email: 'info@darman-plus.ir',
   address: 'سنندج، پارک علم و فناوری، واحد ۲۰۲',
 };
-// Enamad (e-commerce trust seal) badge; the link and image must be sent with the site's origin as referrer.
-export const ENAMAD = { id: '8314749', code: 'wS3OOxHCDNSFi7zxx0pjQXNjqLlWlybD' };
-export const enamadBadge = () => `<a class="enamad" referrerpolicy="origin" target="_blank" rel="noopener" href="https://trustseal.enamad.ir/?id=${ENAMAD.id}&amp;Code=${ENAMAD.code}"><img referrerpolicy="origin" src="https://trustseal.enamad.ir/logo.aspx?id=${ENAMAD.id}&amp;Code=${ENAMAD.code}" alt="نماد اعتماد الکترونیکی" width="96" height="104" style="cursor:pointer" code="${ENAMAD.code}"></a>`;
+// Enamad (e-commerce trust seal) badge, exactly as issued by enamad.ir: Enamad shows the logo only for
+// the registered site's referrer and requires the markup unchanged (no rel="noopener noreferrer").
+export const ENAMAD_TAG = "<a referrerpolicy='origin' target='_blank' href='https://trustseal.enamad.ir/?id=8314749&Code=wS3OOxHCDNSFi7zxx0pjQXNjqLlWlybD'><img referrerpolicy='origin' src='https://trustseal.enamad.ir/logo.aspx?id=8314749&Code=wS3OOxHCDNSFi7zxx0pjQXNjqLlWlybD' alt='' style='cursor:pointer' code='wS3OOxHCDNSFi7zxx0pjQXNjqLlWlybD'></a>";
+export const enamadBadge = () => `<div class="enamad">${ENAMAD_TAG}</div>`;
 
 export const LEGAL_UPDATED = '۱۴۰۵/۰۷/۲۳';
 

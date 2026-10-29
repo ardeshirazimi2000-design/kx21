@@ -5,6 +5,7 @@ import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { startApp } from './helpers.js';
 import { DEMO_ACCOUNTS } from '../src/seed.js';
+import { ENAMAD_TAG } from '../src/lib/legal.js';
 
 let t, doc;
 before(async () => {
@@ -108,7 +109,9 @@ test('services page shows the tariffs set by the admin, in toman; about page and
   assert.match(s.html, /رایگان/); // triage tariff 0
   assert.match(s.html, /"@type":"OfferCatalog"/);
   assert.match(s.html, /trustseal\.enamad\.ir\/logo\.aspx\?id=8314749/);
-  assert.match(s.html, /referrerpolicy="origin"/);
+  assert.ok(s.html.includes(ENAMAD_TAG)); // exactly as issued by Enamad
+  assert.doesNotMatch(s.html.slice(s.html.indexOf('trustseal') - 200, s.html.indexOf('trustseal') + 400), /noopener|noreferrer/);
+  assert.equal(s.headers.get('referrer-policy'), 'strict-origin-when-cross-origin');
   assert.match(s.headers.get('content-security-policy'), /img-src[^;]*https:\/\/trustseal\.enamad\.ir/);
   // A new tariff shows at once.
   await t.call('PUT', '/v1/admin/settings', { token: admin, body: { tariffs: { visit_video: 2_000_000 } } });
@@ -119,5 +122,7 @@ test('services page shows the tariffs set by the admin, in toman; about page and
   assert.match(a.html, /trustseal\.enamad\.ir/);
   const sm = (await page('/sitemap.xml')).html;
   assert.ok(sm.includes('https://darman-plus.ir/services') && sm.includes('https://darman-plus.ir/about'));
-  assert.match((await page('/')).html, /href="\/services"/);
+  const home = (await page('/')).html;
+  assert.match(home, /href="\/services"/);
+  assert.ok(home.includes(ENAMAD_TAG)); // on the first page, in the static HTML
 });

@@ -11,8 +11,7 @@ import { checkPrescription, unknownDrugs, DRUG_KB_VERSION } from './rx/drug-kb.j
 import { icdByCode } from './rx/icd10.js';
 
 
-export function register(router, { db, keys, platform, config, domain }) {
-  const joinNotified = new Map();
+export function register(router, { db, keys, platform, config, domain, limiter }) {
   const loadConsultation = (ctx, id) => {
     requireUuid(id, 'id');
     const c = db.get(
@@ -47,8 +46,7 @@ export function register(router, { db, keys, platform, config, domain }) {
     }
     // Tell the other side that this person is in the room (at most once every 10 minutes).
     const key = `${c.id}:${ctx.user.role}`;
-    if (!(joinNotified.get(key) > now - 10 * 60000)) {
-      joinNotified.set(key, now);
+    if (limiter.firstIn(`join:${key}`, 10 * 60000, now)) {
       const other = c.isDoctor
         ? db.get('SELECT u.id, u.phone FROM patients p JOIN users u ON u.id = p.user_id WHERE p.id = ?', c.patient_id)
         : db.get('SELECT u.id, u.phone FROM doctors d JOIN users u ON u.id = d.user_id WHERE d.id = ?', c.doctor_id);
@@ -97,16 +95,14 @@ export function register(router, { db, keys, platform, config, domain }) {
   }
 
   const SIGNAL_TYPES = ['ready', 'here', 'offer', 'answer', 'ice', 'bye'];
-  const signals = new Map(); // consultation id -> { seq, items: [{ seq, from, type, data, at }] }
-  const box = (id) => {
-    let b = signals.get(id);
-    if (!b) signals.set(id, (b = { seq: 0, items: [] }));
-    return b;
-  };
-  setInterval(() => { // drop idle rooms
-    const cutoff = Date.now() - 30 * 60000;
-    for (const [id, b] of signals) if (!b.items.length || b.items[b.items.length - 1].at < cutoff) signals.delete(id);
-  }, 10 * 60000).unref();
+  // Signals live in the database so both sides reach each other whichever server process serves them.
+  const MAX_SIGNALS = 300; // per visit
+  const lastSeq = (id) => db.get('SELECT MAX(seq) AS s FROM call_signals WHERE consultation_id = ?', id)?.s ?? 0;
+  if (!config.disableSweeper) {
+    setInterval(() => { // drop idle rooms
+      try { db.run(`DELETE FROM call_signals WHERE consultation_id IN (SELECT consultation_id FROM call_signals GROUP BY consultation_id HAVING MAX(at) < ?)`, Date.now() - 30 * 60000); } catch (e) { console.error('[signals]', e.message); }
+    }, 10 * 60000).unref();
+  }
 
   router.post('/v1/consultations/:id/signal', async (ctx) => {
     requireUser(ctx, 'patient', 'doctor');
@@ -115,24 +111,23 @@ export function register(router, { db, keys, platform, config, domain }) {
     const { type, data = null } = ctx.body;
     if (!SIGNAL_TYPES.includes(type)) throw badRequest('نوع سیگنال نامعتبر است');
     if (JSON.stringify(data ?? null).length > 64 * 1024) throw badRequest('داده سیگنال بیش از حد بزرگ است');
-    const b = box(c.id);
-    const item = { seq: ++b.seq, from: ctx.user.role, type, data, at: Date.now() };
-    b.items.push(item);
-    if (b.items.length > 300) b.items.splice(0, b.items.length - 300);
+    const seq = Number(db.get('INSERT INTO call_signals (consultation_id, from_role, type, data, at) VALUES (?,?,?,?,?) RETURNING seq',
+      c.id, ctx.user.role, type, JSON.stringify(data ?? null), Date.now()).seq);
+    db.run(`DELETE FROM call_signals WHERE consultation_id = ? AND seq < (SELECT seq FROM call_signals WHERE consultation_id = ? ORDER BY seq DESC LIMIT 1 OFFSET ?)`,
+      c.id, c.id, MAX_SIGNALS - 1);
     if (type === 'ready' || type === 'bye') platform.audit(ctx, `consultation.call_${type === 'ready' ? 'join' : 'leave'}`, `consultation:${c.id}`);
-    return { status: 201, body: { seq: item.seq } };
+    return { status: 201, body: { seq } };
   });
 
   // after=-1 → only the current position (start listening from now).
   router.get('/v1/consultations/:id/signal', async (ctx) => {
     requireUser(ctx, 'patient', 'doctor');
     const c = loadConsultation(ctx, ctx.params.id);
-    const b = box(c.id);
     const after = Number(ctx.query.after ?? -1);
-    if (after < 0) return { body: { seq: b.seq, items: [] } };
-    const items = b.items.filter((i) => i.seq > after && i.from !== ctx.user.role)
-      .map(({ seq, type, data }) => ({ seq, type, data }));
-    return { body: { seq: b.seq, items, ended: !!c.ended_at } };
+    if (!(after >= 0)) return { body: { seq: lastSeq(c.id), items: [] } };
+    const items = db.all('SELECT seq, type, data FROM call_signals WHERE consultation_id = ? AND seq > ? AND from_role <> ? ORDER BY seq',
+      c.id, after, ctx.user.role).map((r) => ({ seq: Number(r.seq), type: r.type, data: JSON.parse(r.data) }));
+    return { body: { seq: lastSeq(c.id), items, ended: !!c.ended_at } };
   });
 
   router.get('/v1/consultations/:id', async (ctx) => {

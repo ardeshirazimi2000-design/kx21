@@ -451,13 +451,11 @@ ${reviewed.length ? `<section aria-labelledby="rv-h"><h2 id="rv-h" class="mg-h2"
     }));
   }
 
-  function doctorPhoto(req, res, slug) {
+  async function doctorPhoto(req, res, slug) {
     const d = publicDoctors('AND d.public_slug = ?', slug)[0];
     const f = d?.photo_file_id && db.get('SELECT * FROM files WHERE id = ?', d.photo_file_id);
     if (!f) return notFoundPage(req, res);
-    const data = domain.files.read(f);
-    res.writeHead(200, { 'Content-Type': f.mime, 'Content-Length': data.length, 'Cache-Control': 'public, max-age=86400', 'X-Content-Type-Options': 'nosniff' });
-    res.end(req.method === 'HEAD' ? undefined : data);
+    await domain.files.send(f, res, { 'Content-Type': f.mime, 'Cache-Control': 'public, max-age=86400', 'X-Content-Type-Options': 'nosniff' });
     return true;
   }
 
@@ -549,7 +547,7 @@ ${docs.length ? `<div class="mg-docs">${docs.map(doctorCard).join('')}</div>` : 
 
   async function subscribe(req, res, ip) {
     const back = (q) => { res.writeHead(303, { Location: `/mag?${q}#news-h`, 'Cache-Control': 'no-store' }); res.end(); return true; };
-    try { limiter.hit(`mag-sub:${ip}`, 5, 3600e3); } catch { return back('subscribe=bad'); }
+    try { limiter.hitShared(`mag-sub:${ip}`, 5, 3600e3); } catch { return back('subscribe=bad'); }
     const form = await readForm(req);
     if (!form || form.get('website')) return back('subscribed=1'); // honeypot: pretend success
     const raw = String(form.get('contact') ?? '').trim().slice(0, 120);

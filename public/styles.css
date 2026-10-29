@@ -714,3 +714,6 @@ body.landing-mode { background: radial-gradient(circle at 15% 60%, #dceafd 0, tr
 .seo-intro a { color: var(--primary); }
 .js body:not(.landing-mode) .seo-intro { display: none; }
 .native .seo-intro { display: none; }
+.lp-seal { display: flex; justify-content: center; margin-top: 12px; }
+.lp-seal img { display: block; max-height: 96px; width: auto; }
+.js .seo-intro .enamad { display: none; } /* shown on the start screen instead */

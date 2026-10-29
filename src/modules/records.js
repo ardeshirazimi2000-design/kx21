@@ -103,10 +103,10 @@ export function register(router, { db, platform, config, domain, limiter }) {
     if (!(await domain.labOcr.isAvailable())) {
       throw new ApiError(503, 'ocr_unavailable', 'خواندن خودکار روی سرور فعال نیست؛ مقادیر را دستی وارد کنید');
     }
-    limiter.hit(`ocr:${ctx.user.sub}`, 20, 60 * 60 * 1000);
+    limiter.hitShared(`ocr:${ctx.user.sub}`, 20, 60 * 60 * 1000);
     let result;
     try {
-      result = await domain.labOcr.extract(list.map((f) => ({ mime: f.mime, data: files.read(f) })));
+      result = await domain.labOcr.extract(await Promise.all(list.map(async (f) => ({ mime: f.mime, data: await files.read(f) }))));
     } catch (e) {
       if (e.code === 'busy') throw new ApiError(429, 'ocr_busy', 'سرور در حال خواندن برگه‌های دیگر است؛ چند ثانیه بعد دوباره تلاش کنید');
       console.error('[lab-ocr] failed:', e.message);
@@ -159,7 +159,7 @@ export function register(router, { db, platform, config, domain, limiter }) {
     const images = fileIds.map((id) => db.get('SELECT * FROM files WHERE id = ?', id)).filter((f) => f && f.mime.startsWith('image/'));
     if (images.length) {
       if (config.visionLlmBaseUrl) {
-        const text = await describeImages(config, images.slice(0, 4).map((f) => ({ mime: f.mime, data: files.read(f) })), r);
+        const text = await describeImages(config, await Promise.all(images.slice(0, 4).map(async (f) => ({ mime: f.mime, data: await files.read(f) }))), r);
         if (text) { parts.push(`خوانش تصویر (پیش‌نویس مدل ${config.visionLlmModel}):\n${text}`); model = config.visionLlmModel; }
         else parts.push('مدل تصویری پاسخ نداد؛ تصاویر را مستقیم بررسی کنید.');
       } else {

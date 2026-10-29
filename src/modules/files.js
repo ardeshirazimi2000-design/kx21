@@ -2,10 +2,12 @@
 // medical documents. Content is envelope-encrypted at rest; downloads use short-lived signed
 // URLs (design doc §5/§8) so <img> tags work without exposing a bearer token.
 import crypto from 'node:crypto';
-import { mkdirSync, writeFileSync, readFileSync } from 'node:fs';
+import { mkdirSync, writeFileSync } from 'node:fs';
+import { open, readFile } from 'node:fs/promises';
+import { pipeline } from 'node:stream/promises';
 import { join } from 'node:path';
 import { ApiError, badRequest, notFound } from '../lib/http.js';
-import { sealBuffer, unsealBuffer } from '../lib/crypto.js';
+import { sealBuffer, unsealBuffer, fileDecipher } from '../lib/crypto.js';
 import { uuid, nowIso } from '../lib/db.js';
 import { requireUser } from './auth.js';
 
@@ -56,7 +58,30 @@ export function createFilesDomain({ db, keys, config }) {
   }
   const meta = (id) => db.get('SELECT id, owner_user_id, purpose, mime, size, created_at FROM files WHERE id = ?', id);
 
-  return { store, signedUrl, meta, sign, read: (row) => unsealBuffer(keys, readFileSync(join(dir, row.storage_key))) };
+  // Streams the decrypted file to an HTTP response in small chunks, so large downloads never hold
+  // up other requests. Headers are written by the caller-supplied function once the size is known.
+  async function send(row, res, headers) {
+    const fh = await open(join(dir, row.storage_key), 'r');
+    let stream;
+    try {
+      const { size } = await fh.stat();
+      const len = Buffer.alloc(4);
+      await fh.read(len, 0, 4, 0);
+      const n = len.readUInt32BE(0);
+      const head = Buffer.alloc(n);
+      await fh.read(head, 0, n, 4);
+      const decipher = fileDecipher(keys, JSON.parse(head.toString()));
+      stream = fh.createReadStream({ start: 4 + n, highWaterMark: 64 * 1024 });
+      res.writeHead(200, { ...headers, 'Content-Length': size - 4 - n });
+      await pipeline(stream, decipher, res);
+    } catch (e) {
+      if (stream) stream.destroy(); else await fh.close();
+      if (!res.headersSent) throw e;
+      res.destroy(); // altered file or client gone: cut the response off
+    }
+  }
+
+  return { store, signedUrl, meta, sign, send, read: async (row) => unsealBuffer(keys, await readFile(join(dir, row.storage_key))) };
 }
 
 export function register(router, { db, platform, domain }) {
@@ -86,13 +111,10 @@ export function register(router, { db, platform, domain }) {
     const good = files.sign(row.id, exp);
     const valid = exp > Date.now() / 1000 && sig.length === good.length && crypto.timingSafeEqual(Buffer.from(sig), Buffer.from(good));
     if (!valid) throw new ApiError(403, 'invalid_signature', 'لینک فایل منقضی یا نامعتبر است');
-    const data = files.read(row);
-    ctx.res.writeHead(200, {
-      'Content-Type': row.mime, 'Content-Length': data.length,
-      'Cache-Control': 'private, max-age=300', 'Content-Disposition': 'inline',
+    await files.send(row, ctx.res, {
+      'Content-Type': row.mime, 'Cache-Control': 'private, max-age=300', 'Content-Disposition': 'inline',
       'Content-Security-Policy': "default-src 'none'; img-src 'self'; style-src 'unsafe-inline'",
     });
-    ctx.res.end(data);
     return null;
   });
 }

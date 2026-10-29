@@ -107,9 +107,11 @@ export function openSse(res) {
   };
 }
 
-// Fixed-window limiter keyed per user / tenant / ip (gateway rate limiting).
+// Fixed-window limiter keyed per user / tenant / ip (gateway rate limiting). hit() counts in this
+// process only (cheap; for flood protection); hitShared() counts in the database, so limits that
+// matter for security or cost (OTP, MFA, AI, …) hold across all server processes.
 export class RateLimiter {
-  constructor() { this.buckets = new Map(); }
+  constructor(db = null) { this.buckets = new Map(); this.db = db; }
   hit(key, limit, windowMs, now = Date.now()) {
     let b = this.buckets.get(key);
     if (!b || now >= b.reset) {
@@ -126,6 +128,36 @@ export class RateLimiter {
   }
   sweep(now = Date.now()) {
     for (const [k, b] of this.buckets) if (now >= b.reset) this.buckets.delete(k);
+  }
+  hitShared(key, limit, windowMs, now = Date.now()) {
+    if (!this.db) return this.hit(key, limit, windowMs, now);
+    const b = this.#count(key, windowMs, now);
+    if (b.count > limit) {
+      throw new ApiError(429, 'rate_limited', 'تعداد درخواست‌ها بیش از حد مجاز است؛ کمی بعد دوباره تلاش کنید', {
+        retry_after_s: Math.ceil((b.reset - now) / 1000),
+      });
+    }
+  }
+  // True only for the first call per key in each window (e.g. send a notice at most once).
+  firstIn(key, windowMs, now = Date.now()) {
+    if (!this.db) {
+      const b = this.buckets.get(key);
+      if (b && now < b.reset) return false;
+      this.buckets.set(key, { count: 1, reset: now + windowMs });
+      return true;
+    }
+    return this.#count(key, windowMs, now).count === 1;
+  }
+  #count(key, windowMs, now) {
+    return this.db.get(
+      `INSERT INTO rate_limits (key, count, reset) VALUES (?, 1, ?)
+       ON CONFLICT (key) DO UPDATE SET
+         count = CASE WHEN rate_limits.reset <= ? THEN 1 ELSE rate_limits.count + 1 END,
+         reset = CASE WHEN rate_limits.reset <= ? THEN excluded.reset ELSE rate_limits.reset END
+       RETURNING count, reset`, key, now + windowMs, now, now);
+  }
+  sweepShared(now = Date.now()) {
+    this.db?.run('DELETE FROM rate_limits WHERE reset <= ?', now);
   }
 }
 

@@ -398,6 +398,13 @@ const legalLink = (label = 'قوانین و حریم خصوصی', id = null) => 
   onclick: (e) => { e.preventDefault(); e.stopPropagation(); (id ? openLegal(id) : openLegalIndex()).catch((err) => toast(err.message, true)); } }, label);
 const siteLink = () => h('a', { class: 'muted site-link', href: `https://${SITE}`, target: '_blank', rel: 'noopener' }, '🌐 ', h('bdi', {}, SITE));
 
+// Enamad trust seal on the start screen (web only: Enamad shows it only for the site's own origin).
+// A copy of the badge in index.html, whose markup must stay exactly as Enamad issued it.
+const enamadSeal = () => {
+  const src = !IS_NATIVE && document.querySelector('.seo-intro .enamad');
+  return src ? h('div', { class: 'lp-seal' }, src.cloneNode(true)) : null;
+};
+
 // Home-screen tile: a coloured icon with its label.
 const tile = (id, label, tone, onclick = () => route(id), sub = null) => h('button', { class: `svc tone-${tone}`, type: 'button', onclick },
   h('span', { class: 'svc-ic' }, icon(TAB_ICONS[id] ?? id, 30)), h('span', { class: 'svc-lbl' }, label), sub ? h('span', { class: 'svc-sub' }, sub) : null);
@@ -615,6 +622,7 @@ VIEWS.login = () => {
       config.dev_mode ? h('div', { class: 'banner info small' },
         h('b', {}, 'حساب‌های نمونه (ورود پزشکان): '), 'پزشک ', h('bdi', {}, '09120000001'), ' · اپراتور ', h('bdi', {}, '09120000009'), ' · مدیر ', h('bdi', {}, '09120000010')) : null,
       h('div', { class: 'lp-links' }, legalLink(), h('span', { class: 'muted', 'aria-hidden': 'true' }, '|'), siteLink()),
+      enamadSeal(),
       IS_NATIVE ? (window.TELEHEALTH_API_BASE ? null : h('button', { class: 'btn small', onclick: () => route('server') }, `سرور: ${API_BASE.replace(/^https?:\/\//, '')} — تغییر`)) : installButton());
     const feat = (ic, a, b) => h('li', {}, h('span', { class: 'lp-feat-ic' }, icon(ic, 26)), h('span', {}, a, h('br'), b));
     const hero = h('section', { class: 'lp-hero' },

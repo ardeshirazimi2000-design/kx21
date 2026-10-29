@@ -11,8 +11,8 @@ export function register(router, { db, platform, limiter, domain }) {
 
   router.post('/v1/ai/chat', async (ctx) => {
     requireUser(ctx, 'patient');
-    limiter.hit(`ai:${ctx.user.sub}`, 30, 60_000);
-    limiter.hit(`ai-tenant:${ctx.tenantId}`, 3000, 60_000);
+    limiter.hitShared(`ai:${ctx.user.sub}`, 30, 60_000);
+    limiter.hitShared(`ai-tenant:${ctx.tenantId}`, 3000, 60_000);
     requireFields(ctx.body, ['session_id', 'message']);
     const sessionId = requireUuid(ctx.body.session_id, 'session_id');
     const { type, content, form } = ctx.body.message ?? {};

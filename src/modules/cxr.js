@@ -63,8 +63,8 @@ export function register(router, { db, platform, config, domain, limiter }) {
     if (!parseJson(r.file_ids, []).includes(fileId)) throw notFound('فایل');
     const f = db.get('SELECT * FROM files WHERE id = ?', fileId);
     if (!f?.mime.startsWith('image/')) throw badRequest('فقط تصویر (JPG/PNG) قابل تحلیل است');
-    limiter.hit(`cxr:${ctx.user.sub}`, 30, 60 * 60 * 1000);
-    const out = await callService(files.read(f));
+    limiter.hitShared(`cxr:${ctx.user.sub}`, 30, 60 * 60 * 1000);
+    const out = await callService(await files.read(f));
     const overlays = {};
     for (const [key, b64] of Object.entries(out.overlays ?? {})) {
       if (!CXR_LABELS[key]) continue;
