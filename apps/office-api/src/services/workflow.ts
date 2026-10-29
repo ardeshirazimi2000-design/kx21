@@ -14,6 +14,7 @@ import { badRequest, conflict, forbidden, notFound } from '../lib/errors.js';
 import { archiveLetter } from './archive.js';
 import { LETTER_HASH_VERSION, letterContentHash, managerPositionOf, primaryUnitOf } from './letters.js';
 import { notify, positionHolders } from './notifications.js';
+import { requireCleared } from './access.js';
 import { signContent } from './signatures.js';
 
 const assigneeSchema = z.object({
@@ -157,6 +158,8 @@ async function activateFrom(db: Db, req: Request | null, inst: any, from: number
       continue;
     }
     const a = await resolveAssignee(db, s.assignee, letter, inst);
+    // A step is never handed to someone who could not open the letter (the workflow would stall unseen).
+    await requireCleared(db, letter.confidentiality, { userIds: a.userId ? [a.userId] : [], positionIds: a.positionId ? [a.positionId] : [] });
     const dueAt = s.slaHours ? new Date(Date.now() + s.slaHours * 3600_000) : null;
     if (s.type === 'notify') {
       await query(

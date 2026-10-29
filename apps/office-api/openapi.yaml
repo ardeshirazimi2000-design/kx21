@@ -257,6 +257,18 @@ components:
           properties:
             id: *id001
 paths:
+  /api/csp-report:
+    post:
+      tags:
+      - Auth
+      summary: گزارش نقض Content-Security-Policy از مرورگر
+      description: Browser CSP violation reports (application/csp-report or application/reports+json, at most 16 KB). Only the directive and blocked address are logged; nothing is stored.
+      security: []
+      responses:
+        '204':
+          description: Accepted
+        '413':
+          description: Too large
   /api/auth/login:
     post:
       tags:
@@ -287,7 +299,7 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
-      description: Returns tokens, or { mfaRequired, mfaToken } when TOTP is enabled.
+      description: Returns tokens, or { mfaRequired, mfaToken } when TOTP is enabled. With PUBLIC_HTTPS, every /api/auth/* request over plain HTTP gets 403 https_required.
       security: []
       requestBody:
         required: true

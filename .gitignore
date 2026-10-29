@@ -15,3 +15,12 @@ apps/mobile/android/
 .test-uploads-e2e/
 .test-storage/
 storage/
+office-admin-password.txt
+admin-password.txt
+# TLS certificates and private keys are provided on the server (OFFICE_TLS_DIR), never committed
+office-tls/
+*.pem
+*.key
+*.crt
+*.p12
+*.pfx

@@ -1,11 +1,11 @@
 import bcrypt from 'bcryptjs';
 import { Router } from 'express';
 import { z } from 'zod';
-import { currentUser, requirePerm } from '../auth/middleware.js';
+import { currentUser, requirePerm, type AuthUser } from '../auth/middleware.js';
 import { revokeAllSessions } from '../auth/tokens.js';
 import { one, query, tx } from '../db/pool.js';
 import { audit } from '../lib/audit.js';
-import { badRequest, conflict, notFound } from '../lib/errors.js';
+import { badRequest, conflict, forbidden, notFound } from '../lib/errors.js';
 import { body, paged, pageParams, param, uuid } from '../lib/validate.js';
 import { PERMISSIONS } from '../services/permissions.js';
 import { passwordSchema } from './auth.js';
@@ -178,13 +178,36 @@ async function setAssignments(c: any, userId: string, b: Partial<z.infer<typeof 
   }
 }
 
+type RoleGrant = { roleId: string; scopeUnitId?: string | null };
+
+/**
+ * No escalation through user management: a role can be given (or taken away) only by someone who holds each of
+ * its permissions over the same scope, and a clearance only up to one's own.
+ */
+async function requireGrantable(c: any, actor: AuthUser, grants: RoleGrant[]) {
+  for (const g of grants) {
+    const perms = (await query('SELECT permission_key FROM role_permissions WHERE role_id = $1', [g.roleId], c)).map((r) => r.permission_key);
+    const ok = perms.every((p) => (g.scopeUnitId ? actor.can(p, g.scopeUnitId) : actor.perms.get(p) === 'all'));
+    if (!ok) throw forbidden('نمی‌توانید نقشی با مجوزهای بیش از مجوزهای خودتان اعطا یا سلب کنید');
+  }
+}
+
+function requireClearanceAtMost(actor: AuthUser, clearance: number | undefined) {
+  if (clearance !== undefined && clearance > actor.clearance) throw forbidden('نمی‌توانید سطح دسترسی بالاتر از سطح خودتان تعیین کنید');
+}
+
+const sameGrant = (a: RoleGrant, b: RoleGrant) => a.roleId === b.roleId && (a.scopeUnitId ?? null) === (b.scopeUnitId ?? null);
+
 orgRouter.post('/users', async (req, res) => {
-  requirePerm(currentUser(req), 'users.manage');
+  const actor = currentUser(req);
+  requirePerm(actor, 'users.manage');
   const b = body(req, userSchema);
+  requireClearanceAtMost(actor, b.clearance);
   const hash = b.password ? await bcrypt.hash(b.password, 10) : null;
   const row = await tx(async (c) => {
     if (await one('SELECT 1 FROM users WHERE lower(username) = lower($1)', [b.username], c)) throw conflict('نام کاربری تکراری است');
     if (b.nationalId && (await one('SELECT 1 FROM users WHERE national_id = $1', [b.nationalId], c))) throw conflict('کد ملی تکراری است');
+    await requireGrantable(c, actor, b.roles ?? []);
     const r = await one(
       `INSERT INTO users (username, full_name, national_id, email, mobile, password_hash, clearance) VALUES ($1,$2,$3,$4,$5,$6,$7)
        RETURNING id, username, full_name, national_id, email, mobile, clearance, is_active`,
@@ -199,13 +222,28 @@ orgRouter.post('/users', async (req, res) => {
 });
 
 orgRouter.patch('/users/:id', async (req, res) => {
-  requirePerm(currentUser(req), 'users.manage');
+  const actor = currentUser(req);
+  requirePerm(actor, 'users.manage');
   const id = param(req, 'id');
   const b = body(req, userSchema.partial().extend({ resetMfa: z.boolean().optional() }));
+  requireClearanceAtMost(actor, b.clearance);
+  // One's own roles, clearance and positions are changed by somebody else (or a role manager).
+  if (id === actor.id && (b.roles || b.positions || b.clearance !== undefined) && !actor.can('roles.manage')) {
+    throw forbidden('نقش، سمت و سطح دسترسی خودتان را نمی‌توانید تغییر دهید');
+  }
   const hash = b.password ? await bcrypt.hash(b.password, 10) : null;
   const row = await tx(async (c) => {
     const before = await one('SELECT id, username, full_name, national_id, email, mobile, clearance, is_active FROM users WHERE id = $1 FOR UPDATE', [id], c);
     if (!before || before.username === 'system') throw notFound();
+    // Nobody manages (resets the password of, deactivates, demotes) a user who outranks them.
+    const held: RoleGrant[] = (await query('SELECT role_id, scope_unit_id FROM user_roles WHERE user_id = $1', [id], c)).map((r) => ({
+      roleId: r.role_id, scopeUnitId: r.scope_unit_id,
+    }));
+    if (before.clearance > actor.clearance) throw forbidden('این کاربر سطح دسترسی بالاتری از شما دارد');
+    await requireGrantable(c, actor, held).catch(() => {
+      throw forbidden('این کاربر مجوزهایی بیش از مجوزهای شما دارد');
+    });
+    if (b.roles) await requireGrantable(c, actor, b.roles.filter((g) => !held.some((h) => sameGrant(g, h))));
     const r = await one(
       `UPDATE users SET full_name = COALESCE($2, full_name), national_id = COALESCE($3, national_id), email = COALESCE($4, email),
          mobile = COALESCE($5, mobile), password_hash = COALESCE($6, password_hash), clearance = COALESCE($7, clearance),

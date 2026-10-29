@@ -7,21 +7,41 @@
 #
 # Options (environment variables):
 #   PORT=8000            listening port
-#   SEED=1               load demo data (accounts with password Passw0rd!) — use 0 for an empty install
+#   SEED=0               the meetings system starts empty with one super admin ($ADMIN_EMAIL) whose random password
+#                        is written to $ADMIN_FILE (root only); SEED=1 loads demo data instead (accounts with
+#                        password Passw0rd!) — trial installs only
+#   ADMIN_EMAIL=root@kx.local
 #   NPM_REGISTRY=...     npm mirror if registry.npmjs.org is not reachable
 #   APP_DIR=/opt/kx21    install location
 #   OFFICE=1             also install office automation (اتوماسیون اداری) on $OFFICE_PORT — use 0 to skip
 #   OFFICE_PORT=8100     office automation port
+#   OFFICE_SEED=0        office automation starts empty with one administrator whose random password is written
+#                        to $OFFICE_ADMIN_FILE (root only); OFFICE_SEED=1 loads demo accounts (password Passw0rd!)
+#                        instead — trial installs only
+#   OFFICE_ADMIN_USERNAME=admin
+#   MEETINGS_ADMIN_EMAIL / MEETINGS_ADMIN_PASSWORD   a meetings admin, to connect the two systems on first install
+#                        (defaults to the demo admin when SEED=1)
+#   Office automation behind HTTPS (docs/office/05-https.md); kept from the previous run when not given:
+#   OFFICE_PUBLIC_URL=https://office.example.ir   address users open (default http://<server IP>:$OFFICE_PORT)
+#   OFFICE_PUBLIC_HTTPS=true   sign-in only over HTTPS, HSTS on (only once HTTPS works end to end)
+#   OFFICE_HOST=127.0.0.1      listen only locally: a reverse proxy on this server is the only way in
+#   OFFICE_TRUST_PROXY=loopback   that proxy (on this server) may report the client address and scheme;
+#                        empty (default) = no proxy, X-Forwarded-For from clients is ignored
 set -euo pipefail
 
 PORT="${PORT:-8000}"
-SEED="${SEED:-1}"
+SEED="${SEED:-0}"
+ADMIN_EMAIL="${ADMIN_EMAIL:-root@kx.local}"
+ADMIN_FILE=/root/kx21-admin.txt
 APP_DIR="${APP_DIR:-/opt/kx21}"
 APP_USER=kx
 ENV_FILE=/etc/kx21.env
 OFFICE="${OFFICE:-1}"
 OFFICE_PORT="${OFFICE_PORT:-8100}"
 OFFICE_ENV_FILE=/etc/kx21-office.env
+OFFICE_SEED="${OFFICE_SEED:-0}"
+OFFICE_ADMIN_USERNAME="${OFFICE_ADMIN_USERNAME:-admin}"
+OFFICE_ADMIN_FILE=/root/kx21-office-admin.txt
 SRC_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 
 [ "$(id -u)" -eq 0 ] || { echo "Run as root (sudo)."; exit 1; }
@@ -45,7 +65,9 @@ if [ -f "$ENV_FILE" ]; then
   # shellcheck disable=SC1090
   source "$ENV_FILE"
   DB_PASS="$(echo "$DATABASE_URL" | sed -E 's|.*://[^:]+:([^@]+)@.*|\1|')"
+  FIRST=0
 else
+  FIRST=1
   DB_PASS="$(openssl rand -hex 16)"
   JWT_SECRET="$(openssl rand -hex 32)"
 fi
@@ -59,6 +81,12 @@ if [ "$OFFICE" = "1" ]; then
   if [ -f "$OFFICE_ENV_FILE" ]; then
     OFFICE_JWT_SECRET="$(grep '^JWT_SECRET=' "$OFFICE_ENV_FILE" | cut -d= -f2-)"
     OFFICE_DATA_KEY="$(grep '^DATA_ENCRYPTION_KEY=' "$OFFICE_ENV_FILE" | cut -d= -f2-)"
+    # HTTPS settings of the previous run stay unless given again.
+    prev() { grep "^$1=" "$OFFICE_ENV_FILE" | cut -d= -f2- || true; }
+    OFFICE_PUBLIC_URL="${OFFICE_PUBLIC_URL:-$(prev PUBLIC_URL)}"
+    OFFICE_PUBLIC_HTTPS="${OFFICE_PUBLIC_HTTPS:-$(prev PUBLIC_HTTPS)}"
+    OFFICE_HOST="${OFFICE_HOST:-$(prev HOST)}"
+    OFFICE_TRUST_PROXY="${OFFICE_TRUST_PROXY:-$(prev TRUST_PROXY)}"
     OFFICE_FIRST=0
   else
     OFFICE_JWT_SECRET="$(openssl rand -hex 32)"
@@ -105,11 +133,18 @@ chown -R "$APP_USER:$APP_USER" "$APP_DIR" /var/lib/kx21
 log "Running database migrations"
 sudo -u "$APP_USER" env $(grep -v '^#' "$ENV_FILE" | xargs) node "$APP_DIR/apps/api/dist/db/migrate.js"
 if [ "$SEED" = "1" ]; then
-  log "Loading demo data"
-  sudo -u "$APP_USER" env $(grep -v '^#' "$ENV_FILE" | xargs) node "$APP_DIR/apps/api/dist/db/seed.js"
+  log "Loading demo data (trial install)"
+  sudo -u "$APP_USER" env $(grep -v '^#' "$ENV_FILE" | xargs) ALLOW_DEMO_SEED=1 node "$APP_DIR/apps/api/dist/db/seed.js"
+elif [ "$FIRST" = "1" ]; then
+  log "First super admin"
+  # Random password, kept only in a root-only file (never printed or put in an environment variable).
+  (umask 077; openssl rand -base64 24 | tr -d '/+=' | cut -c1-24 > "$ADMIN_FILE")
+  sudo -u "$APP_USER" env $(grep -v '^#' "$ENV_FILE" | xargs) ADMIN_EMAIL="$ADMIN_EMAIL" \
+    node "$APP_DIR/apps/api/dist/db/create-admin.js" < "$ADMIN_FILE"
 fi
 
 if [ "$OFFICE" = "1" ]; then
+  OFFICE_PUBLIC_URL="${OFFICE_PUBLIC_URL:-http://$SERVER_IP:$OFFICE_PORT}"
   cat > "$OFFICE_ENV_FILE" <<ENV
 NODE_ENV=production
 TZ=Asia/Tehran
@@ -119,18 +154,27 @@ JWT_SECRET=$OFFICE_JWT_SECRET
 DATA_ENCRYPTION_KEY=$OFFICE_DATA_KEY
 WEB_DIST_DIR=$APP_DIR/apps/office-web/dist
 STORAGE_DIR=/var/lib/kx21/office-storage
-PUBLIC_URL=http://$SERVER_IP:$OFFICE_PORT
-CORS_ORIGINS=http://$SERVER_IP:$OFFICE_PORT,http://localhost:$OFFICE_PORT
+PUBLIC_URL=$OFFICE_PUBLIC_URL
+CORS_ORIGINS=$OFFICE_PUBLIC_URL,http://localhost:$OFFICE_PORT
 SMS_PROVIDER=log
 EMAIL_PROVIDER=log
+PUBLIC_HTTPS=${OFFICE_PUBLIC_HTTPS:-false}
+HOST=${OFFICE_HOST:-}
+TRUST_PROXY=${OFFICE_TRUST_PROXY:-}
 ENV
   chmod 600 "$OFFICE_ENV_FILE"
   chown -R "$APP_USER:$APP_USER" /var/lib/kx21
   log "Office automation: migrations"
   sudo -u "$APP_USER" env $(grep -v '^#' "$OFFICE_ENV_FILE" | xargs) node "$APP_DIR/apps/office-api/dist/db/migrate.js"
-  if [ "$SEED" = "1" ] && [ "$OFFICE_FIRST" = "1" ]; then
-    log "Office automation: demo data"
-    sudo -u "$APP_USER" env $(grep -v '^#' "$OFFICE_ENV_FILE" | xargs) node "$APP_DIR/apps/office-api/dist/db/seed.js"
+  if [ "$OFFICE_FIRST" = "1" ] && [ "$OFFICE_SEED" = "1" ]; then
+    log "Office automation: demo data (trial install)"
+    sudo -u "$APP_USER" env $(grep -v '^#' "$OFFICE_ENV_FILE" | xargs) ALLOW_DEMO_SEED=1 node "$APP_DIR/apps/office-api/dist/db/seed.js"
+  elif [ "$OFFICE_FIRST" = "1" ]; then
+    log "Office automation: first administrator"
+    # Random password, kept only in a root-only file (never printed or put in an environment variable).
+    (umask 077; openssl rand -base64 24 | tr -d '/+=' | cut -c1-24 > "$OFFICE_ADMIN_FILE")
+    sudo -u "$APP_USER" env $(grep -v '^#' "$OFFICE_ENV_FILE" | xargs) ADMIN_USERNAME="$OFFICE_ADMIN_USERNAME" \
+      node "$APP_DIR/apps/office-api/dist/db/create-admin.js" < "$OFFICE_ADMIN_FILE"
   fi
 fi
 
@@ -183,7 +227,8 @@ fi
 
 if command -v ufw >/dev/null && ufw status | grep -q "Status: active"; then
   ufw allow "$PORT/tcp"
-  [ "$OFFICE" = "1" ] && ufw allow "$OFFICE_PORT/tcp"
+  # Not opened when only a local reverse proxy may reach it.
+  [ "$OFFICE" = "1" ] && [ "${OFFICE_HOST:-}" != "127.0.0.1" ] && ufw allow "$OFFICE_PORT/tcp"
 fi
 
 log "Waiting for the service"
@@ -199,10 +244,17 @@ if [ "$OFFICE" = "1" ]; then
     sleep 1
   done
   curl -fs "http://127.0.0.1:$OFFICE_PORT/health" >/dev/null || { journalctl -u kx21-office -n 50 --no-pager; exit 1; }
-  if [ "$SEED" = "1" ] && [ "$OFFICE_FIRST" = "1" ]; then
+  # Connecting needs a meetings admin: the demo one when the meetings demo data was loaded, otherwise given explicitly.
+  if [ "$SEED" = "1" ]; then
+    MEETINGS_ADMIN_EMAIL="${MEETINGS_ADMIN_EMAIL:-admin@kx.local}"
+    MEETINGS_ADMIN_PASSWORD="${MEETINGS_ADMIN_PASSWORD:-Passw0rd!}"
+  fi
+  if [ "$OFFICE_FIRST" = "1" ] && { [ -z "${MEETINGS_ADMIN_EMAIL:-}" ] || [ -z "${MEETINGS_ADMIN_PASSWORD:-}" ]; }; then
+    echo "Connect office automation to the meetings system later, from its «یکپارچه‌سازی» page (after the chamber exists)."
+  elif [ "$OFFICE_FIRST" = "1" ]; then
     log "Connecting office automation to the meetings system"
     sudo -u "$APP_USER" env $(grep -v '^#' "$OFFICE_ENV_FILE" | xargs) MEETINGS_URL="http://127.0.0.1:$PORT" \
-      MEETINGS_ADMIN_EMAIL=admin@kx.local MEETINGS_ADMIN_PASSWORD='Passw0rd!' \
+      MEETINGS_ADMIN_EMAIL="$MEETINGS_ADMIN_EMAIL" MEETINGS_ADMIN_PASSWORD="$MEETINGS_ADMIN_PASSWORD" \
       OFFICE_WEBHOOK_URL="http://127.0.0.1:$OFFICE_PORT/api/integrations/meetings/webhook" \
       node "$APP_DIR/apps/office-api/dist/db/connect-meetings.js" || echo "Connect later from the office automation «یکپارچه‌سازی» page."
   fi
@@ -210,12 +262,20 @@ fi
 
 echo
 echo "Installed. Open:  http://$SERVER_IP:$PORT"
-[ "$SEED" = "1" ] && echo "Demo login: admin@kx.local / Passw0rd!   (also chair@, secretary@, member1@kx.local)"
+if [ "$SEED" = "1" ]; then
+  echo "Demo login: admin@kx.local / Passw0rd!   (also chair@, secretary@, member1@kx.local — trial only)"
+elif [ "$FIRST" = "1" ]; then
+  echo "Super admin: $ADMIN_EMAIL — password in $ADMIN_FILE (root only). Sign in, change it, delete the file, then create the chamber and its administrators."
+fi
 echo "Logs:     journalctl -u kx21 -f"
 echo "Config:   $ENV_FILE   (after editing: systemctl restart kx21)"
 if [ "$OFFICE" = "1" ]; then
   echo
   echo "Office automation:  http://$SERVER_IP:$OFFICE_PORT"
-  [ "$SEED" = "1" ] && echo "Demo login: admin, clerk, cmshead, expert, president … / Passw0rd!"
+  if [ "$OFFICE_SEED" = "1" ]; then
+    echo "Demo login: admin, clerk, cmshead, expert, president … / Passw0rd!  (trial only: change or remove before real use)"
+  elif [ "$OFFICE_FIRST" = "1" ]; then
+    echo "Administrator: $OFFICE_ADMIN_USERNAME — password in $OFFICE_ADMIN_FILE (root only). Change it after signing in, then delete the file."
+  fi
   echo "Logs:     journalctl -u kx21-office -f    Config: $OFFICE_ENV_FILE"
 fi

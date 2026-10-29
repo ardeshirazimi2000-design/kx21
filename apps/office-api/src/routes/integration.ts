@@ -242,14 +242,19 @@ integrationRouter.get('/meetings', async (req, res) => {
 });
 
 integrationRouter.get('/meetings/:id', async (req, res) => {
-  requirePerm(currentUser(req), 'meetings.view');
+  const u = currentUser(req);
+  requirePerm(u, 'meetings.view');
   const id = param(req, 'id');
   if (req.query.refresh === '1') await syncMeeting(id);
   const m = await one('SELECT * FROM meetings_cache WHERE external_id = $1', [id]);
   if (!m) throw notFound('جلسه یافت نشد');
   const [resolutions, referrals, invitations] = await Promise.all([
     query(`SELECT r.*, l.number AS letter_number FROM resolutions_cache r LEFT JOIN letters l ON l.id = r.letter_id WHERE r.meeting_external_id = $1 ORDER BY r.number`, [id]),
-    query(`SELECT mr.*, l.number AS letter_number, l.subject FROM letter_meeting_refs mr JOIN letters l ON l.id = mr.letter_id WHERE mr.requested_meeting_id = $1`, [id]),
+    query(
+      `SELECT mr.*, l.number AS letter_number, CASE WHEN l.confidentiality <= $2 THEN l.subject END AS subject
+         FROM letter_meeting_refs mr JOIN letters l ON l.id = mr.letter_id WHERE mr.requested_meeting_id = $1`,
+      [id, u.clearance],
+    ),
     query(
       `SELECT mil.invitee_external_id, mil.invitee_name, mil.requested_by, mil.created_at, l.id AS letter_id, l.number AS letter_number, l.status AS letter_status
          FROM meeting_invitation_letters mil JOIN letters l ON l.id = mil.letter_id WHERE mil.meeting_external_id = $1 ORDER BY mil.created_at, mil.invitee_name`,
@@ -309,10 +314,10 @@ integrationRouter.get('/resolutions', async (req, res) => {
 integrationRouter.get('/resolutions/:id', async (req, res) => {
   const u = currentUser(req);
   const r = await one(
-    `SELECT r.*, l.number AS letter_number, l.subject AS letter_subject, m.title AS meeting_title, m.number AS meeting_number, m.scheduled_at AS meeting_date
+    `SELECT r.*, l.number AS letter_number, CASE WHEN l.confidentiality <= $2 THEN l.subject END AS letter_subject, m.title AS meeting_title, m.number AS meeting_number, m.scheduled_at AS meeting_date
        FROM resolutions_cache r LEFT JOIN letters l ON l.id = r.letter_id LEFT JOIN meetings_cache m ON m.external_id = r.meeting_external_id
       WHERE r.external_id = $1`,
-    [param(req, 'id')],
+    [param(req, 'id'), u.clearance],
   );
   if (!r || (!u.can('meetings.view') && r.owner_user_id !== u.id)) throw notFound('مصوبه یافت نشد');
   const feedback = await query(

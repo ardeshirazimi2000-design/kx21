@@ -28,6 +28,16 @@ jobs:
           cache: npm
       # Poppler renders presented PDF pages; the API tests exercise it.
       - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends poppler-utils
+      # The backup/restore test runs pg_dump/pg_restore/psql: they must be the major version of the database service
+      # (a newer pg_dump writes settings an older server rejects), so install the 16 client from the PostgreSQL apt
+      # repository and put it first on PATH.
+      - name: PostgreSQL 16 client tools
+        run: |
+          sudo apt-get install -y --no-install-recommends postgresql-common
+          sudo /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh -y
+          sudo apt-get install -y --no-install-recommends postgresql-client-16
+          echo /usr/lib/postgresql/16/bin >> "$GITHUB_PATH"
+          /usr/lib/postgresql/16/bin/pg_dump --version
       - run: npm ci
       - run: npm run build -w @kx/shared
       - run: npm run typecheck
@@ -41,6 +51,15 @@ jobs:
       - run: npm run build -w @kx/web
       - run: npm run build -w @kx/office-api
       - run: npm run build -w @kx/office-web
+
+  office-web-nginx:
+    # The office-web nginx site in the real nginx image: HTTP→HTTPS redirect, TLS versions and suites, HSTS, CSP,
+    # forwarded headers only from trusted proxies, Docker Compose port defaults. Throwaway certificates only.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker pull nginx:1.27-alpine && docker pull node:22-alpine
+      - run: bash apps/office-web/test/nginx-site.test.sh
 
   mobile:
     runs-on: ubuntu-latest

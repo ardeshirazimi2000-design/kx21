@@ -21,9 +21,9 @@ cd kx21
 sudo bash deploy/install.sh
 ```
 
-اسکریپت Node.js 22 و PostgreSQL را نصب، برنامه را build و سرویس systemd به نام `kx21` را روی پورت **8000** راه‌اندازی می‌کند (وب، API و WebSocket روی یک پورت). سپس `http://IP-سرور:8000` را باز کنید و با `admin@kx.local` / `Passw0rd!` وارد شوید.
+اسکریپت Node.js 22 و PostgreSQL را نصب، برنامه را build و سرویس systemd به نام `kx21` را روی پورت **8000** راه‌اندازی می‌کند (وب، API و WebSocket روی یک پورت). سامانه **بدون داده آزمایشی** و فقط با یک Super Admin (`root@kx.local`، یا نشانی `ADMIN_EMAIL`) ساخته می‌شود. رمز او تصادفی است، چاپ نمی‌شود و فقط در فایل `/root/kx21-admin.txt` (فقط root) است. `http://IP-سرور:8000` را باز کنید، وارد شوید، رمز را عوض و فایل را حذف کنید، سپس اتاق و مدیران آن را بسازید.
 
-- نصب بدون داده آزمایشی: `sudo SEED=0 bash deploy/install.sh` — پورت دیگر: `sudo PORT=9000 bash deploy/install.sh`
+- نصب آزمایشی با داده نمونه (همه حساب‌ها با رمز عمومی `Passw0rd!`؛ هرگز برای استفاده واقعی): `sudo SEED=1 bash deploy/install.sh` — پورت دیگر: `sudo PORT=9000 bash deploy/install.sh`
 - اگر دسترسی به npm محدود است: `sudo NPM_REGISTRY=<آدرس mirror> bash deploy/install.sh`
 - لاگ‌ها: `journalctl -u kx21 -f` — تنظیمات: `/etc/kx21.env` (پس از تغییر: `systemctl restart kx21`)
 - به‌روزرسانی: `git pull` و اجرای دوباره همان اسکریپت (رمزها و داده‌ها حفظ می‌شوند)
@@ -38,7 +38,7 @@ npm install
 npm run build -w @kx/shared
 cp apps/api/.env.example apps/api/.env      # DATABASE_URL را تنظیم کنید
 createdb kx                                  # یا از docker compose برای Postgres استفاده کنید
-npm run db:seed                              # migration + داده آزمایشی
+npm run db:seed                              # migration + داده آزمایشی (در production رد می‌شود مگر با ALLOW_DEMO_SEED=1)
 npm run dev:api                              # http://localhost:4000
 npm run dev:web                              # http://localhost:5173
 ```
@@ -60,7 +60,7 @@ git clone -b claude/commission-platform https://github.com/ardeshirazimi2000-des
 cd kx21
 bash deploy/docker-install.sh          # وب: http://IP-سرور:8000
 ```
-اسکریپت یک‌بار فایل `.env` با رمزهای تصادفی می‌سازد (این فایل را نگه دارید)، سرویس‌ها را build و اجرا می‌کند و داده آزمایشی را بارگذاری می‌کند. بدون داده آزمایشی: `SEED=0 bash deploy/docker-install.sh`؛ پورت دیگر: `WEB_PORT=9000 bash deploy/docker-install.sh`.
+اسکریپت یک‌بار فایل `.env` با رمزهای تصادفی می‌سازد (این فایل را نگه دارید)، سرویس‌ها را build و اجرا می‌کند و یک Super Admin با رمز تصادفی می‌سازد که فقط در فایل `admin-password.txt` (مجوز ۶۰۰) کنار مخزن است. داده آزمایشی فقط برای نصب آزمایشی: `SEED=1 bash deploy/docker-install.sh`؛ پورت دیگر: `WEB_PORT=9000 bash deploy/docker-install.sh`.
 
 - لاگ: `docker compose logs -f api` — توقف: `docker compose down` — به‌روزرسانی: `git pull && bash deploy/docker-install.sh`
 - داده‌ها در volumeهای `db-data` و `uploads` نگهداری می‌شوند؛ `docker compose down -v` همه داده‌ها را پاک می‌کند.
@@ -104,4 +104,4 @@ npm run dev:office-api     # http://localhost:4100
 npm run dev:office-web     # http://localhost:5174 — ورود: admin، clerk، cmshead، expert، president … / Passw0rd!
 npm test -w @kx/office-api
 ```
-در نصب Docker و `deploy/install.sh` اتوماسیون روی پورت `8100` نصب و خودکار به سامانه جلسات وصل می‌شود (`OFFICE=0` برای صرف‌نظر). مستندات: [docs/office](docs/office/README.md)
+در نصب Docker و `deploy/install.sh` اتوماسیون روی پورت `8100` نصب و خودکار به سامانه جلسات وصل می‌شود (`OFFICE=0` برای صرف‌نظر). راه‌اندازی HTTPS: [docs/office/05-https.md](docs/office/05-https.md). مستندات: [docs/office](docs/office/README.md)
