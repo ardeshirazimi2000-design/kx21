@@ -13,9 +13,12 @@ VERSION="${VERSION:-$(date +%Y%m%d)-$(git -C "$REPO" rev-parse --short HEAD)}"
 NAME="kx21-offline-$VERSION"
 STAGE="$OUT_DIR/$NAME"
 
-echo "==> building images ($VERSION)"
-docker build -q -f "$REPO/apps/api/Dockerfile" -t "kx21-api:$VERSION" "$REPO" >/dev/null
-docker build -q -f "$REPO/apps/web/Dockerfile" -t "kx21-web:$VERSION" "$REPO" >/dev/null
+# SKIP_BUILD=1: kx21-api:$VERSION and kx21-web:$VERSION were already built (e.g. behind a proxy).
+if [ "${SKIP_BUILD:-0}" != "1" ]; then
+  echo "==> building images ($VERSION)"
+  docker build -q -f "$REPO/apps/api/Dockerfile" -t "kx21-api:$VERSION" "$REPO" >/dev/null
+  docker build -q -f "$REPO/apps/web/Dockerfile" -t "kx21-web:$VERSION" "$REPO" >/dev/null
+fi
 docker pull -q postgres:16-alpine >/dev/null
 
 rm -rf "$STAGE"
