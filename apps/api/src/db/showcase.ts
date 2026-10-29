@@ -7,7 +7,8 @@
  * Only for an EMPTY install: it refuses a database that already holds a chamber or any user other than a
  * super admin, so it can never mix demo records into real data.
  *
- *   node dist/db/showcase.js          (SHOWCASE_PASSWORD for the demo accounts, ROOT_PASSWORD for root)
+ *   ALLOW_DEMO_SEED=1 node dist/db/showcase.js   (SHOWCASE_PASSWORD for the demo accounts; ROOT_PASSWORD for root when
+ *   no super admin exists yet — normally create-admin.js has made one)
  */
 import bcrypt from 'bcryptjs';
 import http from 'node:http';
@@ -16,6 +17,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DEFAULT_COMMISSION_SETTINGS, toJalali } from '@kx/shared';
 import { createApp } from '../app.js';
+import { config } from '../config.js';
 import { signAccessToken } from '../auth/tokens.js';
 import { migrate } from './migrate.js';
 import { one, pool, query } from './pool.js';
@@ -718,6 +720,10 @@ export async function isEmptyInstall(): Promise<boolean> {
 export async function showcase(opts: { password?: string; rootPassword?: string; log?: (s: string) => void } = {}) {
   const log = opts.log ?? ((s: string) => console.log(s));
   const password = opts.password ?? SHOWCASE_PASSWORD;
+  // Its accounts share one password: on a production install only when asked for explicitly (a presentation server).
+  if (config.isProd && process.env.ALLOW_DEMO_SEED !== '1') {
+    throw new Error('Refusing to load showcase data in production (its accounts share one password). Set ALLOW_DEMO_SEED=1 for a presentation server.');
+  }
   await migrate(false);
   if (!(await isEmptyInstall())) {
     throw new Error('این پایگاه‌داده اطلاعات دارد؛ اطلاعات ارائه فقط روی نصب خالی ساخته می‌شود. (The database is not empty; showcase data is only built on an empty install.)');
