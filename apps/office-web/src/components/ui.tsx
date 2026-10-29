@@ -120,12 +120,15 @@ export function Loading() {
   );
 }
 
-export function Stat({ label, value, tone, hint }: { label: string; value: ReactNode; tone?: Tone; hint?: string }) {
+export function Stat({ label, value, tone, hint, icon }: { label: string; value: ReactNode; tone?: Tone; hint?: string; icon?: ReactNode }) {
   return (
     <div className={`stat ${tone ? `stat-${tone}` : ''}`}>
-      <div className="stat-value">{value}</div>
-      <div className="stat-label">{label}</div>
-      {hint && <div className="stat-hint">{hint}</div>}
+      {icon && <span className="stat-icon">{icon}</span>}
+      <div>
+        <div className="stat-value">{value}</div>
+        <div className="stat-label">{label}</div>
+        {hint && <div className="stat-hint">{hint}</div>}
+      </div>
     </div>
   );
 }

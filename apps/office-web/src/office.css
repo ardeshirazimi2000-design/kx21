@@ -169,3 +169,16 @@
 .chip-btn { cursor: pointer; font: inherit; font-size: 0.82rem; color: var(--text); }
 .chip-btn:hover { border-color: var(--primary); color: var(--primary); }
 .related-list li { padding: 6px 0; }
+
+/* External contacts picker (مخاطبین بیرونی) */
+.span-2 { grid-column: span 2; }
+@media (max-width: 900px) { .span-2 { grid-column: auto; } }
+.contact-picker { position: relative; }
+.contact-picker-value { display: flex; justify-content: space-between; align-items: center; gap: 8px; width: 100%; text-align: start; cursor: pointer; }
+.contact-picker-panel {
+  position: absolute; z-index: 30; inset-inline: 0; top: calc(100% + 4px); display: flex; flex-direction: column; gap: 8px; padding: 10px;
+  background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow);
+}
+.contact-picker-list { max-height: 320px; overflow: auto; }
+.contact-picker-list .org-label { text-align: start; }
+.contact-picker-list li > .org-label { display: block; width: 100%; }

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { ConfBadge, KIND, KindBadge, PRIORITY, Pill, SOURCE, STATUS } from '../components/labels';
+import { ContactPicker } from '../components/contacts';
 import { UnitSelect } from '../components/pickers';
 import { Button, Card, Empty, ErrorBox, Field, JalaliDateInput, Loading, PageHeader, Pager, dateFa, fa } from '../components/ui';
 import { get } from '../lib/api';
@@ -81,6 +82,10 @@ export function LettersPage() {
             <Field label="طرف مکاتبه">
               <input className="input" defaultValue={f.party ?? ''} onBlur={(e) => set('party', e.target.value.trim())} />
             </Field>
+            <div className="field">
+              <span className="field-label">مخاطب بیرونی (با زیرمجموعه‌ها)</span>
+              <ContactPicker value={f.contactId ?? ''} onChange={(v) => set('contactId', v)} placeholder="همه مخاطبین" />
+            </div>
             <Field label="از تاریخ">
               <JalaliDateInput value={f.from ?? ''} onChange={(v) => set('from', v)} />
             </Field>

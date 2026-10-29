@@ -113,32 +113,7 @@ h3 { font-size: 1rem; }
 .mb { margin-bottom: 16px; }
 .pre { white-space: pre-wrap; }
 
-/* Layout */
-.shell { display: grid; grid-template-columns: 250px 1fr; min-height: 100vh; }
-.sidebar { background: var(--sidebar); color: var(--sidebar-ink); padding: 18px 12px; position: sticky; top: 0; height: 100vh; overflow-y: auto; }
-.brand { display: flex; gap: 10px; align-items: center; padding: 4px 6px 18px; margin-bottom: 6px; color: #fff; font-weight: 700; font-size: 0.86rem; line-height: 1.6; border-bottom: 1px solid rgba(255, 255, 255, 0.12); }
-.brand:hover { text-decoration: none; }
-.brand img { flex-shrink: 0; }
-.brand small { display: block; font-weight: 400; font-size: 0.75rem; color: var(--sidebar-ink); margin-top: 2px; }
-.login-brand { display: flex; flex-direction: column; align-items: center; gap: 10px; color: #fff; text-align: center; margin-bottom: 20px; }
-.login-brand h1 { font-size: 1.15rem; }
-.login-brand p { margin: 0; color: #d6e6ea; }
-.nav-section { margin-top: 6px; }
-.nav-group { width: 100%; margin: 8px 0 2px; padding: 8px 12px; border: 0; border-radius: 8px; background: transparent; font: inherit; font-size: 0.85rem; font-weight: 700; color: #e9c46a; display: flex; align-items: center; justify-content: space-between; gap: 8px; cursor: pointer; text-align: start; }
-.nav-group:hover { background: rgba(255, 255, 255, 0.06); }
-.nav-chevron { transition: transform 0.2s ease; transform: rotate(-90deg); }
-.nav-section.open .nav-chevron { transform: rotate(0deg); }
-.nav-items { padding-inline-start: 10px; border-inline-start: 1px solid rgba(233, 196, 106, 0.25); margin-inline-start: 14px; }
-.nav a { display: flex; gap: 10px; align-items: center; padding: 8px 12px; border-radius: 8px; color: var(--sidebar-ink); }
-.nav a:hover { background: rgba(255, 255, 255, 0.06); text-decoration: none; }
-.nav a.active { background: rgba(255, 255, 255, 0.12); color: #fff; }
-.nav .count { margin-inline-start: auto; background: var(--accent); color: #fff; border-radius: 99px; padding: 0 7px; font-size: 0.72rem; }
-.main { min-width: 0; }
-.topbar { display: flex; align-items: center; gap: 12px; padding: 10px 24px; background: var(--surface); border-bottom: 1px solid var(--border); position: sticky; top: 0; z-index: 5; }
-.topbar .search { flex: 1; max-width: 420px; }
-.content { padding: 24px; max-width: 1400px; }
-.menu-btn { display: none; }
-
+/* Layout: shell, sidebar and top bar live in shell.css */
 .page-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; margin-bottom: 20px; flex-wrap: wrap; }
 
 /* Cards */
@@ -258,17 +233,9 @@ table.table { width: 100%; border-collapse: collapse; }
 .minutes-preview h2 { font-size: 1.05rem; margin: 16px 0 6px; }
 .minutes-preview h3 { font-size: 0.98rem; margin: 12px 0 4px; }
 
-.login { min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 16px; background: linear-gradient(135deg, var(--sidebar), var(--primary)); }
-.login .card { width: 100%; max-width: 400px; }
 
 @media (max-width: 900px) {
-  .shell { grid-template-columns: 1fr; }
-  .sidebar { position: fixed; inset: 0 0 0 auto; width: 260px; z-index: 40; transform: translateX(100%); transition: transform 0.2s; }
-  .sidebar.open { transform: none; }
-  .menu-btn { display: inline-flex; }
   .grid-2, .grid-3, .grid-4 { grid-template-columns: 1fr; }
-  .content { padding: 16px; }
-  .topbar { padding: 10px 16px; }
 }
 
 /* ───────── Jalali date picker ───────── */
