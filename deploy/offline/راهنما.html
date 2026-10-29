@@ -1,0 +1,150 @@
+<!doctype html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>راهنمای نصب و ارائه</title>
+<style>
+  :root { --bg:#f3f5f9; --card:#fff; --ink:#1b2433; --muted:#5b6678; --brand:#123f8a; --line:#dde3ec; --code:#eef2f8; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#10151d; --card:#18202b; --ink:#e6ebf2; --muted:#9aa6b8; --brand:#7aa7ff; --line:#2a3544; --code:#202a37; } }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink); font: 16px/1.9 Vazirmatn, Vazir, Tahoma, "Segoe UI", sans-serif; }
+  header { background:#123f8a; color:#fff; padding:28px 16px; }
+  header div, main { max-width: 920px; margin: 0 auto; }
+  header h1 { margin:0 0 6px; font-size:26px; }
+  header p { margin:0; opacity:.85; }
+  main { padding: 16px; }
+  section { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:18px 20px; margin:16px 0; }
+  h2 { margin:0 0 10px; font-size:20px; color:var(--brand); }
+  h3 { font-size:16px; margin:16px 0 6px; }
+  code, pre { direction:ltr; unicode-bidi:isolate; font-family: ui-monospace, Consolas, monospace; background:var(--code); border-radius:6px; }
+  code { padding:1px 6px; font-size:14px; }
+  pre { padding:12px 14px; overflow-x:auto; text-align:left; font-size:14px; line-height:1.6; }
+  table { width:100%; border-collapse:collapse; font-size:15px; }
+  th, td { border-bottom:1px solid var(--line); padding:7px 6px; text-align:right; vertical-align:top; }
+  th { color:var(--muted); font-weight:600; }
+  .ltr { direction:ltr; unicode-bidi:isolate; }
+  .note { border-right:4px solid #c98a00; background:rgba(201,138,0,.08); padding:10px 14px; border-radius:8px; }
+  ol li, ul li { margin: 4px 0; }
+  .wrap { overflow-x:auto; }
+</style>
+</head>
+<body>
+<header><div>
+  <h1>سامانهٔ کمیسیون‌های تخصصی — بستهٔ نصب آفلاین</h1>
+  <p>راهنمای نصب روی سرور و سناریوی ارائه</p>
+</div></header>
+<main>
+
+<section>
+  <h2>۱. پیش‌نیاز سرور</h2>
+  <ul>
+    <li>لینوکس ۶۴ بیتی (Ubuntu، Debian، CentOS/Rocky و مشابه) با systemd</li>
+    <li>حافظهٔ ۴ گیگابایت یا بیشتر (پیشنهادی ۸ تا ۱۶)، ۱۵ گیگابایت فضای آزاد دیسک</li>
+    <li>دسترسی root (یا sudo). <strong>به اینترنت نیازی نیست</strong>؛ اگر Docker نصب نباشد، از داخل همین بسته نصب می‌شود.</li>
+    <li>پورت <span class="ltr">5000</span> آزاد باشد و در فایروال باز شود.</li>
+  </ul>
+</section>
+
+<section>
+  <h2>۲. نصب</h2>
+  <ol>
+    <li>فایل بسته را به سرور منتقل کنید (مثلاً با WinSCP به پوشهٔ <code>/root</code>).</li>
+    <li>باز کردن بسته و اجرای نصب:
+<pre>tar -xf kx21-offline-*.tar
+cd kx21-offline-*
+sudo bash install.sh</pre></li>
+    <li>در پایان، نشانی سامانه نمایش داده می‌شود: <code>http://نشانی-سرور:5000</code></li>
+  </ol>
+  <h3>دو حالت نصب</h3>
+  <table>
+    <tr><th>دستور</th><th>نتیجه</th></tr>
+    <tr><td><code>sudo bash install.sh</code></td><td>نصب <strong>با اطلاعات ارائه</strong>: شش اتاق استانی با کمیسیون‌ها، جلسات، مصوبات و شبکه‌ها (برای نمایش)</td></tr>
+    <tr><td><code>sudo bash install.sh --empty</code></td><td>نصب <strong>خالی</strong> برای استفادهٔ واقعی: فقط یک مدیر سامانه</td></tr>
+  </table>
+  <p>پورت دیگر: <code>sudo WEB_PORT=8080 bash install.sh</code>. پیکربندی در <code>/opt/kx21</code> نگهداری می‌شود.</p>
+  <p class="note">اطلاعات ارائه فقط روی پایگاه‌دادهٔ خالی ساخته می‌شود؛ اگر سامانه اطلاعات داشته باشد، برنامه خودش متوقف می‌شود. پس هیچ‌وقت با اطلاعات واقعی قاطی نمی‌شود.</p>
+</section>
+
+<section>
+  <h2>۳. حساب‌های ارائه</h2>
+  <p>ورود با نشانی ایمیل. رمز همهٔ حساب‌های ارائه: <code>Demo@1405</code> — رمز مدیر سامانه به‌صورت تصادفی در فایل <code>/opt/kx21/admin-password.txt</code> است.</p>
+  <div class="wrap"><table>
+    <tr><th>نقش</th><th>نام کاربری</th></tr>
+    <tr><td>مدیر کل سامانه (اتاق ایران)</td><td class="ltr">root@demo.ir</td></tr>
+    <tr><td>هماهنگ‌کنندهٔ شبکه‌های ملی</td><td class="ltr">coordinator@demo.ir</td></tr>
+    <tr><td>مدیر اتاق استان</td><td class="ltr">admin.yzd@demo.ir · admin.shz@demo.ir · admin.isf@demo.ir · admin.snd@demo.ir · admin.tbz@demo.ir · admin.thr@demo.ir</td></tr>
+    <tr><td>رئیس کمیسیون</td><td class="ltr">chair.agr.yzd@demo.ir</td></tr>
+    <tr><td>دبیر کمیسیون</td><td class="ltr">secretary.agr.yzd@demo.ir</td></tr>
+    <tr><td>نایب‌رئیس / کارشناس</td><td class="ltr">vice.agr.yzd@demo.ir · expert.agr.yzd@demo.ir</td></tr>
+    <tr><td>عضو کمیسیون</td><td class="ltr">member1.agr.yzd@demo.ir … member6.agr.yzd@demo.ir</td></tr>
+  </table></div>
+  <h3>الگوی نام کاربری</h3>
+  <p><span class="ltr">نقش.کمیسیون.استان@demo.ir</span></p>
+  <table>
+    <tr><th>استان</th><th>کد</th><th>کمیسیون‌ها (کد)</th></tr>
+    <tr><td>یزد</td><td class="ltr">yzd</td><td>کشاورزی <span class="ltr">agr</span> · تجارت و صادرات <span class="ltr">exp</span> · انرژی، آب و محیط زیست <span class="ltr">enr</span></td></tr>
+    <tr><td>فارس (شیراز)</td><td class="ltr">shz</td><td>کشاورزی <span class="ltr">agr</span> · تجارت و صادرات <span class="ltr">exp</span> · گردشگری <span class="ltr">tur</span></td></tr>
+    <tr><td>اصفهان</td><td class="ltr">isf</td><td>کشاورزی <span class="ltr">agr</span> · تجارت و صادرات <span class="ltr">exp</span> · صنعت و معدن <span class="ltr">ind</span></td></tr>
+    <tr><td>کردستان (سنندج)</td><td class="ltr">snd</td><td>کشاورزی <span class="ltr">agr</span> · تجارت و صادرات <span class="ltr">exp</span> · گردشگری <span class="ltr">tur</span></td></tr>
+    <tr><td>آذربایجان شرقی (تبریز)</td><td class="ltr">tbz</td><td>کشاورزی <span class="ltr">agr</span> · تجارت و صادرات <span class="ltr">exp</span> · صنعت و معدن <span class="ltr">ind</span></td></tr>
+    <tr><td>تهران</td><td class="ltr">thr</td><td>کشاورزی <span class="ltr">agr</span> · تجارت و صادرات <span class="ltr">exp</span> · حمل‌ونقل و لجستیک <span class="ltr">trn</span></td></tr>
+  </table>
+  <p>مثال: دبیر کمیسیون گردشگری شیراز ← <span class="ltr">secretary.tur.shz@demo.ir</span></p>
+</section>
+
+<section>
+  <h2>۴. چه چیزهایی در اطلاعات ارائه هست</h2>
+  <ul>
+    <li>شش اتاق استانی، هر کدام با دورهٔ دهم و سه کمیسیون؛ هر کمیسیون رئیس، نایب‌رئیس، دبیر، شش عضو و یک کارشناس دارد.</li>
+    <li>برای هر کمیسیون: سه جلسهٔ گذشته که از روی صورتجلسهٔ کاغذی ثبت شده‌اند (با اسکن صورتجلسه)، یک جلسهٔ برگزارشده در سامانه (اعلام حضور، رأی‌گیری زنده، ارجاع کارشناسی) و یک جلسهٔ آینده با دعوت‌نامهٔ ارسال‌شده.</li>
+    <li>صورتجلسه‌ها در همهٔ مراحل: پیش‌نویس، در انتظار تأیید رئیس، تأییدشده و قفل‌شده.</li>
+    <li>مصوبات با چند دستگاه اجرایی و گزارش پیشرفت جداگانهٔ هر دستگاه؛ مصوبات انجام‌شده، در حال اجرا و معوق.</li>
+    <li>چهار شبکهٔ موضوعی (کشاورزی، تجارت و صادرات، گردشگری، صنعت و معدن)، انتشار مصوبات در شبکه، حمایت کمیسیون‌های استان‌های دیگر و <strong>چهار پیشنهاد ملی</strong> که هماهنگ‌کننده آن‌ها را پیگیری کرده است.</li>
+    <li>تعطیلات رسمی، اعلان‌ها و گزارش رویدادها (Audit) برای همهٔ کارها.</li>
+  </ul>
+  <p>تاریخ‌ها نسبت به روز نصب ساخته می‌شوند؛ یعنی جلسهٔ «آینده» همیشه واقعاً در روزهای آینده است.</p>
+</section>
+
+<section>
+  <h2>۵. سناریوی پیشنهادی ارائه (حدود ۱۵ دقیقه)</h2>
+  <ol>
+    <li><strong>نگاه ملی</strong> — ورود با <span class="ltr">root@demo.ir</span>: داشبورد، انتخاب اتاق‌های استان از بالای صفحه، «شبکه‌های موضوعی» و نقشهٔ شبکهٔ کشاورزی.</li>
+    <li><strong>پیشنهاد ملی</strong> — ورود با <span class="ltr">coordinator@demo.ir</span>: زبانهٔ «پیشنهادهای ملی» شبکه، حمایت استان‌ها، پاسخ و نامهٔ پیشنهاد.</li>
+    <li><strong>کار روزانهٔ کمیسیون</strong> — ورود با <span class="ltr">secretary.agr.yzd@demo.ir</span>: تقویم جلسات (تعطیلات روی تقویم)، جلسهٔ آینده و دستور جلسه، جلسهٔ برگزارشده با نتیجهٔ رأی‌گیری و صورتجلسه، جلسات ثبت‌شده از سوابق با اسکن امضاشده.</li>
+    <li><strong>پیگیری مصوبات</strong> — «مصوبات و پیگیری»: مصوبات معوق در ابتدای فهرست، پیشرفت هر دستگاه اجرایی.</li>
+    <li><strong>تأیید صورتجلسه</strong> — ورود با <span class="ltr">chair.enr.yzd@demo.ir</span>: صورتجلسهٔ در انتظار تأیید و تأیید و قفل آن.</li>
+    <li><strong>برنامهٔ موبایل</strong> — نصب فایل <span class="ltr">kx-commissions.apk</span> و ورود با <span class="ltr">member1.agr.yzd@demo.ir</span>؛ در صفحهٔ ورود، نشانی سرور را <span class="ltr">http://نشانی-سرور:5000</span> وارد کنید.</li>
+  </ol>
+</section>
+
+<section>
+  <h2>۶. نگهداری</h2>
+  <h3>وضعیت و گزارش خطا</h3>
+<pre>cd /opt/kx21
+docker compose ps
+docker compose logs -f api</pre>
+  <h3>پشتیبان‌گیری</h3>
+  <p>یک بار رمز پشتیبان را بسازید و نسخه‌ای از آن را <strong>بیرون از سرور</strong> نگه دارید:</p>
+<pre>(umask 077; openssl rand -base64 32 > /root/kx21-backup.pass)
+sudo OFFICE=0 bash /opt/kx21/deploy/backup.sh</pre>
+  <p>پشتیبان رمزگذاری‌شده در <code>/var/backups/kx21</code> ذخیره می‌شود و شامل پایگاه‌داده، فایل‌های بارگذاری‌شده و پیکربندی است. بازگردانی: <code>deploy/restore.sh</code>.</p>
+  <h3>ارتقا به نسخهٔ جدید</h3>
+  <p>بستهٔ جدید را باز کنید و همان <code>sudo bash install.sh</code> را اجرا کنید؛ اطلاعات حفظ می‌شود.</p>
+  <h3>شروع دوباره (حذف همهٔ اطلاعات)</h3>
+<pre>cd /opt/kx21 &amp;&amp; docker compose down -v &amp;&amp; rm .env admin-password.txt</pre>
+  <p>سپس دوباره نصب کنید. این کار همهٔ اطلاعات را پاک می‌کند.</p>
+</section>
+
+<section>
+  <h2>۷. نکات امنیتی</h2>
+  <ul>
+    <li>اطلاعات ارائه فقط برای نمایش است و همهٔ حساب‌هایش یک رمز دارند؛ برای استفادهٔ واقعی، سرور را با <code>--empty</code> نصب کنید.</li>
+    <li>پس از اولین ورود، رمز مدیر سامانه را عوض کنید و فایل <code>admin-password.txt</code> را حذف کنید.</li>
+    <li>برای استفادهٔ واقعی، سامانه را پشت HTTPS قرار دهید.</li>
+  </ul>
+</section>
+
+</main>
+</body>
+</html>
