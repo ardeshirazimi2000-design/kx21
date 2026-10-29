@@ -27,8 +27,18 @@ echo "==> saving images"
 docker save postgres:16-alpine "kx21-api:$VERSION" "kx21-web:$VERSION" | gzip -1 > "$STAGE/images/kx21-images.tar.gz"
 
 echo "==> Docker for servers without it"
-curl -fsSL "https://download.docker.com/linux/static/stable/x86_64/$DOCKER_STATIC" -o "$STAGE/docker/$DOCKER_STATIC"
-curl -fsSL "https://github.com/docker/compose/releases/download/$COMPOSE_VERSION/docker-compose-linux-x86_64" -o "$STAGE/docker/docker-compose"
+# download.docker.com refuses some regions: then the target server needs Docker already installed (or pass local
+# copies: DOCKER_TGZ=path/docker-XX.tgz COMPOSE_BIN=path/docker-compose).
+if [ -n "${DOCKER_TGZ:-}" ]; then cp "$DOCKER_TGZ" "$STAGE/docker/"
+elif ! curl -fsSL "https://download.docker.com/linux/static/stable/x86_64/$DOCKER_STATIC" -o "$STAGE/docker/$DOCKER_STATIC"; then
+  rm -f "$STAGE/docker/$DOCKER_STATIC"
+  echo "WARNING: Docker could not be downloaded; the target server must have Docker installed" >&2
+fi
+if [ -n "${COMPOSE_BIN:-}" ]; then cp "$COMPOSE_BIN" "$STAGE/docker/docker-compose"
+elif ! curl -fsSL "https://github.com/docker/compose/releases/download/$COMPOSE_VERSION/docker-compose-linux-x86_64" -o "$STAGE/docker/docker-compose"; then
+  rm -f "$STAGE/docker/docker-compose"
+  echo "WARNING: Docker Compose could not be downloaded; the target server must have it installed" >&2
+fi
 
 cp "$REPO/deploy/offline/docker-compose.yml" "$REPO/deploy/offline/install.sh" "$STAGE/"
 cp "$REPO/deploy/offline/راهنما.html" "$STAGE/"

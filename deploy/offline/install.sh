@@ -33,6 +33,7 @@ say "بررسی سالم بودن فایل‌های بسته…"
 
 # ───── 1. Docker ─────
 install_docker() {
+  ls "$BUNDLE"/docker/docker-*.tgz >/dev/null 2>&1 || die "Docker روی این سرور نصب نیست و فایل نصب آن در این بسته نیست؛ ابتدا Docker را نصب کنید"
   say "نصب Docker از داخل بسته (بدون اینترنت)…"
   command -v systemctl >/dev/null || die "این سرور systemd ندارد؛ Docker را دستی نصب کنید و دوباره اجرا کنید"
   tar -xzf "$BUNDLE"/docker/docker-*.tgz -C /tmp
@@ -70,6 +71,7 @@ UNIT
   systemctl enable --now containerd docker
 }
 install_compose() {
+  [ -f "$BUNDLE/docker/docker-compose" ] || die "Docker Compose روی این سرور نصب نیست و در این بسته هم نیست؛ ابتدا آن را نصب کنید"
   say "نصب Docker Compose از داخل بسته…"
   install -D -m 755 "$BUNDLE/docker/docker-compose" /usr/local/lib/docker/cli-plugins/docker-compose
 }
