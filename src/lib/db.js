@@ -506,6 +506,66 @@ CREATE TABLE IF NOT EXISTS doctor_payouts (
   created_at  TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_payouts_doctor ON doctor_payouts (doctor_id, paid_at DESC);
+
+-- health magazine (public articles; separate from every patient table)
+CREATE TABLE IF NOT EXISTS mag_articles (
+  id                  TEXT PRIMARY KEY,
+  tenant_id           TEXT NOT NULL,
+  slug                TEXT NOT NULL,
+  title               TEXT NOT NULL,
+  summary             TEXT NOT NULL DEFAULT '',
+  body                TEXT NOT NULL DEFAULT '',     -- limited markdown
+  category            TEXT NOT NULL,
+  cover_image_id      TEXT,
+  status              TEXT NOT NULL DEFAULT 'draft' CHECK (status IN ('draft','review','approved','published','archived')),
+  seo_title           TEXT,
+  seo_description     TEXT,
+  keywords            TEXT NOT NULL DEFAULT '[]',
+  author_id           TEXT,
+  reviewer_doctor_id  TEXT REFERENCES doctors(id),
+  review_note         TEXT,
+  reviewed_at         TEXT,
+  published_at        TEXT,
+  -- edits to a published article wait here (with their own review) while the live text stays up
+  pending_changes     TEXT,
+  views               INTEGER NOT NULL DEFAULT 0,
+  created_at          TEXT NOT NULL,
+  updated_at          TEXT NOT NULL,
+  UNIQUE (tenant_id, slug)
+);
+CREATE INDEX IF NOT EXISTS idx_mag_status ON mag_articles (tenant_id, status, published_at DESC);
+
+-- every saved version of an article, for history and restore
+CREATE TABLE IF NOT EXISTS mag_revisions (
+  id          TEXT PRIMARY KEY,
+  article_id  TEXT NOT NULL REFERENCES mag_articles(id),
+  action      TEXT NOT NULL,
+  snapshot    TEXT NOT NULL,
+  actor_id    TEXT,
+  created_at  TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_mag_revisions ON mag_revisions (article_id, created_at DESC);
+
+-- article images (public, not encrypted: never patient files)
+CREATE TABLE IF NOT EXISTS mag_images (
+  id           TEXT PRIMARY KEY,
+  tenant_id    TEXT NOT NULL,
+  mime         TEXT NOT NULL,
+  size         INTEGER NOT NULL,
+  storage_key  TEXT NOT NULL,
+  uploaded_by  TEXT,
+  created_at   TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS mag_subscribers (
+  id               TEXT PRIMARY KEY,
+  tenant_id        TEXT NOT NULL,
+  contact          TEXT NOT NULL,
+  kind             TEXT NOT NULL CHECK (kind IN ('email','phone')),
+  created_at       TEXT NOT NULL,
+  unsubscribed_at  TEXT,
+  UNIQUE (tenant_id, contact)
+);
 `;
 
 export function openDb(path) {

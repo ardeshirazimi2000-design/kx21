@@ -19,6 +19,8 @@ export const PERMISSIONS = {
   'stats.view': 'مشاهده آمار',
   'audit.view': 'لاگ ممیزی',
   'activity.view': 'سابقه ورود و فعالیت کاربران',
+  'mag.write': 'نوشتن و ویرایش مقالات مجله سلامت',
+  'mag.publish': 'انتشار مقالات مجله سلامت (پس از تأیید پزشک)',
   'users.manage': 'مدیریت کاربران، نقش‌ها و دسترسی‌ها',
 };
 const ALL = Object.keys(PERMISSIONS);

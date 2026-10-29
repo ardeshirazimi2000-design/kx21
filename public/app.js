@@ -4,6 +4,7 @@
 import { openTriageWizard, triageResultCard } from './triage-wizard.js';
 import { mediaSupported, startCall } from './video-call.js';
 import { installV2 } from './views-v2.js';
+import { installMag } from './views-mag.js';
 import { icon, illus } from './icons.js';
 import { jalaliPicker, formatJalaliDate, todayJalali, isoToJalali, MONTHS } from './jalali.js';
 
@@ -165,17 +166,17 @@ function installButton() {
 let current = { view: null, cleanup: [] };
 const TABS = {
   patient: [['assistant', 'دستیار هوشمند'], ['doctors', 'پزشکان'], ['book', 'رزرو نوبت'], ['appointments', 'نوبت‌های من'], ['records', 'مدارک پزشکی'], ['prescriptions', 'نسخه‌ها'], ['inbox', 'پیام‌ها'], ['support', 'پشتیبانی'], ['profile', 'پروفایل و حریم خصوصی']],
-  doctor: [['doctor-appointments', 'نوبت‌ها'], ['calendar', 'تقویم'], ['doctor-rx', 'نسخه‌ها'], ['doctor-profile', 'پروفایل و مدارک'], ['doctor-contract', 'قرارداد همکاری'], ['inbox', 'اعلان‌ها'], ['support', 'پشتیبانی']],
+  doctor: [['doctor-appointments', 'نوبت‌ها'], ['calendar', 'تقویم'], ['doctor-rx', 'نسخه‌ها'], ['doctor-profile', 'پروفایل و مدارک'], ['doctor-contract', 'قرارداد همکاری'], ['doctor-mag-reviews', 'بازبینی مقالات'], ['inbox', 'اعلان‌ها'], ['support', 'پشتیبانی']],
   doctor_pending: [['doctor-profile', 'پروفایل و مدارک'], ['inbox', 'اعلان‌ها'], ['support', 'پشتیبانی']],
   // Staff tabs are shown by permission (see TAB_PERMS); operator and admin share the same list.
   operator: [['support-desk', 'دستیار پشتیبان'], ['escalations', 'درخواست‌های ارجاع'], ['stats', 'آمار']],
-  admin: [['admin-doctors', 'تأیید پزشکان'], ['settings', 'تنظیمات سیستم'], ['drug-catalog', 'فهرست داروها'], ['payments', 'پرداخت‌ها'], ['accounting', 'حسابداری'], ['support-desk', 'دستیار پشتیبان'], ['support-report', 'گزارش پشتیبانی'], ['escalations', 'درخواست‌های ارجاع'], ['stats', 'آمار'], ['audit', 'لاگ ممیزی'], ['activity', 'سابقه ورود و فعالیت'], ['staff', 'کاربران و نقش‌ها']],
+  admin: [['admin-doctors', 'تأیید پزشکان'], ['settings', 'تنظیمات سیستم'], ['drug-catalog', 'فهرست داروها'], ['payments', 'پرداخت‌ها'], ['accounting', 'حسابداری'], ['support-desk', 'دستیار پشتیبان'], ['support-report', 'گزارش پشتیبانی'], ['escalations', 'درخواست‌های ارجاع'], ['stats', 'آمار'], ['audit', 'لاگ ممیزی'], ['activity', 'سابقه ورود و فعالیت'], ['staff', 'کاربران و نقش‌ها'], ['magazine', 'مجله سلامت']],
 };
 TABS.doctor.splice(4, 0, ['doctor-accounting', 'حسابداری من']);
 for (const k of ['patient', 'doctor', 'doctor_pending']) TABS[k].push(['my-activity', 'سابقه ورود']);
 const TAB_PERMS = {
   'admin-doctors': 'doctors.review', settings: 'tariffs.manage', 'drug-catalog': 'drug_catalog.manage', payments: 'payments.view',
-  accounting: 'accounting.view', 'support-desk': 'support.handle', 'support-report': 'support.report', escalations: 'escalations.handle', stats: 'stats.view', audit: 'audit.view', activity: 'activity.view', staff: 'users.manage',
+  accounting: 'accounting.view', 'support-desk': 'support.handle', 'support-report': 'support.report', escalations: 'escalations.handle', stats: 'stats.view', audit: 'audit.view', activity: 'activity.view', staff: 'users.manage', magazine: 'mag.write',
 };
 function tabsFor(u) {
   if (['admin', 'operator'].includes(u.role)) {
@@ -191,7 +192,7 @@ const TAB_ICONS = {
   prescriptions: 'rx', inbox: 'bell', profile: 'user', 'my-activity': 'history',
   'doctor-appointments': 'stethoscope', 'doctor-contract': 'approve', calendar: 'calendar', 'doctor-rx': 'rx', 'doctor-profile': 'idcard', 'doctor-accounting': 'wallet',
   'admin-doctors': 'approve', settings: 'settings', 'drug-catalog': 'catalog', payments: 'card', accounting: 'wallet',
-  escalations: 'alert', support: 'support', 'support-desk': 'support', 'support-report': 'chart', stats: 'chart', audit: 'shield', activity: 'history', staff: 'team', 'staff-create': 'team',
+  escalations: 'alert', support: 'support', 'support-desk': 'support', 'support-report': 'chart', stats: 'chart', audit: 'shield', activity: 'history', staff: 'team', 'staff-create': 'team', magazine: 'book', 'doctor-mag-reviews': 'book',
 };
 // Phones: a bottom bar with five sections for patients and doctors (the rest is on the home
 // screen and in the top bar). Staff have many sections: a menu (side menu on wide screens).
@@ -345,6 +346,7 @@ const NAV_GROUPS = [
   ['g-finance', 'امور مالی', 'wallet', ['payments', 'accounting']],
   ['g-support', 'پشتیبانی و ارجاع', 'support', ['support-desk', 'support-report', 'escalations']],
   ['g-reports', 'گزارش‌ها و امنیت', 'chart', ['stats', 'audit', 'activity', 'my-activity']],
+  ['g-content', 'محتوا و سئو', 'book', ['magazine']],
   ['g-system', 'تنظیمات و کاربران', 'settings', ['settings', 'staff']],
 ];
 function groupNav(items) {
@@ -477,6 +479,12 @@ async function patientHome(me) {
   }
 }
 
+// The health magazine is a set of server pages: same tab on the web, system browser in the app.
+function openMagazine() {
+  if (IS_NATIVE) window.open(apiUrl('/mag'), '_blank', 'noopener');
+  else location.href = '/mag';
+}
+
 // «راهنما» and «تماس با ما» on the start screen (no account needed).
 async function openGuide() {
   const step = (n, t, d) => h('li', {}, h('b', {}, `${fa(n)}. ${t}`), h('div', { class: 'muted' }, d));
@@ -496,17 +504,11 @@ async function openGuide() {
     h('p', {}, 'پرسش دیگری دارید؟ پس از ورود، از بخش «پشتیبانی» با دستیار و کارشناس پشتیبانی گفتگو کنید.'),
     legalLink('قوانین و حریم خصوصی')));
 }
-async function openContact() {
-  const r = await api('GET', '/v1/legal');
-  const c = r.company;
+function openContact() {
+  const email = 'info@darman-plus.ir';
   V2.sheet('تماس با ما', h('div', { class: 'legal-page stack' },
-    h('p', {}, h('b', {}, c.name), ' — ', c.brand),
     h('ul', { class: 'contact-list' },
-      h('li', {}, h('span', { class: 'muted' }, 'نشانی: '), c.address),
-      h('li', {}, h('span', { class: 'muted' }, 'رایانامه: '), h('a', { href: `mailto:${c.email}`, dir: 'ltr' }, c.email)),
-      h('li', {}, h('span', { class: 'muted' }, 'وب‌سایت: '), h('bdi', {}, c.site))),
-    h('p', {}, 'کاربران سامانه پس از ورود می‌توانند از بخش «پشتیبانی» با دستیار پشتیبانی و کارشناس‌ها گفتگو کنند و شکایت یا درخواست خود را ثبت کنند.'),
-    legalLink('شیوه رسیدگی به شکایات', 'support')));
+      h('li', {}, h('span', { class: 'muted' }, 'رایانامه: '), h('a', { href: `mailto:${email}`, dir: 'ltr' }, email)))));
 }
 
 // First launch only: two animated introduction pages before the start screen (swipe, dots,
@@ -626,7 +628,7 @@ VIEWS.login = () => {
       h('header', { class: 'lp-top' },
         h('div', { class: 'lp-top-brand' }, h('img', { src: 'brand/mark.svg', alt: '', width: 38, height: 38 }), wordmark('sm')),
         h('nav', { class: 'lp-nav', 'aria-label': 'پیوندها' },
-          nav('خانه', () => stepRole(), true), nav('راهنما', guard(openGuide)), nav('تماس با ما', guard(openContact)))),
+          nav('خانه', () => stepRole(), true), nav('مجله سلامت', openMagazine), nav('راهنما', guard(openGuide)), nav('تماس با ما', guard(openContact)))),
       h('div', { class: 'lp-grid' }, card, hero));
   };
 
@@ -2008,6 +2010,7 @@ VIEWS.server = () => {
 // Views from the second requirements document (doctor onboarding, admin review, tariffs, payments, records).
 const V2 = { illus, VIEWS, h, api, toast, fa, fmt, route, guard, onCleanup, every, apiUrl, IS_NATIVE, formatJalaliDate, $app, getSession: () => session, setSession, renderChrome };
 installV2(V2);
+installMag(V2);
 // Login history moved off the bar: a link at the end of the profile pages.
 for (const name of ['profile', 'doctor-profile']) {
   const view = VIEWS[name];

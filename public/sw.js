@@ -1,7 +1,7 @@
 // Service worker: caches the app shell so the PWA opens instantly and offline.
 // API calls (/v1) always go to the network — health data is never cached on the device.
-const CACHE = 'clinic-shell-v47';
-const SHELL = ['/', '/index.html', '/app.js', '/triage-wizard.js', '/jalali.js', '/ble-health.js', '/video-call.js', '/views-v2.js', '/icons.js', '/brand/mark-white.svg', '/config.js', '/styles.css', '/icon.svg', '/fonts/vazirmatn.css', '/fonts/vazirmatn-arabic-400-normal.woff2', '/fonts/vazirmatn-arabic-700-normal.woff2', '/manifest.webmanifest', '/icons/icon-192.png', '/intro/home.webp', '/intro/visit.webp', '/intro/laptop.webp', '/brand/mark.svg'];
+const CACHE = 'clinic-shell-v48';
+const SHELL = ['/', '/index.html', '/app.js', '/triage-wizard.js', '/jalali.js', '/ble-health.js', '/video-call.js', '/views-v2.js', '/views-mag.js', '/icons.js', '/brand/mark-white.svg', '/config.js', '/styles.css', '/icon.svg', '/fonts/vazirmatn.css', '/fonts/vazirmatn-arabic-400-normal.woff2', '/fonts/vazirmatn-arabic-700-normal.woff2', '/manifest.webmanifest', '/icons/icon-192.png', '/intro/home.webp', '/intro/visit.webp', '/intro/laptop.webp', '/brand/mark.svg'];
 
 self.addEventListener('install', (e) => {
   e.waitUntil(caches.open(CACHE).then((c) => c.addAll(SHELL)).then(() => self.skipWaiting()));
@@ -14,7 +14,8 @@ self.addEventListener('activate', (e) => {
 
 self.addEventListener('fetch', (e) => {
   const url = new URL(e.request.url);
-  if (e.request.method !== 'GET' || url.origin !== location.origin || url.pathname.startsWith('/v1/') || url.pathname === '/healthz') return;
+  if (e.request.method !== 'GET' || url.origin !== location.origin || url.pathname.startsWith('/v1/') || url.pathname === '/healthz'
+    || url.pathname === '/mag' || url.pathname.startsWith('/mag/') || url.pathname === '/robots.txt' || url.pathname === '/sitemap.xml') return; // server pages
   // Network first (fresh code after deploys), cache as fallback.
   e.respondWith(
     fetch(e.request)

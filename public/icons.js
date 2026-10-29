@@ -19,6 +19,7 @@ const P = {
   chart: '<path d="M3 21h18"/><rect x="5" y="11" width="3" height="7" rx="1"/><rect x="10.5" y="5" width="3" height="13" rx="1"/><rect x="16" y="14" width="3" height="4" rx="1"/>',
   approve: '<rect x="4" y="3" width="16" height="18" rx="2.5"/><path d="M8 8h8M8 12h4"/><path d="M11 16.5l2 2 4-4.5"/>',
   card: '<rect x="2.5" y="5" width="19" height="14" rx="2.5"/><path d="M2.5 10h19M6 15h4"/>',
+  book: '<path d="M3 5.5C5.5 4 8.5 4 12 6c3.5-2 6.5-2 9-.5V19c-2.5-1.5-5.5-1.5-9 .5-3.5-2-6.5-2-9-.5z"/><path d="M12 6v13.5"/>',
   catalog: '<path d="M4 4.5h11a3 3 0 0 1 3 3V21H7a3 3 0 0 1-3-3z"/><path d="M4 18a3 3 0 0 1 3-3h11"/><path d="M9 8.5h5M11.5 6v5"/>',
   alert: '<path d="M12 3.5 21.5 20h-19z"/><path d="M12 10v4.5M12 17.3v.2"/>',
   team: '<circle cx="9" cy="8" r="3.5"/><path d="M2.5 20a6.5 6.5 0 0 1 10-5.5"/><circle cx="17.5" cy="16.5" r="2.2"/><path d="M17.5 12.3v1.5M17.5 19.2v1.5M13.3 16.5h1.5M20.2 16.5h1.5"/>',

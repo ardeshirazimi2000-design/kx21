@@ -31,6 +31,8 @@ import * as access from './modules/access.js';
 import * as accounting from './modules/accounting.js';
 import * as support from './modules/support.js';
 import * as contracts from './modules/contracts.js';
+import * as magazine from './modules/magazine.js';
+import { createMagazinePages } from './modules/magazine-pages.js';
 import { createLabOcr } from './modules/ai/lab-ocr.js';
 import { createIdentityService } from './modules/identity.js';
 import { createAssistant } from './modules/ai/assistant.js';
@@ -123,6 +125,7 @@ export function createApp(overrides = {}) {
   domain.labOcr = createLabOcr();
   domain.drugDirectory = createDrugDirectory({ db, config });
   domain.drugCatalog = drugCatalog.createDrugCatalog({ db });
+  domain.magazine = magazine.createMagazineDomain({ db, platform, config, domain });
   domain.patient = patient.createPatientDomain({ db, keys, files: () => domain.files });
   domain.moderate = createModerator({ db, ApiError, uuid, nowIso });
   domain.payments = payments.createPaymentsDomain({ db, platform, config });
@@ -149,6 +152,8 @@ export function createApp(overrides = {}) {
   accounting.register(router, deps);
   support.register(router, deps);
   contracts.register(router, deps);
+  magazine.register(router, deps);
+  const magPages = createMagazinePages({ db, config, domain, limiter });
 
   router.get('/healthz', async () => ({ body: { status: 'ok' } }));
   router.get('/v1/config', async () => ({
@@ -157,6 +162,7 @@ export function createApp(overrides = {}) {
 
   if (config.seed) seed({ db, config, domain });
   if (!config.devMode) bootstrapProduction({ db, config });
+  domain.magazine.seedDrafts(config.defaultTenant);
 
   async function serveStatic(req, res, pathname) {
     let rel = pathname === '/' ? 'index.html' : pathname.slice(1);
@@ -171,12 +177,7 @@ export function createApp(overrides = {}) {
       res.end(data);
       return true;
     } catch {
-      if (!extname(rel)) { // SPA fallback
-        const data = await readFile(join(PUBLIC_DIR, 'index.html'));
-        res.writeHead(200, { 'Content-Type': MIME['.html'] });
-        res.end(data);
-        return true;
-      }
+      // The app routes by #hash, so an unknown path is a real 404 (no soft-404 copies of the app).
       return false;
     }
   }
@@ -211,16 +212,19 @@ export function createApp(overrides = {}) {
       }
     }
     try {
-      if (!url.pathname.startsWith('/v1/') && url.pathname !== '/healthz') {
-        if (req.method === 'GET' && (await serveStatic(req, res, url.pathname))) return;
-        throw new ApiError(404, 'not_found', 'مسیر پیدا نشد');
-      }
       // Behind the reverse proxy (local Caddy/nginx, or a Docker proxy on TRUSTED_PROXIES) the client
       // address comes in X-Forwarded-For. The last entry is the one our proxy added; earlier ones are
       // whatever the client sent and could be forged.
       const peer = req.socket.remoteAddress ?? '';
       const fwd = String(req.headers['x-forwarded-for'] ?? '').split(',').map((x) => x.trim()).filter(Boolean).at(-1);
       const ip = fwd && isTrustedProxy(peer) ? fwd : peer;
+      if (!url.pathname.startsWith('/v1/') && url.pathname !== '/healthz') {
+        // Public health-magazine pages, robots.txt and sitemap.xml are rendered on the server.
+        if (await magPages.handle(req, res, url, ip)) return;
+        if (req.method === 'GET' && (await serveStatic(req, res, url.pathname))) return;
+        if (req.method === 'GET' || req.method === 'HEAD') { magPages.notFoundPage(req, res); return; }
+        throw new ApiError(404, 'not_found', 'مسیر پیدا نشد');
+      }
       limiter.hit(`ip:${ip}`, 600, 60_000);
       const m = router.match(req.method, url.pathname);
       if (!m) throw new ApiError(404, 'not_found', 'مسیر پیدا نشد');
