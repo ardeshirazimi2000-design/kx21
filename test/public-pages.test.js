@@ -108,7 +108,7 @@ test('services page shows the tariffs set by the admin, in toman; about page and
   assert.match(s.html, /ویزیت متنی<\/b>.*?۸۰٬۰۰۰ تومان/s);
   assert.match(s.html, /رایگان/); // triage tariff 0
   assert.match(s.html, /"@type":"OfferCatalog"/);
-  assert.match(s.html, /trustseal\.enamad\.ir\/logo\.aspx\?id=8314749/);
+  assert.match(s.html, /trustseal\.enamad\.ir\/logo\.aspx\?id=8273167/);
   assert.ok(s.html.includes(ENAMAD_TAG)); // exactly as issued by Enamad
   assert.doesNotMatch(s.html.slice(s.html.indexOf('trustseal') - 200, s.html.indexOf('trustseal') + 400), /noopener|noreferrer/);
   assert.equal(s.headers.get('referrer-policy'), 'strict-origin-when-cross-origin');

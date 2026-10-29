@@ -13,7 +13,7 @@ export const COMPANY = {
 };
 // Enamad (e-commerce trust seal) badge, exactly as issued by enamad.ir: Enamad shows the logo only for
 // the registered site's referrer and requires the markup unchanged (no rel="noopener noreferrer").
-export const ENAMAD_TAG = "<a referrerpolicy='origin' target='_blank' href='https://trustseal.enamad.ir/?id=8314749&Code=wS3OOxHCDNSFi7zxx0pjQXNjqLlWlybD'><img referrerpolicy='origin' src='https://trustseal.enamad.ir/logo.aspx?id=8314749&Code=wS3OOxHCDNSFi7zxx0pjQXNjqLlWlybD' alt='' style='cursor:pointer' code='wS3OOxHCDNSFi7zxx0pjQXNjqLlWlybD'></a>";
+export const ENAMAD_TAG = "<a referrerpolicy='origin' target='_blank' href='https://trustseal.enamad.ir/?id=8273167&Code=Pr8u9hvfEN7Bpy4GOGSR4dYpWEvnVG7m'><img referrerpolicy='origin' src='https://trustseal.enamad.ir/logo.aspx?id=8273167&Code=Pr8u9hvfEN7Bpy4GOGSR4dYpWEvnVG7m' alt='' style='cursor:pointer' code='Pr8u9hvfEN7Bpy4GOGSR4dYpWEvnVG7m'></a>";
 export const enamadBadge = () => `<div class="enamad">${ENAMAD_TAG}</div>`;
 
 export const LEGAL_UPDATED = '۱۴۰۵/۰۷/۲۳';
