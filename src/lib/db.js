@@ -593,6 +593,8 @@ const COLUMNS = {
     ['review_reason', 'TEXT'], ['reviewed_by', 'TEXT'], ['reviewed_at', 'TEXT'], ['submitted_at', 'TEXT'],
     ['sheba', 'TEXT'], // bank account (IBAN) for payouts
     ['contract_required', 'INTEGER'], ['contract_signed_at', 'TEXT'], // cooperation agreement (doctors approved from 1405/07)
+    // Public profile page on the site (/doctors/<slug>): only with the doctor's own consent.
+    ['public_profile', 'INTEGER'], ['public_show_license', 'INTEGER'], ['public_slug', 'TEXT'],
   ],
   appointments: [['payment_due_at', 'TEXT'], ['cancel_reason', 'TEXT'], ['cancelled_by', 'TEXT'], ['reminded_60_at', 'TEXT'], ['reminded_room_at', 'TEXT'],
     ['queue_next_at', 'TEXT'], ['queue_delay_notified', 'INTEGER'], // live queue notifications
@@ -617,6 +619,7 @@ function migrate(db) {
     for (const [name, type] of cols) if (!have.has(name)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${name} ${type}`);
   }
   db.exec(`CREATE INDEX IF NOT EXISTS idx_users_nid ON users (tenant_id, national_id_hash)`);
+  db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS uq_doctors_public_slug ON doctors (tenant_id, public_slug) WHERE public_slug IS NOT NULL`);
 }
 
 function wrap(db) {

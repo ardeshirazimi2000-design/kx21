@@ -145,3 +145,34 @@ img { max-width: 100%; height: auto; display: block; }
   .mg-hero-img { max-width: 200px; }
   .mg-hero { gap: 8px; }
 }
+
+/* Public doctor, specialty and legal pages */
+.mg-intro { color: var(--mg-muted); max-width: 70ch; margin: 0 0 20px; }
+.mg-links { list-style: none; padding: 0; margin: 0 0 24px; display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 12px; }
+.mg-links a { display: flex; align-items: center; gap: 10px; padding: 14px 16px; background: var(--mg-card); border: 1px solid var(--mg-line); border-radius: var(--mg-r); text-decoration: none; color: var(--mg-navy); font-weight: 700; }
+.mg-links a:hover { border-color: var(--mg-blue); }
+.mg-links small { margin-inline-start: auto; color: var(--mg-muted); font-weight: 400; }
+.mg-docs { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; }
+.mg-doc { background: var(--mg-card); border: 1px solid var(--mg-line); border-radius: var(--mg-r); }
+.mg-doc:hover { border-color: var(--mg-blue); }
+.mg-doc-in { display: flex; align-items: center; gap: 14px; padding: 14px; text-decoration: none; color: var(--mg-ink); }
+.mg-doc-in b { display: block; color: var(--mg-navy); }
+.mg-doc-in small { color: var(--mg-muted); }
+.mg-avatar { border-radius: 50%; object-fit: cover; flex: none; background: var(--mg-sky); }
+.mg-avatar.ph { display: inline-flex; align-items: center; justify-content: center; color: var(--mg-blue); }
+.mg-doc-head { display: flex; align-items: flex-start; gap: 20px; margin-bottom: 8px; }
+.mg-doc-head h1 { margin: 0 0 4px; }
+.mg-services { list-style: none; padding: 0; margin: 0; display: grid; gap: 8px; }
+.mg-services li { display: flex; align-items: center; gap: 10px; padding: 10px 14px; border: 1px solid var(--mg-line); border-radius: 12px; background: var(--mg-sky2); color: var(--mg-navy); }
+.mg-services b { margin-inline-start: auto; }
+.mg-steps { margin: 0 0 14px; padding-inline-start: 20px; color: var(--mg-ink); }
+.mg-steps li { margin-bottom: 6px; }
+.mg-table { overflow-x: auto; margin: 12px 0; }
+.mg-table table { border-collapse: collapse; width: 100%; font-size: .92rem; }
+.mg-table th, .mg-table td { border: 1px solid var(--mg-line); padding: 8px 10px; text-align: start; vertical-align: top; }
+.mg-table th { background: var(--mg-sky2); color: var(--mg-navy); }
+.mg-legal section { margin-bottom: 18px; }
+@media (max-width: 640px) {
+  .mg-doc-head { flex-direction: column; align-items: center; text-align: center; }
+  .mg-links, .mg-docs { grid-template-columns: 1fr; }
+}

@@ -48,7 +48,7 @@ export function createMagazineDomain({ db, platform, config, domain }) {
     return a;
   };
   const doctorName = (doctorId) => doctorId && db.get(
-    `SELECT u.full_name, d.specialty, d.id FROM doctors d JOIN users u ON u.id = d.user_id WHERE d.id = ?`, doctorId) || null;
+    `SELECT u.full_name, d.specialty, d.id, d.public_profile, d.public_slug FROM doctors d JOIN users u ON u.id = d.user_id WHERE d.id = ?`, doctorId) || null;
   const approvedDoctor = (tenantId, doctorId) => db.get(
     `SELECT d.id, d.user_id, u.phone FROM doctors d JOIN users u ON u.id = d.user_id
      WHERE d.id = ? AND d.tenant_id = ? AND d.status = 'approved' AND d.deleted_at IS NULL AND u.disabled_at IS NULL`, doctorId, tenantId);

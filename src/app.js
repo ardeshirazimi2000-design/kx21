@@ -4,7 +4,8 @@
 // split into its own deployable later (design doc §1, "5 services in MVP").
 import http from 'node:http';
 import { tmpdir } from 'node:os';
-import { readFile } from 'node:fs/promises';
+import { readFile, stat } from 'node:fs/promises';
+import { gzipSync } from 'node:zlib';
 import { dirname, extname, join, normalize } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Router, RateLimiter, readJson, sendJson, sendError, newTraceId, ApiError } from './lib/http.js';
@@ -43,7 +44,7 @@ import { createSms } from './lib/sms.js';
 const PUBLIC_DIR = fileURLToPath(new URL('../public/', import.meta.url));
 const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8',
   '.svg': 'image/svg+xml', '.json': 'application/json', '.ico': 'image/x-icon', '.png': 'image/png',
-  '.webmanifest': 'application/manifest+json', '.woff2': 'font/woff2', '.webp': 'image/webp' };
+  '.webmanifest': 'application/manifest+json', '.woff2': 'font/woff2', '.webp': 'image/webp', '.txt': 'text/plain; charset=utf-8' };
 
 export function loadConfig(env = process.env) {
   const devMode = env.NODE_ENV !== 'production';
@@ -164,22 +165,38 @@ export function createApp(overrides = {}) {
   if (!config.devMode) bootstrapProduction({ db, config });
   domain.magazine.seedDrafts(config.defaultTenant);
 
+  // Static files: an ETag for cheap revalidation (304), long caching for fonts and images, and
+  // gzip for text files (kept in memory per file version).
+  const LONG_CACHE = /^(fonts|icons|intro|brand|mag-assets)\//;
+  const COMPRESSIBLE = new Set(['.html', '.js', '.css', '.svg', '.json', '.webmanifest']);
+  const gzCache = new Map();
   async function serveStatic(req, res, pathname) {
-    let rel = pathname === '/' ? 'index.html' : pathname.slice(1);
+    const rel = pathname === '/' ? 'index.html' : pathname.slice(1);
     const full = normalize(join(PUBLIC_DIR, rel));
     if (!full.startsWith(PUBLIC_DIR)) return false;
-    try {
-      const data = await readFile(full);
-      res.writeHead(200, {
-        'Content-Type': MIME[extname(full)] || 'application/octet-stream', 'Cache-Control': 'no-cache',
-        ...(rel === 'sw.js' ? { 'Service-Worker-Allowed': '/' } : {}),
-      });
-      res.end(data);
-      return true;
-    } catch {
-      // The app routes by #hash, so an unknown path is a real 404 (no soft-404 copies of the app).
-      return false;
+    let st;
+    try { st = await stat(full); } catch { return false; } // the app routes by #hash: unknown paths are real 404s
+    if (!st.isFile()) return false;
+    const etag = `"${st.size.toString(36)}-${Math.floor(st.mtimeMs).toString(36)}"`;
+    const ext = extname(full);
+    const headers = {
+      'Content-Type': MIME[ext] || 'application/octet-stream', ETag: etag,
+      'Cache-Control': LONG_CACHE.test(rel) ? 'public, max-age=604800' : 'no-cache',
+      ...(rel === 'sw.js' ? { 'Service-Worker-Allowed': '/' } : {}),
+      ...(COMPRESSIBLE.has(ext) ? { Vary: 'Accept-Encoding' } : {}),
+    };
+    if (req.headers['if-none-match'] === etag) { res.writeHead(304, headers); res.end(); return true; }
+    let data = await readFile(full);
+    if (COMPRESSIBLE.has(ext) && data.length > 1024 && /\bgzip\b/.test(String(req.headers['accept-encoding'] ?? ''))) {
+      const key = `${full}|${etag}`;
+      let gz = gzCache.get(key);
+      if (!gz) { gz = gzipSync(data); if (gzCache.size > 200) gzCache.clear(); gzCache.set(key, gz); }
+      data = gz;
+      headers['Content-Encoding'] = 'gzip';
     }
+    res.writeHead(200, { ...headers, 'Content-Length': data.length });
+    res.end(req.method === 'HEAD' ? undefined : data);
+    return true;
   }
 
   const SECURITY_HEADERS = {
@@ -221,7 +238,7 @@ export function createApp(overrides = {}) {
       if (!url.pathname.startsWith('/v1/') && url.pathname !== '/healthz') {
         // Public health-magazine pages, robots.txt and sitemap.xml are rendered on the server.
         if (await magPages.handle(req, res, url, ip)) return;
-        if (req.method === 'GET' && (await serveStatic(req, res, url.pathname))) return;
+        if ((req.method === 'GET' || req.method === 'HEAD') && (await serveStatic(req, res, url.pathname))) return;
         if (req.method === 'GET' || req.method === 'HEAD') { magPages.notFoundPage(req, res); return; }
         throw new ApiError(404, 'not_found', 'مسیر پیدا نشد');
       }

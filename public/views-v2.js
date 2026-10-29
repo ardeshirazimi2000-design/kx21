@@ -200,8 +200,29 @@ export function installV2(x) {
           h('div', { class: 'upload' }, h('label', {}, 'تصویر کارت نظام پزشکی * (عکس یا PDF)'), cardPrev, picker('image/*,application/pdf', 'license_card', (id) => { cardId = id; }, cardPrev))),
         locked ? null : h('div', { class: 'row' },
           h('button', { class: 'btn', onclick: guard(async () => { await save(); toast('ذخیره شد'); route('doctor-profile'); }) }, 'ذخیره'),
-          approved ? null : h('button', { class: 'btn primary', onclick: guard(async () => { await save(); await api('POST', '/v1/doctors/me/submit', {}); toast('برای بررسی ارسال شد'); route('doctor-profile'); }) }, 'ذخیره و ارسال برای بررسی'))));
+          approved ? null : h('button', { class: 'btn primary', onclick: guard(async () => { await save(); await api('POST', '/v1/doctors/me/submit', {}); toast('برای بررسی ارسال شد'); route('doctor-profile'); }) }, 'ذخیره و ارسال برای بررسی'))),
+      approved ? publicProfileCard(d) : null);
   };
+
+  // Public page on the website (search engines): off until the doctor explicitly turns it on.
+  function publicProfileCard(d) {
+    const ready = !(d.contract_required && !d.contract_signed_at);
+    const enabled = h('input', { type: 'checkbox', checked: d.public_profile, disabled: !ready });
+    const license = h('input', { type: 'checkbox', checked: d.public_show_license, disabled: !ready });
+    const url = d.public_url ? apiUrl(d.public_url) : null;
+    return h('div', { class: 'card stack' },
+      h('h3', {}, 'صفحه عمومی در وب‌سایت'),
+      h('p', { class: 'muted' }, 'با فعال کردن این گزینه، صفحه‌ای با نام، تخصص، عکس، رزومه، سابقه کار و زمان‌های آزاد شما در وب‌سایت درمان پلاس منتشر می‌شود که موتورهای جست‌وجو هم آن را می‌بینند. شماره موبایل، کد ملی، شماره حساب و اطلاعات بیماران هرگز در این صفحه نمایش داده نمی‌شود. هر زمان بخواهید می‌توانید آن را خاموش کنید.'),
+      ready ? null : h('div', { class: 'banner warn' }, 'این گزینه پس از امضای قرارداد همکاری فعال می‌شود.'),
+      h('label', { class: 'row' }, enabled, h('span', {}, 'با انتشار صفحه عمومی خود موافقم')),
+      h('label', { class: 'row' }, license, h('span', {}, 'شماره نظام پزشکی هم نمایش داده شود')),
+      url ? h('p', {}, 'نشانی صفحه شما: ', h('a', { href: url, target: '_blank', rel: 'noopener', dir: 'ltr' }, url)) : null,
+      h('div', { class: 'row' }, h('button', { class: 'btn primary', disabled: !ready, onclick: guard(async () => {
+        await api('PUT', '/v1/doctors/me/public-profile', { enabled: enabled.checked, show_license: license.checked });
+        toast(enabled.checked ? 'صفحه عمومی فعال شد' : 'صفحه عمومی خاموش شد');
+        route('doctor-profile');
+      }) }, 'ذخیره تنظیمات صفحه عمومی')));
+  }
 
   // ---------------------------------------------------------------- cooperation agreement
   // Signature drawn with finger or mouse; returns { el, isEmpty, toDataURL, clear }.

@@ -8,6 +8,9 @@ import { installMag } from './views-mag.js';
 import { icon, illus } from './icons.js';
 import { jalaliPicker, formatJalaliDate, todayJalali, isoToJalali, MONTHS } from './jalali.js';
 
+// The static intro in index.html is for crawlers and no-JS visitors; the app shows it only on the start screen.
+document.documentElement.classList.add('js');
+
 // ---------------- utilities ----------------
 // Optional parts are written as `cond ? node : null`. The DOM would print a null/undefined/false
 // child as the text "null" etc., so these methods skip them everywhere.
@@ -628,7 +631,7 @@ VIEWS.login = () => {
       h('header', { class: 'lp-top' },
         h('div', { class: 'lp-top-brand' }, h('img', { src: 'brand/mark.svg', alt: '', width: 38, height: 38 }), wordmark('sm')),
         h('nav', { class: 'lp-nav', 'aria-label': 'پیوندها' },
-          nav('خانه', () => stepRole(), true), nav('مجله سلامت', openMagazine), nav('راهنما', guard(openGuide)), nav('تماس با ما', guard(openContact)))),
+          nav('خانه', () => stepRole(), true), IS_NATIVE ? nav('مجله سلامت', openMagazine) : h('a', { href: '/mag' }, 'مجله سلامت'), nav('راهنما', guard(openGuide)), nav('تماس با ما', guard(openContact)))),
       h('div', { class: 'lp-grid' }, card, hero));
   };
 

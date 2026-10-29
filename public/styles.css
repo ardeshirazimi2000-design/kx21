@@ -705,3 +705,11 @@ body.landing-mode { background: radial-gradient(circle at 15% 60%, #dceafd 0, tr
   :root:not([data-theme="light"]) .lp-feats li { color: var(--text); }
   :root:not([data-theme="light"]) .lp-feat-ic { background: var(--surface); }
 }
+
+/* Crawlable intro in index.html: below the fold while the app loads, shown under the start screen, hidden inside the app. */
+@media (scripting: enabled) { #app:empty { min-height: 100vh; } }
+.seo-intro { max-width: 960px; margin: 24px auto; padding: 0 16px 24px; color: #44546a; font-size: 15px; line-height: 1.9; }
+.seo-intro h2 { font-size: 18px; color: var(--primary); margin: 0 0 8px; }
+.seo-intro ul { display: flex; flex-wrap: wrap; gap: 8px 20px; padding: 0; list-style: none; margin: 12px 0; }
+.seo-intro a { color: var(--primary); }
+.js body:not(.landing-mode) .seo-intro { display: none; }

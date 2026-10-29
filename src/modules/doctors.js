@@ -6,6 +6,8 @@ import { ApiError, badRequest, notFound, conflict, requireUuid } from '../lib/ht
 import { nowIso, isUniqueViolation } from '../lib/db.js';
 import { requireUser } from './auth.js';
 import { SPECIALTIES } from './patient.js';
+import { slugify } from './magazine.js';
+import { doctorBookable } from '../lib/contract-text.js';
 
 const EDITABLE_WHEN_APPROVED = ['bio', 'education', 'experience_years', 'photo_file_id'];
 const STATUS_FA = { draft: 'پیش‌نویس', pending_review: 'در انتظار بررسی', approved: 'تأییدشده', rejected: 'ردشده', suspended: 'تعلیق‌شده' };
@@ -33,6 +35,8 @@ export function register(router, { db, platform, domain }) {
       status: d.status, status_label: STATUS_FA[d.status] ?? d.status,
       review_reason: d.review_reason, submitted_at: d.submitted_at, reviewed_at: d.reviewed_at,
       contract_required: !!d.contract_required, contract_signed_at: d.contract_signed_at ?? null,
+      public_profile: !!d.public_profile, public_show_license: !!d.public_show_license,
+      public_url: d.public_profile && d.public_slug ? `/doctors/${encodeURIComponent(d.public_slug)}` : null,
     };
   };
 
@@ -44,6 +48,24 @@ export function register(router, { db, platform, domain }) {
   };
 
   router.get('/v1/doctors/me/profile', async (ctx) => ({ body: fullView(myDoctor(ctx)) }));
+
+  // Public page on the site (/doctors/<name>): only when the doctor turns it on. It shows name,
+  // specialty, photo, introduction, education, experience and free times — never contact details;
+  // the medical-council number only if the doctor chooses to.
+  router.put('/v1/doctors/me/public-profile', async (ctx) => {
+    const d = myDoctor(ctx);
+    if (typeof ctx.body.enabled !== 'boolean') throw badRequest('enabled باید true یا false باشد');
+    if (ctx.body.enabled && !doctorBookable(d)) throw conflict('صفحه عمومی پس از تأیید مدارک و امضای قرارداد فعال می‌شود', 'doctor_not_bookable');
+    let slug = d.public_slug;
+    if (ctx.body.enabled && !slug) {
+      const name = db.get('SELECT full_name FROM users WHERE id = ?', d.user_id)?.full_name ?? 'پزشک';
+      slug = `${slugify(name.startsWith('دکتر') ? name : `دکتر ${name}`)}-${d.id.slice(0, 4)}`;
+    }
+    db.run('UPDATE doctors SET public_profile = ?, public_show_license = ?, public_slug = ? WHERE id = ?',
+      ctx.body.enabled ? 1 : 0, ctx.body.show_license ? 1 : 0, slug ?? null, d.id);
+    platform.audit(ctx, 'doctor.public_profile', `doctor:${d.id}`, { enabled: ctx.body.enabled, show_license: !!ctx.body.show_license });
+    return { body: fullView(db.get('SELECT * FROM doctors WHERE id = ?', d.id)) };
+  });
 
   router.put('/v1/doctors/me/profile', async (ctx) => {
     const d = myDoctor(ctx);
