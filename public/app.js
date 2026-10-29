@@ -95,6 +95,7 @@ const urgencyPill = (u) => { const [t, c] = LABELS.urgency[u] ?? [u, '']; return
 // Web: same origin. Native app (Capacitor): the server address comes from the build
 // (config.js) or is entered once on the "server" screen and kept on the device.
 const IS_NATIVE = !!window.Capacitor?.isNativePlatform?.();
+if (IS_NATIVE) document.documentElement.classList.add('native'); // the website intro's links only work on the web
 // A build with the server address built in always uses it (an older install may have saved the old IP).
 let API_BASE = (window.TELEHEALTH_API_BASE || store.get('api_base') || '').replace(/\/$/, '');
 const apiUrl = (path) => API_BASE + path;
@@ -631,7 +632,7 @@ VIEWS.login = () => {
       h('header', { class: 'lp-top' },
         h('div', { class: 'lp-top-brand' }, h('img', { src: 'brand/mark.svg', alt: '', width: 38, height: 38 }), wordmark('sm')),
         h('nav', { class: 'lp-nav', 'aria-label': 'پیوندها' },
-          nav('خانه', () => stepRole(), true), IS_NATIVE ? nav('مجله سلامت', openMagazine) : h('a', { href: '/mag' }, 'مجله سلامت'), nav('راهنما', guard(openGuide)), nav('تماس با ما', guard(openContact)))),
+          nav('خانه', () => stepRole(), true), IS_NATIVE ? nav('مجله سلامت', openMagazine) : h('a', { href: '/mag' }, 'مجله سلامت'), IS_NATIVE ? null : h('a', { href: '/services' }, 'خدمات و تعرفه‌ها'), nav('راهنما', guard(openGuide)), nav('تماس با ما', guard(openContact)))),
       h('div', { class: 'lp-grid' }, card, hero));
   };
 

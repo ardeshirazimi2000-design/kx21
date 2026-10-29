@@ -9,11 +9,12 @@ import { join } from 'node:path';
 import { renderMarkdown, readingMinutes, esc } from '../lib/markdown.js';
 import { normalizePhone } from '../lib/fa.js';
 import { uuid, nowIso, parseJson } from '../lib/db.js';
-import { COMPANY, legalDoc, legalIndex, LEGAL_UPDATED } from '../lib/legal.js';
+import { COMPANY, legalDoc, legalIndex, LEGAL_UPDATED, enamadBadge } from '../lib/legal.js';
 import { DOCTOR_BOOKABLE_SQL } from '../lib/contract-text.js';
 import { getVisitSettings } from '../lib/visit-settings.js';
 import { SPECIALTIES } from './patient.js';
 import { MAG_CATEGORIES } from './magazine.js';
+import { TARIFF_LABELS } from './payments.js';
 
 // Short introductions for the category pages (shown under the heading and used as their description).
 const CATEGORY_INTRO = {
@@ -123,8 +124,10 @@ ${footer()}
 <nav class="mg-nav" aria-label="پیوندهای اصلی"><div class="mg-wrap">
 <a href="/">${svg('home', 18)}خانه</a>
 <a href="/doctors"${active === 'doctors' ? ' aria-current="page"' : ''}>${svg('doctor', 18)}پزشکان و مشاوره آنلاین</a>
+<a href="/services"${active === 'services' ? ' aria-current="page"' : ''}>${svg('cal', 18)}خدمات و تعرفه‌ها</a>
 <a href="/mag"${active === 'mag' ? ' aria-current="page"' : ''}>${svg('book', 18)}مجله سلامت</a>
 <a href="/legal"${active === 'legal' ? ' aria-current="page"' : ''}>${svg('shield', 18)}قوانین و حریم خصوصی</a>
+<a href="/about"${active === 'about' ? ' aria-current="page"' : ''}>${svg('home', 18)}درباره ما و تماس</a>
 </div></nav>
 </header>`;
   }
@@ -132,7 +135,8 @@ ${footer()}
   function footer() {
     return `<footer class="mg-foot"><div class="mg-wrap mg-foot-in">
 <a class="mg-brand" href="/mag"><img src="/brand/mark.svg" alt="" width="36" height="36"><span><b>درمان پلاس</b><small>سلامت شما، اولویت ماست</small></span></a>
-<nav aria-label="پیوندهای پایین صفحه"><a href="/">خانه</a><a href="/doctors">پزشکان</a><a href="/specialties">تخصص‌ها</a><a href="/mag">مجله سلامت</a>${Object.entries(MAG_CATEGORIES).slice(0, 4).map(([c, l]) => `<a href="/mag/c/${c}">${esc(l)}</a>`).join('')}<a href="/legal">قوانین و حریم خصوصی</a></nav>
+<nav aria-label="پیوندهای پایین صفحه"><a href="/">خانه</a><a href="/services">خدمات و تعرفه‌ها</a><a href="/doctors">پزشکان</a><a href="/specialties">تخصص‌ها</a><a href="/mag">مجله سلامت</a>${Object.entries(MAG_CATEGORIES).slice(0, 4).map(([c, l]) => `<a href="/mag/c/${c}">${esc(l)}</a>`).join('')}<a href="/legal">قوانین و حریم خصوصی</a><a href="/about">درباره ما و تماس</a></nav>
+<div class="mg-seal">${enamadBadge()}</div>
 <p class="mg-copy">© ${esc(COMPANY.brand)} — ${esc(COMPANY.name)}. مطالب مجله جایگزین معاینه و مشاوره پزشک نیست.</p>
 </div></footer>`;
   }
@@ -317,6 +321,61 @@ ${rows.length ? `<div class="mg-grid mg-grid-wide">${rows.map(card).join('')}</d
       jsonld: [breadcrumbLd(siteBase(req), [['قوانین و حریم خصوصی', '/legal'], [d.title, `/legal/${id}`]])] }));
   }
 
+  // ---------------------------------------------------------------- services, prices, about
+  // Prices come from the tariffs set by the admin (stored in rial, shown in toman).
+  const SERVICE_INFO = {
+    triage: ['all', 'پرسش‌وپاسخ با دستیار هوشمند درباره علائم، تعیین فوریت و پیشنهاد تخصص مناسب. جایگزین معاینه پزشک نیست.'],
+    visit_chat: ['chat', 'گفتگوی متنی با پزشک در زمان نوبت، همراه با امکان ارسال عکس، مدارک و نتایج آزمایش.'],
+    visit_audio: ['doctor', 'تماس صوتی امن با پزشک در زمان نوبت از داخل سامانه، بدون نیاز به شماره تلفن.'],
+    visit_video: ['doctor', 'ویزیت تصویری با پزشک در زمان نوبت؛ مناسب برای مواردی که دیدن بیمار به تشخیص کمک می‌کند.'],
+  };
+  const SERVICE_ORDER = ['visit_video', 'visit_audio', 'visit_chat', 'triage'];
+  const priceText = (rial) => (rial ? `${faNum(Math.round(rial / 10))} تومان` : 'رایگان');
+
+  function servicesPage(req, res) {
+    const t = domain.payments?.getTariffs?.(tenantOf()) ?? {};
+    const vs = getVisitSettings(db, tenantOf());
+    const durations = vs.durations.map((m) => faNum(m)).join('، ');
+    const body = `${crumbs([['خدمات و تعرفه‌ها', null]])}
+<h1 class="mg-h1">خدمات و تعرفه‌های درمان پلاس</h1>
+<p class="mg-intro">همه خدمات زیر به‌صورت آنلاین و از طریق وب‌سایت یا اپلیکیشن درمان پلاس ارائه می‌شود. مبالغ به تومان و شامل همه هزینه‌هاست؛ هزینه‌ای جداگانه از بیمار دریافت نمی‌شود.</p>
+<div class="mg-table"><table><thead><tr><th>خدمت</th><th>توضیح</th><th>تعرفه</th></tr></thead><tbody>
+${SERVICE_ORDER.map((k) => `<tr><td><b>${esc(TARIFF_LABELS[k])}</b></td><td>${esc(SERVICE_INFO[k][1])}${k.startsWith('visit_') ? ` مدت هر ویزیت: ${durations} دقیقه.` : ''}</td><td class="mg-price">${priceText(t[k])}</td></tr>`).join('')}
+</tbody></table></div>
+<section class="mg-legal"><h2 class="mg-h2">نحوه دریافت خدمت و پرداخت</h2>
+<ol class="mg-steps"><li>با شماره موبایل در درمان پلاس ثبت‌نام کنید.</li><li>پزشک، نوع ویزیت و یکی از زمان‌های آزاد را انتخاب کنید.</li><li>هزینه را از طریق درگاه پرداخت اینترنتی بانکی با همه کارت‌های عضو شبکه شتاب پرداخت کنید. نوبت پس از پرداخت قطعی می‌شود و تا ${faNum(domain.payments?.HOLD_MIN ?? 15)} دقیقه برای پرداخت نگه داشته می‌شود.</li><li>در زمان نوبت از بخش «نوبت‌ها» وارد اتاق ویزیت شوید.</li></ol>
+<h2 class="mg-h2">لغو و بازگشت وجه</h2>
+<p>اگر نوبت را دست‌کم ${faNum(vs.cancel_refund_hours)} ساعت پیش از زمان آن لغو کنید، کل مبلغ بازگردانده می‌شود یا نوبت بدون پرداخت مجدد به زمان دیگری منتقل می‌شود. اگر پزشک نوبت را لغو کند یا حاضر نشود، یا ویزیت به‌علت اشکال فنی سامانه انجام نشود، به انتخاب شما ویزیت مجدد بدون هزینه یا بازگشت کامل وجه انجام می‌شود. بازگشت وجه حداکثر ظرف ۷ روز کاری به همان کارت پرداخت‌کننده انجام می‌شود. جزئیات در <a href="/legal/terms">شرایط استفاده، لغو و بازپرداخت</a> آمده است.</p>
+<p>درمان پلاس خدمات اورژانسی ارائه نمی‌کند؛ در شرایط اورژانسی با ۱۱۵ تماس بگیرید.</p></section>
+<div class="mg-cta"><div><b>پزشک موردنظر خود را پیدا کنید</b><p>فهرست پزشکان و تخصص‌ها را ببینید یا مستقیم وارد سامانه شوید.</p></div><a class="mg-btn" href="/">${svg('cal', 18)}رزرو نوبت آنلاین</a></div>`;
+    const base = siteBase(req);
+    const offers = SERVICE_ORDER.map((k) => ({ '@type': 'Offer', name: TARIFF_LABELS[k], price: String(Math.round((t[k] ?? 0) / 10)), priceCurrency: 'IRT', description: SERVICE_INFO[k][1] }));
+    return send(req, res, 200, layout(req, {
+      title: 'خدمات و تعرفه‌ها | ویزیت آنلاین درمان پلاس',
+      description: `تعرفه ویزیت تصویری ${priceText(t.visit_video)}، صوتی ${priceText(t.visit_audio)} و متنی ${priceText(t.visit_chat)} در درمان پلاس؛ پرداخت اینترنتی و بازگشت کامل وجه با لغو به‌موقع.`,
+      path: '/services', nav: 'services', body,
+      jsonld: [breadcrumbLd(base, [['خدمات و تعرفه‌ها', '/services']]), { '@context': 'https://schema.org', '@type': 'OfferCatalog', name: 'خدمات درمان پلاس', url: `${base}/services`, itemListElement: offers }],
+    }), { 'Cache-Control': 'public, max-age=60' });
+  }
+
+  function aboutPage(req, res) {
+    const body = `${crumbs([['درباره ما و تماس', null]])}
+<article class="mg-article mg-legal"><h1>درباره درمان پلاس</h1>
+<div class="mg-body">
+<p>«${esc(COMPANY.brand)}» سامانه مشاوره و ویزیت آنلاین پزشکی است که ${esc(COMPANY.name)} آن را راه‌اندازی کرده است. در این سامانه بیماران می‌توانند با پزشکان دارای مجوز نظام پزشکی به‌صورت تصویری، صوتی یا متنی مشورت کنند، نوبت اینترنتی بگیرند، پرونده سلامت خود را نگه دارند و در صورت نیاز نسخه الکترونیک دریافت کنند.</p>
+<p>مدارک هر پزشک (کارت نظام پزشکی، مدرک تحصیلی و هویت) پیش از فعالیت بررسی و تأیید می‌شود و همه پزشکان قرارداد همکاری امضا می‌کنند. اطلاعات پزشکی بیماران رمزنگاری‌شده نگهداری می‌شود و فقط در اختیار پزشک معالج قرار می‌گیرد.</p>
+<h2>اطلاعات تماس</h2>
+<ul><li>نام شرکت: ${esc(COMPANY.name)}</li><li>نشانی: ${esc(COMPANY.address)}</li><li>رایانامه: <a href="mailto:${esc(COMPANY.email)}" dir="ltr">${esc(COMPANY.email)}</a></li><li>وب‌سایت: <a href="/" dir="ltr">${esc(COMPANY.site)}</a></li></ul>
+<p>پاسخ‌گویی پشتیبانی از داخل سامانه (بخش پشتیبانی) و از طریق رایانامه انجام می‌شود. شکایات طبق <a href="/legal">قوانین و شیوه رسیدگی به شکایات</a> بررسی می‌شود.</p>
+</div><div class="mg-seal">${enamadBadge()}</div></article>`;
+    const base = siteBase(req);
+    return send(req, res, 200, layout(req, {
+      title: 'درباره ما و تماس با درمان پلاس', description: `درمان پلاس، سامانه ویزیت و مشاوره آنلاین پزشکی ${COMPANY.name}. نشانی: ${COMPANY.address}. رایانامه: ${COMPANY.email}`,
+      path: '/about', nav: 'about', body,
+      jsonld: [breadcrumbLd(base, [['درباره ما و تماس', '/about']]), { '@context': 'https://schema.org', ...orgLd(base), '@type': 'MedicalOrganization', email: COMPANY.email, address: { '@type': 'PostalAddress', streetAddress: COMPANY.address, addressCountry: 'IR' } }],
+    }));
+  }
+
   // ---------------------------------------------------------------- doctors and specialties
   // Only approved doctors who can take bookings AND turned on their public page themselves.
   const publicDoctors = (where = '', ...args) => db.all(
@@ -464,7 +523,7 @@ ${docs.length ? `<div class="mg-docs">${docs.map(doctorCard).join('')}</div>` : 
       ...(docs.length ? [u(`${base}/doctors`)] : []), u(`${base}/specialties`),
       ...[...new Set(docs.map((d) => d.specialty))].map((c) => u(`${base}/specialties/${c}`)),
       ...docs.map((d) => u(`${base}${doctorUrl(d)}`)),
-      u(`${base}/legal`), ...legalIndex(legalSettings()).map((it) => u(`${base}/legal/${it.id}`)),
+      u(`${base}/services`), u(`${base}/about`), u(`${base}/legal`), ...legalIndex(legalSettings()).map((it) => u(`${base}/legal/${it.id}`)),
     ].join('\n')}\n</urlset>\n`;
     res.writeHead(200, { 'Content-Type': 'application/xml; charset=utf-8', 'Cache-Control': 'public, max-age=900' });
     res.end(req.method === 'HEAD' ? undefined : xml);
@@ -509,6 +568,8 @@ ${docs.length ? `<div class="mg-docs">${docs.map(doctorCard).join('')}</div>` : 
     if (p === '/robots.txt' && read) return robots(req, res);
     if (p === '/sitemap.xml' && read) return sitemap(req, res);
     let m;
+    if (read && (p === '/services' || p === '/services/')) return servicesPage(req, res);
+    if (read && (p === '/about' || p === '/about/')) return aboutPage(req, res);
     if (read && (p === '/legal' || p === '/legal/')) return legalIndexPage(req, res);
     if (read && (m = /^\/legal\/([a-z]+)\/?$/.exec(p))) return legalPage(req, res, m[1]);
     if (read && (p === '/doctors' || p === '/doctors/')) return doctorsPage(req, res);

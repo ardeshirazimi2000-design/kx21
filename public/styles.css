@@ -656,7 +656,7 @@ body.landing-mode { background: radial-gradient(circle at 15% 60%, #dceafd 0, tr
   border-radius: 0 0 18px 18px; box-shadow: 0 2px 14px rgba(13,43,85,.06); }
 .lp-top-brand { display: flex; align-items: center; gap: 8px; }
 .lp-nav { display: flex; gap: 4px; }
-.lp-nav button { border: 0; background: none; font: inherit; padding: 10px 14px; color: #44546a; cursor: pointer; border-bottom: 3px solid transparent; }
+.lp-nav button, .lp-nav a { text-decoration: none; border: 0; background: none; font: inherit; padding: 10px 14px; color: #44546a; cursor: pointer; border-bottom: 3px solid transparent; }
 .lp-nav button.cur { color: var(--primary); font-weight: 700; border-bottom-color: var(--primary); }
 .lp-word { line-height: 1.1; }
 .lp-name { font-weight: 800; font-size: 26px; } .lp-name b { color: #0d2b6b; } .lp-name i { font-style: normal; color: #12b886; }
@@ -694,7 +694,7 @@ body.landing-mode { background: radial-gradient(circle at 15% 60%, #dceafd 0, tr
   .lp-grid { grid-template-columns: 1fr; padding: 16px; gap: 16px; }
   .lp-hero { display: none; }
   .lp-top { padding: 8px 12px; } .lp-top .lp-latin { display: none; }
-  .lp-nav button { padding: 8px 8px; font-size: 14px; }
+  .lp-nav button, .lp-nav a { padding: 8px 8px; font-size: 14px; }
   .lp-card { padding: 22px 16px 18px; }
 }
 @media (prefers-color-scheme: dark) {
@@ -713,3 +713,4 @@ body.landing-mode { background: radial-gradient(circle at 15% 60%, #dceafd 0, tr
 .seo-intro ul { display: flex; flex-wrap: wrap; gap: 8px 20px; padding: 0; list-style: none; margin: 12px 0; }
 .seo-intro a { color: var(--primary); }
 .js body:not(.landing-mode) .seo-intro { display: none; }
+.native .seo-intro { display: none; }

@@ -96,3 +96,28 @@ test('static files: ETag revalidation, gzip, long cache for assets, favicon, cra
   assert.match(og.headers.get('cache-control'), /max-age=604800/);
   assert.match((await page('/app.js')).headers.get('cache-control'), /no-cache/);
 });
+
+test('services page shows the tariffs set by the admin, in toman; about page and Enamad seal', async () => {
+  const admin = await t.login(DEMO_ACCOUNTS.admin.phone);
+  await t.call('PUT', '/v1/admin/settings', { token: admin, body: { tariffs: { visit_video: 1_500_000, visit_audio: 1_200_000, visit_chat: 800_000, triage: 0 } } });
+  const s = await page('/services');
+  assert.equal(s.status, 200);
+  assert.match(s.html, /<h1 class="mg-h1">خدمات و تعرفه‌های درمان پلاس<\/h1>/);
+  assert.match(s.html, /ویزیت تصویری<\/b>.*?۱۵۰٬۰۰۰ تومان/s);
+  assert.match(s.html, /ویزیت متنی<\/b>.*?۸۰٬۰۰۰ تومان/s);
+  assert.match(s.html, /رایگان/); // triage tariff 0
+  assert.match(s.html, /"@type":"OfferCatalog"/);
+  assert.match(s.html, /trustseal\.enamad\.ir\/logo\.aspx\?id=8314749/);
+  assert.match(s.html, /referrerpolicy="origin"/);
+  assert.match(s.headers.get('content-security-policy'), /img-src[^;]*https:\/\/trustseal\.enamad\.ir/);
+  // A new tariff shows at once.
+  await t.call('PUT', '/v1/admin/settings', { token: admin, body: { tariffs: { visit_video: 2_000_000 } } });
+  assert.match((await page('/services')).html, /۲۰۰٬۰۰۰ تومان/);
+  const a = await page('/about');
+  assert.equal(a.status, 200);
+  assert.match(a.html, /info@darman-plus\.ir/);
+  assert.match(a.html, /trustseal\.enamad\.ir/);
+  const sm = (await page('/sitemap.xml')).html;
+  assert.ok(sm.includes('https://darman-plus.ir/services') && sm.includes('https://darman-plus.ir/about'));
+  assert.match((await page('/')).html, /href="\/services"/);
+});
