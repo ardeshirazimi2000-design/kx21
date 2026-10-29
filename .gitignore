@@ -24,3 +24,4 @@ office-tls/
 *.crt
 *.p12
 *.pfx
+dist-offline/

@@ -65,6 +65,16 @@ bash deploy/docker-install.sh          # وب: http://IP-سرور:8000
 - لاگ: `docker compose logs -f api` — توقف: `docker compose down` — به‌روزرسانی: `git pull && bash deploy/docker-install.sh`
 - داده‌ها در volumeهای `db-data` و `uploads` نگهداری می‌شوند؛ `docker compose down -v` همه داده‌ها را پاک می‌کند.
 
+## بستهٔ نصب آفلاین (سرور بدون اینترنت، پورت 5000)
+
+روی یک سرور دارای اینترنت و Docker (مثلاً همین سرور فعلی) بسته را بسازید؛ نصب فعلی دست نمی‌خورد:
+
+```bash
+bash deploy/offline/build-bundle.sh          # خروجی: dist-offline/kx21-offline-<نسخه>.tar
+```
+
+فایل tar را به سرور مقصد ببرید و `sudo bash install.sh` (با اطلاعات ارائهٔ شش استان) یا `sudo bash install.sh --empty` (خالی) را اجرا کنید. Docker در صورت نبودن از داخل بسته نصب می‌شود. راهنمای کامل و حساب‌های ارائه: `deploy/offline/راهنما.html`. اطلاعات ارائه (`dist/db/showcase.js`) فقط روی پایگاه‌دادهٔ خالی ساخته می‌شود.
+
 ## آماده‌سازی برای بهره‌برداری (حذف داده‌های آزمایشی)
 
 همه اطلاعات (اتاق‌ها، اشخاص، کمیسیون‌ها، جلسات، مصوبات، شبکه‌ها، اعلان‌ها و فایل‌ها) حذف می‌شود و فقط حساب مدیر سامانه (root) با رمز جدید می‌ماند:
