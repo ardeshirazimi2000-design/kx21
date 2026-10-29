@@ -19,7 +19,7 @@ if [ "${SKIP_BUILD:-0}" != "1" ]; then
   docker build -q -f "$REPO/apps/api/Dockerfile" -t "kx21-api:$VERSION" "$REPO" >/dev/null
   docker build -q -f "$REPO/apps/web/Dockerfile" -t "kx21-web:$VERSION" "$REPO" >/dev/null
 fi
-docker pull -q postgres:16-alpine >/dev/null
+docker image inspect postgres:16-alpine >/dev/null 2>&1 || docker pull -q postgres:16-alpine >/dev/null
 
 rm -rf "$STAGE"
 mkdir -p "$STAGE/images" "$STAGE/docker" "$STAGE/deploy"

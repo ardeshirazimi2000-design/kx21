@@ -1,6 +1,6 @@
 # Offline bundle of the commissions system (سامانهٔ کمیسیون‌های تخصصی): ready-built images, no internet needed.
 # Installed and started by install.sh; the images are loaded from images/ by that script.
-name: kx21
+name: kx21-offline
 services:
   db:
     image: postgres:16-alpine

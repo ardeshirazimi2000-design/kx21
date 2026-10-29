@@ -90,6 +90,10 @@ cd "$INSTALL_DIR"
 FIRST=0
 if [ ! -f .env ]; then
   FIRST=1
+  # A database left by an earlier install would not open with the new password, and must not be overwritten.
+  if docker volume inspect kx21-offline_db-data >/dev/null 2>&1; then
+    die "اطلاعات یک نصب قبلی (حجم kx21-offline_db-data) روی این سرور هست ولی فایل $INSTALL_DIR/.env آن نیست؛ .env قبلی را برگردانید، یا اگر آن اطلاعات لازم نیست: docker volume rm kx21-offline_db-data kx21-offline_uploads"
+  fi
   if command -v ss >/dev/null && ss -ltn "sport = :$WEB_PORT" | grep -q LISTEN; then
     die "پورت $WEB_PORT در این سرور اشغال است؛ با WEB_PORT=… پورت دیگری بدهید"
   fi
