@@ -1,0 +1,4 @@
+{"writes":{"conc":50,"rps_ok":833,"p95":96.5,"p99":130.4,"errors":0}}
+{"writes":{"conc":200,"rps_ok":828,"p95":351.8,"p99":459,"errors":0}}
+{"upload_8mb":{"status":201,"ms":325}}
+{"file_download_8mb":{"downloads":30,"p50_ms":2811.5,"p95_ms":4628.4,"total_s":10},"healthz_idle_p95":0.8,"healthz_during_downloads":{"p50":713.4,"p95":1647.2,"max":1647.2}}

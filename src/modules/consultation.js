@@ -1,0 +1,353 @@
+// Consultation service: visit room join (LiveKit-style access token), in-room text chat
+// (also the fallback channel when video/audio fails), end of visit. Prescription service
+// (v1 in the roadmap) is included: drafts are invalid until the doctor signs them (Ed25519).
+import { ApiError, badRequest, forbidden, notFound, conflict, requireFields, requireUuid } from '../lib/http.js';
+import { uuid, nowIso, parseJson, isUniqueViolation } from '../lib/db.js';
+import crypto from 'node:crypto';
+import { signJwt, signPayload, verifyPayload, canonical, sha256 } from '../lib/crypto.js';
+import { requireUser } from './auth.js';
+import { formatFaDateTime, toFaDigits } from '../lib/fa.js';
+import { checkPrescription, unknownDrugs, DRUG_KB_VERSION } from './rx/drug-kb.js';
+import { icdByCode } from './rx/icd10.js';
+
+
+export function register(router, { db, keys, platform, config, domain, limiter }) {
+  const loadConsultation = (ctx, id) => {
+    requireUuid(id, 'id');
+    const c = db.get(
+      `SELECT c.*, a.patient_id, a.doctor_id, a.status AS appointment_status, a.slot_id
+       FROM consultations c JOIN appointments a ON a.id = c.appointment_id
+       WHERE c.id = ? AND c.tenant_id = ?`, id, ctx.tenantId,
+    );
+    if (!c) throw notFound('ویزیت');
+    const u = ctx.user;
+    const isPatient = u.role === 'patient' && c.patient_id === u.pid;
+    const isDoctor = u.role === 'doctor' && c.doctor_id === u.did;
+    if (!isPatient && !isDoctor) throw notFound('ویزیت');
+    return { ...c, isDoctor };
+  };
+
+  router.post('/v1/consultations/:id/join', async (ctx) => {
+    requireUser(ctx, 'patient', 'doctor');
+    const c = loadConsultation(ctx, ctx.params.id);
+    if (c.appointment_status !== 'confirmed') throw conflict('این نوبت فعال نیست', 'appointment_not_active');
+    const slot = db.get('SELECT starts_at, ends_at FROM slots WHERE id = ?', c.slot_id);
+    const now = Date.now();
+    const win = domain.appointment.joinWindow(ctx.tenantId, slot);
+    // A doctor running late keeps the room open for the patients still waiting.
+    const q = domain.appointment.dayQueue(c.doctor_id, slot.starts_at, now).find((x) => x.appointment_id === c.appointment_id);
+    if (win && q?.delay_min) win.closes_at = new Date(Date.parse(win.closes_at) + q.delay_min * 60000).toISOString();
+    if (config.enforceJoinWindow && win) {
+      if (now < Date.parse(win.opens_at)) {
+        const mins = Math.ceil((Date.parse(win.opens_at) - now) / 60000);
+        throw conflict(`اتاق ویزیت ${mins > 90 ? `در ${formatFaDateTime(win.opens_at)}` : `${toFaDigits(mins)} دقیقه دیگر`} باز می‌شود`, 'too_early');
+      }
+      if (now > Date.parse(win.closes_at)) throw conflict('زمان این ویزیت گذشته است', 'too_late');
+    }
+    // Tell the other side that this person is in the room (at most once every 10 minutes).
+    const key = `${c.id}:${ctx.user.role}`;
+    if (limiter.firstIn(`join:${key}`, 10 * 60000, now)) {
+      const other = c.isDoctor
+        ? db.get('SELECT u.id, u.phone FROM patients p JOIN users u ON u.id = p.user_id WHERE p.id = ?', c.patient_id)
+        : db.get('SELECT u.id, u.phone FROM doctors d JOIN users u ON u.id = d.user_id WHERE d.id = ?', c.doctor_id);
+      if (other) {
+        platform.notify(ctx, { userId: other.id, channel: 'push', target: other.phone, body: c.isDoctor ? 'پزشک وارد اتاق ویزیت شد؛ از «نوبت‌ها» وارد شوید.' : 'بیمار وارد اتاق ویزیت شد.' });
+      }
+    }
+    if (c.isDoctor && !c.doctor_joined_at) db.run('UPDATE consultations SET doctor_joined_at = ? WHERE id = ? AND doctor_joined_at IS NULL', nowIso(), c.id);
+    if (!c.started_at) {
+      db.run('UPDATE consultations SET started_at = ? WHERE id = ? AND started_at IS NULL', nowIso(), c.id);
+      platform.publish(ctx, 'consultation.started', { consultation_id: c.id, appointment_id: c.appointment_id });
+    }
+    platform.audit(ctx, 'consultation.join', `consultation:${c.id}`);
+    // Access token in the LiveKit grant shape; signed locally. Swap the key for the LiveKit API secret in prod.
+    const token = signJwt({ jwtKey: keys.livekitKey }, {
+      iss: 'telehealth', sub: ctx.user.sub,
+      video: { room: c.room_id, roomJoin: true, canPublish: true, canSubscribe: true },
+      metadata: JSON.stringify({ role: ctx.user.role }),
+    }, 60 * 60);
+    return {
+      body: {
+        consultation_id: c.id, room_id: c.room_id, channel: c.channel, token,
+        media_url: config.livekitUrl || null,
+        ice_servers: iceServers(ctx.user.sub),
+        // Fallback order when bandwidth is poor (design doc §10/§12).
+        fallback: ['video', 'audio', 'chat'].slice(['video', 'audio', 'chat'].indexOf(c.channel)),
+      },
+    };
+  });
+
+  // ---------------- 1:1 video/audio call (WebRTC peer-to-peer) ----------------
+  // The server only relays signalling (SDP offer/answer, ICE candidates); media flows directly
+  // between the two phones, DTLS-SRTP encrypted, or through the clinic's own TURN relay.
+  function iceServers(userId) {
+    const list = [];
+    if (config.turnUrls.length && config.turnSecret) {
+      // TURN REST API credentials (coturn use-auth-secret): valid for 12 hours.
+      const username = `${Math.floor(Date.now() / 1000) + 12 * 3600}:${userId}`;
+      const credential = crypto.createHmac('sha1', config.turnSecret).update(username).digest('base64');
+      list.push({ urls: config.turnUrls, username, credential });
+      const stun = config.turnUrls.map((u) => u.replace(/^turns?:/, 'stun:').replace(/\?.*$/, ''));
+      list.push({ urls: [...new Set(stun)] });
+    }
+    if (config.stunUrls.length) list.push({ urls: config.stunUrls });
+    return list;
+  }
+
+  const SIGNAL_TYPES = ['ready', 'here', 'offer', 'answer', 'ice', 'bye'];
+  // Signals live in the database so both sides reach each other whichever server process serves them.
+  const MAX_SIGNALS = 300; // per visit
+  const lastSeq = (id) => db.get('SELECT MAX(seq) AS s FROM call_signals WHERE consultation_id = ?', id)?.s ?? 0;
+  if (!config.disableSweeper) {
+    setInterval(() => { // drop idle rooms
+      try { db.run(`DELETE FROM call_signals WHERE consultation_id IN (SELECT consultation_id FROM call_signals GROUP BY consultation_id HAVING MAX(at) < ?)`, Date.now() - 30 * 60000); } catch (e) { console.error('[signals]', e.message); }
+    }, 10 * 60000).unref();
+  }
+
+  router.post('/v1/consultations/:id/signal', async (ctx) => {
+    requireUser(ctx, 'patient', 'doctor');
+    const c = loadConsultation(ctx, ctx.params.id);
+    if (c.ended_at) throw conflict('این ویزیت پایان یافته است', 'consultation_ended');
+    const { type, data = null } = ctx.body;
+    if (!SIGNAL_TYPES.includes(type)) throw badRequest('نوع سیگنال نامعتبر است');
+    if (JSON.stringify(data ?? null).length > 64 * 1024) throw badRequest('داده سیگنال بیش از حد بزرگ است');
+    const seq = Number(db.get('INSERT INTO call_signals (consultation_id, from_role, type, data, at) VALUES (?,?,?,?,?) RETURNING seq',
+      c.id, ctx.user.role, type, JSON.stringify(data ?? null), Date.now()).seq);
+    db.run(`DELETE FROM call_signals WHERE consultation_id = ? AND seq < (SELECT seq FROM call_signals WHERE consultation_id = ? ORDER BY seq DESC LIMIT 1 OFFSET ?)`,
+      c.id, c.id, MAX_SIGNALS - 1);
+    if (type === 'ready' || type === 'bye') platform.audit(ctx, `consultation.call_${type === 'ready' ? 'join' : 'leave'}`, `consultation:${c.id}`);
+    return { status: 201, body: { seq } };
+  });
+
+  // after=-1 → only the current position (start listening from now).
+  router.get('/v1/consultations/:id/signal', async (ctx) => {
+    requireUser(ctx, 'patient', 'doctor');
+    const c = loadConsultation(ctx, ctx.params.id);
+    const after = Number(ctx.query.after ?? -1);
+    if (!(after >= 0)) return { body: { seq: lastSeq(c.id), items: [] } };
+    const items = db.all('SELECT seq, type, data FROM call_signals WHERE consultation_id = ? AND seq > ? AND from_role <> ? ORDER BY seq',
+      c.id, after, ctx.user.role).map((r) => ({ seq: Number(r.seq), type: r.type, data: JSON.parse(r.data) }));
+    return { body: { seq: lastSeq(c.id), items, ended: !!c.ended_at } };
+  });
+
+  router.get('/v1/consultations/:id', async (ctx) => {
+    requireUser(ctx, 'patient', 'doctor');
+    const c = loadConsultation(ctx, ctx.params.id);
+    return {
+      body: {
+        id: c.id, appointment_id: c.appointment_id, room_id: c.room_id, channel: c.channel,
+        started_at: c.started_at, ended_at: c.ended_at, patient_id: c.patient_id, doctor_id: c.doctor_id,
+      },
+    };
+  });
+
+  router.get('/v1/consultations/:id/messages', async (ctx) => {
+    requireUser(ctx, 'patient', 'doctor');
+    const c = loadConsultation(ctx, ctx.params.id);
+    const after = ctx.query.after || '';
+    const rows = db.all(
+      `SELECT id, sender_role, content, created_at FROM messages
+       WHERE thread_id = ? AND thread_kind = 'consultation' AND created_at > ? ORDER BY created_at LIMIT 200`,
+      c.id, after,
+    );
+    return { body: { items: rows, ended_at: c.ended_at } };
+  });
+
+  router.post('/v1/consultations/:id/messages', async (ctx) => {
+    requireUser(ctx, 'patient', 'doctor');
+    const c = loadConsultation(ctx, ctx.params.id);
+    if (c.ended_at) throw conflict('این ویزیت پایان یافته است', 'consultation_ended');
+    const text = String(ctx.body.content ?? '').trim();
+    if (!text || text.length > 4000) throw badRequest('متن پیام خالی یا بیش از حد طولانی است');
+    const id = uuid();
+    const ts = nowIso();
+    db.run(
+      `INSERT INTO messages (id, tenant_id, thread_id, thread_kind, sender_id, sender_role, content, created_at)
+       VALUES (?,?,?,'consultation',?,?,?,?)`,
+      id, ctx.tenantId, c.id, ctx.user.sub, ctx.user.role, text, ts,
+    );
+    return { status: 201, body: { id, sender_role: ctx.user.role, content: text, created_at: ts } };
+  });
+
+  router.post('/v1/consultations/:id/end', async (ctx) => {
+    requireUser(ctx, 'doctor');
+    const c = loadConsultation(ctx, ctx.params.id);
+    if (c.ended_at) return { body: { id: c.id, ended_at: c.ended_at } };
+    const ts = nowIso();
+    db.tx(() => {
+      db.run('UPDATE consultations SET ended_at = ?, started_at = COALESCE(started_at, ?) WHERE id = ?', ts, ts, c.id);
+      db.run(`UPDATE appointments SET status = 'completed', updated_at = ? WHERE id = ?`, ts, c.appointment_id);
+    });
+    platform.audit(ctx, 'consultation.end', `consultation:${c.id}`);
+    platform.publish(ctx, 'consultation.ended', {
+      consultation_id: c.id, appointment_id: c.appointment_id, patient_id: c.patient_id, doctor_id: c.doctor_id,
+    });
+    return { body: { id: c.id, ended_at: ts } };
+  });
+
+  // ---------------- prescriptions ----------------
+  const validateDrugs = (drugs) => {
+    if (!Array.isArray(drugs) || drugs.length === 0 || drugs.length > 20) throw badRequest('فهرست داروها خالی یا نامعتبر است');
+    return drugs.map((d) => {
+      if (!d || typeof d.name !== 'string' || !d.name.trim()) throw badRequest('نام دارو الزامی است');
+      const pick = (k) => (d[k] == null ? null : String(d[k]).slice(0, 200));
+      return {
+        name: d.name.trim().slice(0, 200), dose: pick('dose'), frequency: pick('frequency'), duration: pick('duration'), instructions: pick('instructions'),
+        ...(d.erx_code ? { erx_code: String(d.erx_code).trim().slice(0, 12) } : {}),
+      };
+    });
+  };
+
+  const validateDiagnoses = (codes) => {
+    if (codes == null) return [];
+    if (!Array.isArray(codes) || codes.length > 5) throw badRequest('فهرست تشخیص‌ها نامعتبر است');
+    return [...new Set(codes)].map((c) => {
+      const x = icdByCode(typeof c === 'string' ? c : c?.code);
+      if (!x) throw badRequest(`کد ICD-10 «${typeof c === 'string' ? c : c?.code}» شناخته نشد`, 'unknown_icd_code');
+      return { code: x.code, label_fa: x.label_fa };
+    });
+  };
+
+  // Safety context: recorded allergies + drugs on the patient's other prescriptions of the last 60 days.
+  function safetyFor(patientId, drugs, excludeConsultationId = null) {
+    const p = db.get('SELECT allergies FROM patients WHERE id = ?', patientId);
+    const since = new Date(Date.now() - 60 * 864e5).toISOString();
+    const activeDrugs = db.all(
+      `SELECT drugs, issued_at FROM prescriptions WHERE patient_id = ? AND issued_at IS NOT NULL AND issued_at > ? AND consultation_id != ?`,
+      patientId, since, excludeConsultationId ?? '-',
+    ).flatMap((r) => parseJson(r.drugs, []).map((d) => ({ name: d.name, prescribed_at: r.issued_at })));
+    return {
+      warnings: checkPrescription(drugs, { allergies: parseJson(p?.allergies, []), activeDrugs }),
+      unrecognised: unknownDrugs(drugs),
+      kb_version: DRUG_KB_VERSION,
+    };
+  }
+
+  const rxView = (r, { forDoctor = false } = {}) => ({
+    id: r.id, consultation_id: r.consultation_id, doctor_id: r.doctor_id, patient_id: r.patient_id,
+    drugs: parseJson(r.drugs, []), notes: r.notes, status: r.issued_at ? 'issued' : 'draft',
+    diagnoses: parseJson(r.diagnoses, []),
+    issued_at: r.issued_at, created_at: r.created_at,
+    signature: r.signature ? Buffer.from(r.signature).toString('base64') : null,
+    ...(forDoctor ? {
+      safety: r.issued_at ? parseJson(r.safety, null) : safetyFor(r.patient_id, parseJson(r.drugs, []), r.consultation_id),
+    } : {}),
+  });
+
+  // Diagnoses are part of the signed payload only when present, so older signatures stay valid.
+  const signedPayload = (r) => {
+    const dx = parseJson(r.diagnoses, []);
+    return canonical({
+      id: r.id, consultation_id: r.consultation_id, doctor_id: r.doctor_id, patient_id: r.patient_id,
+      drugs: parseJson(r.drugs, []), notes: r.notes ?? null, issued_at: r.issued_at,
+      ...(dx.length ? { diagnoses: dx.map((d) => d.code) } : {}),
+    });
+  };
+
+  // Draft creation; also used by the assistant's create_prescription_draft tool (doctor sessions only).
+  function createDraft(ctx, { consultationId, drugs, notes, idempotencyKey, diagnoses }) {
+    requireUser(ctx, 'doctor');
+    if (!idempotencyKey) throw badRequest('هدر Idempotency-Key الزامی است', 'idempotency_key_required');
+    const c = loadConsultation(ctx, consultationId);
+    if (!c.isDoctor) throw forbidden();
+    const items = validateDrugs(drugs);
+    // Official national code (eRx): must exist in the active catalogue; the official title is kept.
+    for (const it of items) {
+      if (!it.erx_code) continue;
+      const r = domain.drugCatalog.resolve(ctx.tenantId, it.erx_code);
+      it.erx_title = r.title;
+    }
+    const dx = validateDiagnoses(diagnoses);
+    const key = `${ctx.user.did}:${idempotencyKey}`;
+    const prior = db.get('SELECT * FROM prescriptions WHERE tenant_id = ? AND idempotency_key = ?', ctx.tenantId, key);
+    if (prior) return { rx: prior, replayed: true };
+    const id = uuid();
+    try {
+      db.run(
+        `INSERT INTO prescriptions (id, tenant_id, consultation_id, doctor_id, patient_id, drugs, notes, diagnoses, idempotency_key, created_at)
+         VALUES (?,?,?,?,?,?,?,?,?,?)`,
+        id, ctx.tenantId, c.id, c.doctor_id, c.patient_id, JSON.stringify(items), notes ? String(notes).slice(0, 2000) : null, JSON.stringify(dx), key, nowIso(),
+      );
+    } catch (e) {
+      if (isUniqueViolation(e)) return { rx: db.get('SELECT * FROM prescriptions WHERE idempotency_key = ?', key), replayed: true };
+      throw e;
+    }
+    platform.audit(ctx, 'prescription.draft', `prescription:${id}`);
+    return { rx: db.get('SELECT * FROM prescriptions WHERE id = ?', id), replayed: false };
+  }
+  domain.prescription = { createDraft, safetyFor };
+
+  // Live safety check while the prescriber types (nothing is stored).
+  router.post('/v1/prescriptions/check', async (ctx) => {
+    requireUser(ctx, 'doctor');
+    const c = loadConsultation(ctx, ctx.body?.consultation_id);
+    const drugs = (Array.isArray(ctx.body.drugs) ? ctx.body.drugs : []).filter((d) => d && typeof d.name === 'string' && d.name.trim()).slice(0, 20);
+    return { body: safetyFor(c.patient_id, drugs.map((d) => ({ name: d.name.trim() })), c.id) };
+  });
+
+  router.post('/v1/prescriptions', async (ctx) => {
+    requireFields(ctx.body, ['consultation_id', 'drugs']);
+    const { rx, replayed } = createDraft(ctx, {
+      consultationId: ctx.body.consultation_id, drugs: ctx.body.drugs, notes: ctx.body.notes, diagnoses: ctx.body.diagnoses,
+      idempotencyKey: ctx.req.headers['idempotency-key'],
+    });
+    return { status: replayed ? 200 : 201, body: rxView(rx, { forDoctor: true }) };
+  });
+
+  router.post('/v1/prescriptions/:id/sign', async (ctx) => {
+    requireUser(ctx, 'doctor');
+    const r = db.get('SELECT * FROM prescriptions WHERE id = ? AND tenant_id = ?', requireUuid(ctx.params.id, 'id'), ctx.tenantId);
+    if (!r || r.doctor_id !== ctx.user.did) throw notFound('نسخه');
+    if (r.issued_at) return { body: rxView(r, { forDoctor: true }) };
+    // Safety check at signing: a high-severity warning needs the prescriber's written reason.
+    const safety = safetyFor(r.patient_id, parseJson(r.drugs, []), r.consultation_id);
+    const high = safety.warnings.filter((w) => w.severity === 'high');
+    const reason = String(ctx.body?.override_reason ?? '').trim();
+    if (high.length && reason.length < 5) {
+      throw new ApiError(409, 'safety_override_required', 'هشدار ایمنی جدی برای این نسخه وجود دارد؛ برای صدور، دلیل خود را بنویسید', { warnings: safety.warnings });
+    }
+    const doc = db.get('SELECT sign_private_sealed FROM doctors WHERE id = ?', r.doctor_id);
+    const issued = { ...r, issued_at: nowIso() };
+    const sig = signPayload(keys, doc.sign_private_sealed, signedPayload(issued));
+    const stored = { ...safety, checked_at: issued.issued_at, override_reason: high.length ? reason.slice(0, 500) : null };
+    db.run('UPDATE prescriptions SET signature = ?, issued_at = ?, safety = ? WHERE id = ? AND issued_at IS NULL', sig, issued.issued_at, JSON.stringify(stored), r.id);
+    platform.audit(ctx, 'prescription.issue', `prescription:${r.id}`, {
+      payload_sha256: sha256(signedPayload(issued)), warnings: safety.warnings.map((w) => `${w.severity}:${w.type}`), override: high.length ? stored.override_reason : undefined,
+    });
+    platform.publish(ctx, 'prescription.issued', { prescription_id: r.id, patient_id: r.patient_id, doctor_id: r.doctor_id });
+    const pu = db.get('SELECT u.id, u.phone FROM patients p JOIN users u ON u.id = p.user_id WHERE p.id = ?', r.patient_id);
+    if (pu) platform.notify(ctx, { userId: pu.id, channel: 'sms', target: pu.phone, body: 'نسخه الکترونیک شما صادر شد و در اپ قابل مشاهده است.' });
+    return { body: rxView(db.get('SELECT * FROM prescriptions WHERE id = ?', r.id), { forDoctor: true }) };
+  });
+
+  router.get('/v1/prescriptions', async (ctx) => {
+    requireUser(ctx, 'patient', 'doctor');
+    const rows = ctx.user.role === 'patient'
+      ? db.all('SELECT * FROM prescriptions WHERE patient_id = ? AND issued_at IS NOT NULL ORDER BY issued_at DESC', ctx.user.pid ?? '-')
+      : db.all(
+        ctx.query.consultation_id
+          ? 'SELECT * FROM prescriptions WHERE doctor_id = ? AND consultation_id = ? ORDER BY created_at DESC'
+          : 'SELECT * FROM prescriptions WHERE doctor_id = ? ORDER BY created_at DESC LIMIT 100',
+        ...(ctx.query.consultation_id ? [ctx.user.did, ctx.query.consultation_id] : [ctx.user.did]),
+      );
+    return {
+      body: {
+        items: rows.map((r) => {
+          const d = db.get('SELECT u.full_name, d.license_no FROM doctors d JOIN users u ON u.id = d.user_id WHERE d.id = ?', r.doctor_id);
+          return { ...rxView(r, { forDoctor: ctx.user.role === 'doctor' }), doctor_name: d?.full_name, doctor_license_no: d?.license_no };
+        }),
+      },
+    };
+  });
+
+  // Public verification (pharmacy): checks the doctor's signature over the canonical payload.
+  router.get('/v1/prescriptions/:id/verify', async (ctx) => {
+    const r = db.get('SELECT * FROM prescriptions WHERE id = ?', requireUuid(ctx.params.id, 'id'));
+    if (!r) throw notFound('نسخه');
+    if (!r.issued_at) return { body: { valid: false, reason: 'draft' } };
+    const doc = db.get('SELECT sign_public_pem FROM doctors WHERE id = ?', r.doctor_id);
+    const valid = verifyPayload(doc.sign_public_pem, signedPayload(r), r.signature);
+    return { body: { valid, issued_at: r.issued_at, drugs: valid ? parseJson(r.drugs, []) : undefined, diagnoses: valid ? parseJson(r.diagnoses, []) : undefined } };
+  });
+
+}

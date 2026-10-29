@@ -1,0 +1,12 @@
+{
+  "appId": "ir.kx21.clinic",
+  "appName": "درمان پلاس",
+  "webDir": "www",
+  "android": {
+    "allowMixedContent": true,
+    "adjustMarginsForEdgeToEdge": "auto"
+  },
+  "server": {
+    "androidScheme": "https"
+  }
+}
