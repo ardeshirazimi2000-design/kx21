@@ -1,0 +1,8 @@
+{"setup":{"patients":3000,"seconds":32,"valid":3000}}
+{"conc":50,"rps_ok":2163,"p50":21.7,"p95":39.2,"p99":51.1,"err_rate":0,"codes":{"200":43293},"server_cpu_cores":0.99,"server_rss_mb":137,"per_op_p95":{"notifications":39.4,"doctors":38.7,"slots":39.8,"records":39.1,"appointments":38.4,"me":39}}
+{"conc":100,"rps_ok":2086,"p50":44.7,"p95":81,"p99":104.3,"err_rate":0,"codes":{"200":41877},"server_cpu_cores":0.99,"server_rss_mb":138,"per_op_p95":{"notifications":82.2,"doctors":80.8,"appointments":81.5,"slots":81.4,"me":80.4,"records":79.4}}
+{"conc":200,"rps_ok":2158,"p50":85,"p95":148.8,"p99":201,"err_rate":0,"codes":{"200":43255},"server_cpu_cores":1,"server_rss_mb":138,"per_op_p95":{"doctors":148.2,"slots":148.9,"notifications":149.6,"me":152.6,"records":145.9,"appointments":147.3}}
+{"conc":400,"rps_ok":2140,"p50":172.1,"p95":243.1,"p99":383.8,"err_rate":0,"codes":{"200":42987},"server_cpu_cores":0.99,"server_rss_mb":139,"per_op_p95":{"slots":244.4,"notifications":243.6,"appointments":242.5,"records":242.8,"doctors":242.2,"me":244.7}}
+{"conc":800,"rps_ok":1944,"p50":399.9,"p95":505,"p99":802.1,"err_rate":0,"codes":{"200":39313},"server_cpu_cores":0.93,"server_rss_mb":142,"per_op_p95":{"doctors":507.2,"me":501.6,"records":505.4,"appointments":506.3,"notifications":504.6,"slots":506.2}}
+{"booking_race":{"contenders":100,"slot":"5f51446e-0635-42cd-acdf-5c106aa8c669","codes":{"201":1,"409":99},"p95_ms":62.9}}
+{"conc":25,"rps_ok":2091,"p50":10.3,"p95":22.2,"p99":32.3,"err_rate":0,"codes":{"200":20929},"server_cpu_cores":0.97,"server_rss_mb":143,"per_op_p95":{"notifications":22,"doctors":22.1,"slots":22.2,"me":22.9,"appointments":22.3,"records":21.9}}
