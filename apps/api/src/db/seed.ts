@@ -17,9 +17,10 @@ export async function seed() {
   const c = await pool.connect();
   try {
     await c.query('BEGIN');
-    const exists = await c.query(`SELECT 1 FROM users WHERE email = 'admin@kx.local'`);
+    // Only on an empty install: never mix demo records into real data (e.g. after a reset to root only).
+    const exists = await c.query(`SELECT 1 FROM chambers UNION ALL SELECT 1 FROM users WHERE NOT is_super_admin LIMIT 1`);
     if (exists.rowCount) {
-      console.log('seed data already present');
+      console.log('the database already has data; demo seed skipped');
       await c.query('ROLLBACK');
       return;
     }
