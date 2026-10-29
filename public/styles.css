@@ -716,4 +716,7 @@ body.landing-mode { background: radial-gradient(circle at 15% 60%, #dceafd 0, tr
 .native .seo-intro { display: none; }
 .lp-seal { display: flex; justify-content: center; margin-top: 12px; }
 .lp-seal img { display: block; max-height: 96px; width: auto; }
-.js .seo-intro .enamad { display: none; } /* shown on the start screen instead */
+.site-seal { display: flex; justify-content: center; padding: 16px 16px 24px; }
+.site-seal img { display: block; }
+.native .site-seal { display: none; }
+body:has(.lp-seal) .site-seal { display: none; } /* the start screen shows it inside its card */

@@ -401,7 +401,7 @@ const siteLink = () => h('a', { class: 'muted site-link', href: `https://${SITE}
 // Enamad trust seal on the start screen (web only: Enamad shows it only for the site's own origin).
 // A copy of the badge in index.html, whose markup must stay exactly as Enamad issued it.
 const enamadSeal = () => {
-  const src = !IS_NATIVE && document.querySelector('.seo-intro .enamad');
+  const src = !IS_NATIVE && document.querySelector('.site-seal .enamad');
   return src ? h('div', { class: 'lp-seal' }, src.cloneNode(true)) : null;
 };
 
