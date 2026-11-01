@@ -443,12 +443,51 @@ interface Commission {
   shareable?: string; // a resolution of the live meeting, for the network
 }
 
+interface Council {
+  chamberId: string;
+  council: string;
+  expert: string;
+  president: string;
+  sec: string;
+  members: string[];
+  reps: string[];
+  code: string;
+}
+
+/** The council and expert group of a chamber, with the president as council secretary. */
+async function councilBodies(c: any, chamberId: string, term: string, city: string, president: string, sec: string, members: string[], reps: string[], code: string): Promise<Council> {
+  const national = code === 'iran';
+  const council = (
+    await c.query(
+      `INSERT INTO commissions (chamber_id, term_id, name, code, domain, settings, body_type, council_secretary_id) VALUES ($1,$2,$3,'SHG',$4,$5,'council',$6) RETURNING id`,
+      [chamberId, term, national ? 'شورای ملی گفت‌وگوی دولت و بخش خصوصی' : `شورای گفت‌وگوی دولت و بخش خصوصی ${city}`, 'گفت‌وگوی دولت و بخش خصوصی', JSON.stringify(DEFAULT_COMMISSION_SETTINGS), president],
+    )
+  ).rows[0].id as string;
+  const expert = (
+    await c.query(
+      `INSERT INTO commissions (chamber_id, term_id, name, code, domain, settings, body_type) VALUES ($1,$2,$3,'KRG',$4,$5,'expert_group') RETURNING id`,
+      [chamberId, term, national ? 'کارگروه کارشناسی ملی شورای گفت‌وگو' : `کارگروه کارشناسی شورای گفت‌وگوی ${city}`, 'بررسی کارشناسی پرونده‌های شورا', JSON.stringify(DEFAULT_COMMISSION_SETTINGS)],
+    )
+  ).rows[0].id as string;
+  const mem = (body: string, userId: string, position: string, hasVote: boolean) =>
+    c.query(`INSERT INTO commission_memberships (chamber_id, commission_id, user_id, position, has_vote, start_date) VALUES ($1,$2,$3,$4,$5,$6)`, [
+      chamberId, body, userId, position, hasVote, TERM_START,
+    ]);
+  await mem(council, president, 'chair', true);
+  await mem(council, sec, 'secretary', false);
+  for (const m of members) await mem(council, m, 'member', true);
+  await mem(expert, sec, 'secretary', false);
+  return { chamberId, council, expert, president, sec, members, reps, code };
+}
+
 // ─────────────────────────────── Structure ───────────────────────────────
 
 async function buildStructure(password: string, rootPassword: string) {
   const hash = await bcrypt.hash(password, 10);
   const c = await pool.connect();
   const commissions: Commission[] = [];
+  const councils: Council[] = [];
+  let national: Council | undefined;
   let seq = 0;
   let nameSeq = 0;
   const people = new Set<string>();
@@ -541,9 +580,46 @@ async function buildStructure(password: string, rootPassword: string) {
         await mem(expert, 'expert', false);
         commissions.push({ id: k, code: theme, theme, province: p, chamberId: ch, chair, vice, secretary, members, expert });
       }
+      // شورای گفت‌وگو of the chamber: the president (دبیر شورا) approves himself, the secretariat runs the meetings;
+      // the expert group has no fixed members — the experts and government representatives are invited per case.
+      const president = await person(`${name()}`, `president.${p.code}`, `رئیس اتاق ${p.city}`);
+      const councilSec = await person(name(), `council.sec.${p.code}`, `دبیرخانهٔ شورای گفت‌وگوی ${p.city}`);
+      const reps = [
+        await person(`نمایندهٔ سازمان صنعت، معدن و تجارت ${p.province}`, `gov1.${p.code}`, `سازمان صنعت، معدن و تجارت ${p.province}`),
+        await person(`نمایندهٔ گمرک ${p.province}`, `gov2.${p.code}`, `ادارهٔ کل گمرک ${p.province}`),
+      ];
+      councils.push(await councilBodies(c, ch, term, p.city, president, councilSec, commissions.filter((k) => k.chamberId === ch).map((k) => k.chair), reps, p.code));
+    }
+    // Iran Chamber: the national council and its expert group.
+    {
+      const iran = (
+        await c.query(
+          `INSERT INTO chambers (name, province, phone, email, address, kind) VALUES ('اتاق بازرگانی، صنایع، معادن و کشاورزی ایران', 'تهران', '021-00000000', $1, 'تهران (اطلاعات نمایشی)', 'national') RETURNING id`,
+          [`info@iran.${DOMAIN}`],
+        )
+      ).rows[0].id as string;
+      const person = async (fullName: string, local: string, org: string) => {
+        seq++;
+        return (
+          await c.query(
+            `INSERT INTO users (chamber_id, full_name, email, mobile, organization, password_hash) VALUES ($1,$2,$3,$4,$5,$6) RETURNING id`,
+            [iran, fullName, `${local}@${DOMAIN}`, `09159${String(seq).padStart(6, '0')}`, org, hash],
+          )
+        ).rows[0].id as string;
+      };
+      const admin = await person('مدیر اتاق ایران', 'admin.iran', 'دبیرخانهٔ اتاق ایران');
+      await c.query('INSERT INTO chamber_admins (chamber_id, user_id) VALUES ($1,$2)', [iran, admin]);
+      await c.query(`INSERT INTO staff_roles (user_id, role, chamber_id) VALUES ($1,'it_admin',$2)`, [admin, iran]);
+      const term = (await c.query(`INSERT INTO terms (chamber_id, number, title, start_date, status) VALUES ($1, 10, 'دوره دهم', $2, 'active') RETURNING id`, [iran, TERM_START])).rows[0].id;
+      const president = await person('رئیس اتاق ایران', 'president.iran', 'اتاق ایران');
+      const sec = await person('دبیرخانهٔ ملی شورای گفت‌وگو', 'council.sec.iran', 'دبیرخانهٔ شورای گفت‌وگوی دولت و بخش خصوصی');
+      const members = [];
+      for (let i = 1; i <= 4; i++) members.push(await person(`عضو شورای ملی ${['اول', 'دوم', 'سوم', 'چهارم'][i - 1]}`, `member${i}.national`, 'شورای ملی گفت‌وگو'));
+      const reps = [await person('نمایندهٔ وزارت صنعت، معدن و تجارت', 'gov1.iran', 'وزارت صنعت، معدن و تجارت'), await person('نمایندهٔ بانک مرکزی', 'gov2.iran', 'بانک مرکزی')];
+      national = await councilBodies(c, iran, term, 'ملی', president, sec, members, reps, 'iran');
     }
     await c.query('COMMIT');
-    return { root: root!, coordinator, chambers, commissions };
+    return { root: root!, coordinator, chambers, commissions, councils, national: national! };
   } catch (e) {
     await c.query('ROLLBACK');
     throw e;
@@ -674,6 +750,144 @@ async function upcomingMeeting(k: Commission, plan: MeetingPlan, offset: number)
   }
 }
 
+// ─────────────────────────────── شورای گفت‌وگو ───────────────────────────────
+
+const CASES = [
+  { title: 'تمدید مهلت رفع تعهد ارزی صادرکنندگان محصولات کشاورزی', outcome: 'مهلت رفع تعهد ارزی صادرکنندگان محصولات کشاورزی با مصوبهٔ شورای ملی سه ماه تمدید شد و به بانک مرکزی و اتاق‌های استان ابلاغ شد.' },
+  { title: 'کاهش زمان ترخیص کالا در گمرکات استان', outcome: '' },
+  { title: 'تسهیل صدور مجوز واحدهای فراوری در شهرک‌های صنعتی', outcome: 'کارگروه مشترک صدور مجوز در استان تشکیل و زمان صدور مجوز به ده روز کاری کاهش یافت.' },
+  { title: 'رفع موانع صادرات محصولات کشاورزی از بازارچه‌های مرزی', outcome: '' },
+  { title: 'تأمین نقدینگی واحدهای تولیدی صادرات‌محور', outcome: '' },
+  { title: 'اصلاح تعرفهٔ حمل‌ونقل ریلی کالاهای صادراتی', outcome: '' },
+];
+
+const counters = new Map<string, number>();
+const nextNumber = (body: string) => {
+  const n = (counters.get(body) ?? 0) + 1;
+  counters.set(body, n);
+  return n;
+};
+
+/** A council or expert meeting held in the past, recorded from its paper minutes, with invited government representatives. */
+async function pastBodyMeeting(sec: string, bodyId: string, title: string, daysAgo: number, guests: string[] = []): Promise<string> {
+  const m = await api(sec, 'POST', '/meetings/archival', {
+    commissionId: bodyId, number: nextNumber(bodyId), title, date: ymd(workday(-daysAgo)), startTime: '10:00', endTime: '12:00', location: 'سالن شورای اتاق', type: 'in_person',
+  });
+  for (const g of guests) await api(sec, 'POST', `/meetings/${m.id}/invitees`, { userId: g, role: 'guest' });
+  await api(sec, 'POST', `/meetings/${m.id}/attendance/bulk`, { status: 'manual_present' });
+  return m.id;
+}
+
+/** A council or expert meeting still to come (scheduled, invitations sent). */
+async function futureBodyMeeting(sec: string, bodyId: string, title: string, offset: number, guests: string[] = []): Promise<string> {
+  for (let extra = 0; extra < 10; extra++) {
+    const d = workday(offset + extra);
+    d.setHours(10, 0, 0, 0);
+    try {
+      const m = await api(sec, 'POST', '/meetings', { commissionId: bodyId, title, scheduledAt: d.toISOString(), durationMinutes: 90, location: 'سالن شورای اتاق', type: 'hybrid', schedule: true });
+      for (const g of guests) await api(sec, 'POST', `/meetings/${m.id}/invitees`, { userId: g, role: 'guest' });
+      await api(sec, 'POST', `/meetings/${m.id}/invite`, {});
+      return m.id;
+    } catch (e) {
+      if ((e as { code?: string }).code !== 'holiday') throw e;
+    }
+  }
+  throw new Error('no working day for the meeting');
+}
+
+/** The meeting's decision on the case: its agenda item's summary and a resolution, whose deadline is the next stage's. */
+async function caseResolution(sec: string, bodyId: string, meetingId: string, caseId: string, text: string, summary: string, dueIn: number): Promise<string> {
+  const m = await api(sec, 'GET', `/meetings/${meetingId}`);
+  const item = m.agenda.find((a: any) => a.council_case_id === caseId);
+  await api(sec, 'PATCH', `/agenda-items/${item.id}`, { discussionSummary: summary, decision: text });
+  const r = await api(sec, 'POST', '/resolutions', { commissionId: bodyId, meetingId, agendaItemId: item.id, text, dueDate: ymd(workday(dueIn)) });
+  return r.id;
+}
+
+async function closeMeeting(sec: string, meetingId: string, label: string) {
+  await uploadScan(sec, meetingId, label);
+  await api(sec, 'POST', `/meetings/${meetingId}/archival/finalize`, { regenerate: true });
+}
+
+/** Expert review in the past, then the provincial council's meeting with the case on its agenda. */
+async function provincialRounds(c: Council, caseId: string, title: string, expertDaysAgo: number, councilDaysAgo: number) {
+  const ex = await pastBodyMeeting(c.sec, c.expert, `جلسهٔ کارشناسی: ${title}`, expertDaysAgo, c.reps);
+  await api(c.sec, 'POST', `/council-cases/${caseId}/expert-meeting`, { meetingId: ex });
+  await caseResolution(c.sec, c.expert, ex, caseId, `نظر کارشناسی: طرح «${title}» در شورای استان با پیوست گزارش دستگاه‌ها`, 'نمایندگان دستگاه‌ها و کارشناسان اتاق موانع و راهکارها را بررسی کردند.', 20);
+  await closeMeeting(c.sec, ex, `expert ${c.code}`);
+  const cm = await pastBodyMeeting(c.sec, c.council, 'جلسهٔ شورای گفت‌وگوی دولت و بخش خصوصی استان', councilDaysAgo);
+  await api(c.sec, 'POST', `/council-cases/${caseId}/actions`, { action: 'schedule', meetingId: cm });
+  return cm;
+}
+
+/**
+ * One case per province, each at another stage: closed nationally (Yazd), waiting for the president's approval to go
+ * national (Shiraz), resolved and closed in the province (Isfahan), with an upcoming expert meeting (Sanandaj), on an
+ * upcoming council agenda (Tabriz), and on the national council's agenda plus a confidential case returned (Tehran).
+ */
+async function buildCouncil(commissions: Commission[], councils: Council[], nat: Council) {
+  for (const [i, c] of councils.entries()) {
+    const exp = commissions.find((k) => k.chamberId === c.chamberId && k.code === 'EXP')!;
+    const res = (await api(exp.secretary, 'GET', `/resolutions?commissionId=${exp.id}&pageSize=50`)).items.find((r: any) => r.due_date && r.status !== 'cancelled');
+    const title = CASES[i].title;
+    const cs = await api(exp.secretary, 'POST', '/council-cases', {
+      resolutionId: res.id, title, description: `ارجاع کمیسیون ${THEMES.EXP.name} ${exp.province.city}: ${res.text}`, priority: i % 2 ? 'normal' : 'high',
+    });
+    const act = (who: string, body: object) => api(who, 'POST', `/council-cases/${cs.id}/actions`, body);
+    if (i === 3) {
+      // Sanandaj: the expert meeting is coming, with the representatives invited for this case.
+      const ex = await futureBodyMeeting(c.sec, c.expert, `جلسهٔ کارشناسی: ${title}`, 4, c.reps);
+      await api(c.sec, 'POST', `/council-cases/${cs.id}/expert-meeting`, { meetingId: ex });
+      continue;
+    }
+    if (i === 4) {
+      // Tabriz: reviewed by the experts, on the agenda of the council's next meeting.
+      const ex = await pastBodyMeeting(c.sec, c.expert, `جلسهٔ کارشناسی: ${title}`, 12, c.reps);
+      await api(c.sec, 'POST', `/council-cases/${cs.id}/expert-meeting`, { meetingId: ex });
+      await caseResolution(c.sec, c.expert, ex, cs.id, `نظر کارشناسی: طرح «${title}» در شورای استان`, 'گزارش دستگاه‌ها بررسی شد.', 20);
+      await closeMeeting(c.sec, ex, `expert ${c.code}`);
+      const cm = await futureBodyMeeting(c.sec, c.council, 'جلسهٔ شورای گفت‌وگوی دولت و بخش خصوصی استان', 6);
+      await act(c.sec, { action: 'schedule', meetingId: cm });
+      continue;
+    }
+    const cm = await provincialRounds(c, cs.id, title, 40 - i * 3, 30 - i * 3);
+    if (i === 2) {
+      // Isfahan: settled by the provincial council.
+      const r = await caseResolution(c.sec, c.council, cm, cs.id, CASES[i].outcome, 'دستگاه‌های اجرایی استان راهکار را پذیرفتند.', 45);
+      await closeMeeting(c.sec, cm, `council ${c.code}`);
+      await act(c.sec, { action: 'resolve', resolutionId: r });
+      await act(c.sec, { action: 'close', outcome: CASES[i].outcome });
+      continue;
+    }
+    const r = await caseResolution(c.sec, c.council, cm, cs.id, `پروندهٔ «${title}» برای تصمیم‌گیری به شورای ملی گفت‌وگو ارجاع شود`, 'حل موضوع در اختیار دستگاه‌های ملی است.', 40);
+    await closeMeeting(c.sec, cm, `council ${c.code}`);
+    await act(c.sec, { action: 'propose_escalation', resolutionId: r });
+    if (i === 1) continue; // Shiraz: waiting for the president's approval.
+    await act(c.president, { action: 'approve_escalation' });
+    if (i === 0) {
+      // Yazd: decided nationally and closed.
+      const ex = await pastBodyMeeting(nat.sec, nat.expert, `جلسهٔ کارشناسی ملی: ${title}`, 15, nat.reps);
+      await api(nat.sec, 'POST', `/council-cases/${cs.id}/expert-meeting`, { meetingId: ex });
+      await closeMeeting(nat.sec, ex, 'national expert');
+      const nm = await pastBodyMeeting(nat.sec, nat.council, 'جلسهٔ شورای ملی گفت‌وگوی دولت و بخش خصوصی', 8);
+      await act(nat.sec, { action: 'schedule', meetingId: nm });
+      const nr = await caseResolution(nat.sec, nat.council, nm, cs.id, CASES[0].outcome, 'بانک مرکزی با تمدید سه‌ماهه موافقت کرد.', 90);
+      await closeMeeting(nat.sec, nm, 'national council');
+      await act(nat.sec, { action: 'resolve', resolutionId: nr });
+      await act(nat.sec, { action: 'close', outcome: CASES[0].outcome });
+    } else {
+      // Tehran: on the national council's next agenda.
+      const nm = await futureBodyMeeting(nat.sec, nat.council, 'جلسهٔ شورای ملی گفت‌وگوی دولت و بخش خصوصی', 9);
+      await act(nat.sec, { action: 'schedule', meetingId: nm });
+      // …and a confidential case opened by the chamber's council secretariat, returned for completion.
+      const conf = await api(c.sec, 'POST', '/council-cases', {
+        chamberId: c.chamberId, title: 'بدهی معوق واحدهای تولیدی به سازمان تأمین اجتماعی', description: 'درخواست تقسیط بدهی معوق واحدهای تولیدی استان', dueDate: ymd(workday(30)), confidential: true, priority: 'urgent',
+      });
+      await api(c.sec, 'POST', `/council-cases/${conf.id}/actions`, { action: 'return', reason: 'فهرست واحدها و میزان بدهی هر واحد پیوست نشده است' });
+    }
+  }
+}
+
 // ─────────────────────────────── Networks ───────────────────────────────
 
 async function buildNetworks(root: string, coordinator: string, commissions: Commission[]) {
@@ -744,7 +958,7 @@ export async function showcase(opts: { password?: string; rootPassword?: string;
   base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
   try {
     log('ساختار: اتاق‌ها، دوره‌ها، کمیسیون‌ها و اعضا…');
-    const { root, coordinator, commissions } = await buildStructure(password, opts.rootPassword ?? password);
+    const { root, coordinator, commissions, councils, national } = await buildStructure(password, opts.rootPassword ?? password);
     const [jy] = toJalali(new Date().getFullYear(), new Date().getMonth() + 1, new Date().getDate());
     for (const y of [jy, jy + 1]) await api(root, 'POST', '/holidays/official', { year: y }).catch(() => undefined);
 
@@ -760,6 +974,8 @@ export async function showcase(opts: { password?: string; rootPassword?: string;
     }
     log('شبکه‌ها، انتشار مصوبات، حمایت‌ها و پیشنهادهای ملی…');
     await buildNetworks(root, coordinator, commissions);
+    log('شورای گفت‌وگوی استان‌ها و شورای ملی، با پرونده‌هایی در همهٔ مراحل…');
+    await buildCouncil(commissions, councils, national);
     log('اطلاعات ارائه کامل شد.');
     return { commissions: commissions.length };
   } finally {

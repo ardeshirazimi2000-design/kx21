@@ -6,6 +6,7 @@ import {
   CASE_STATUS_LABELS,
   CASE_TRANSITIONS,
   caseTransition,
+  isArchivalOpen,
   isEditable,
   isLive,
   type CaseAction,
@@ -152,7 +153,7 @@ councilRouter.get('/council-cases/:id/options', async (req, res) => {
         `SELECT m.id, m.title, m.number, m.scheduled_at, m.status, k.body_type, k.name AS body_name
            FROM meetings m JOIN commissions k ON k.id = m.commission_id
           WHERE k.chamber_id = $1 AND k.body_type <> 'commission' AND k.status = 'active'
-            AND m.status IN ('draft','scheduled','invitation_sent','checkin_open','in_progress','agenda_processing')
+            AND (m.status IN ('draft','scheduled','invitation_sent','checkin_open','in_progress','agenda_processing') OR (m.archival AND m.status = 'minutes_draft'))
             AND NOT EXISTS (SELECT 1 FROM agenda_items ai WHERE ai.meeting_id = m.id AND ai.council_case_id = $2)
           ORDER BY m.scheduled_at`,
         [chamber, a.case.id],
@@ -240,7 +241,8 @@ async function addToAgenda(c: any, req: any, caseRow: CouncilCase, meetingId: st
   if (a.commission.chamber_id !== levelChamber || !bodyTypes.includes(a.commission.body_type)) {
     throw badRequest(bodyTypes.includes('council') ? 'جلسه باید جلسهٔ شورای همین سطح باشد' : 'جلسه باید جلسهٔ کارشناسی همین سطح باشد');
   }
-  if (!isEditable(a.meeting.status) && !isLive(a.meeting.status)) throw conflict('افزودن دستور جلسه در این وضعیت جلسه ممکن نیست');
+  // A meeting held before the system was used can be recorded with the case on its agenda (ثبت از سوابق).
+  if (!isEditable(a.meeting.status) && !isLive(a.meeting.status) && !isArchivalOpen(a.meeting)) throw conflict('افزودن دستور جلسه در این وضعیت جلسه ممکن نیست');
   if (await one('SELECT 1 FROM agenda_items WHERE meeting_id = $1 AND council_case_id = $2', [meetingId, caseRow.id], c)) {
     throw conflict('این پرونده در دستور همین جلسه هست');
   }

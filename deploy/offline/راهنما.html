@@ -59,7 +59,7 @@ sudo bash install.sh</pre></li>
   <h3>دو حالت نصب</h3>
   <table>
     <tr><th>دستور</th><th>نتیجه</th></tr>
-    <tr><td><code>sudo bash install.sh</code></td><td>نصب <strong>با اطلاعات ارائه</strong>: شش اتاق استانی با کمیسیون‌ها، جلسات، مصوبات و شبکه‌ها (برای نمایش)</td></tr>
+    <tr><td><code>sudo bash install.sh</code></td><td>نصب <strong>با اطلاعات ارائه</strong>: شش اتاق استانی و اتاق ایران با کمیسیون‌ها، جلسات، مصوبات، شبکه‌ها و شورای گفت‌وگو (برای نمایش)</td></tr>
     <tr><td><code>sudo bash install.sh --empty</code></td><td>نصب <strong>خالی</strong> برای استفادهٔ واقعی: فقط یک مدیر سامانه</td></tr>
   </table>
   <p>پورت دیگر: <code>sudo WEB_PORT=8080 bash install.sh</code>. پیکربندی در <code>/opt/kx21</code> نگهداری می‌شود.</p>
@@ -83,7 +83,7 @@ sudo bash install.sh</pre></li>
   <p>ورود با نشانی ایمیل. رمز همهٔ حساب‌های ارائه: <code>Demo@1405</code> — رمز مدیر سامانه به‌صورت تصادفی در فایل <code>/opt/kx21/admin-password.txt</code> است.</p>
   <div class="wrap"><table>
     <tr><th>نقش</th><th>نام کاربری</th></tr>
-    <tr><td>مدیر فناوری اطلاعات سامانه و دبیرخانهٔ ملی (اتاق ایران)</td><td class="ltr">root@demo.ir</td></tr>
+    <tr><td>مدیر فناوری اطلاعات سامانه و دبیرخانهٔ ملی (داشبورد آماری)</td><td class="ltr">root@demo.ir</td></tr>
     <tr><td>ممیز امنیت (فقط رویدادنگاری و تنظیمات امنیتی)</td><td class="ltr">auditor@demo.ir</td></tr>
     <tr><td>هماهنگ‌کنندهٔ شبکه‌های ملی</td><td class="ltr">coordinator@demo.ir</td></tr>
     <tr><td>مدیر اتاق استان</td><td class="ltr">admin.yzd@demo.ir · admin.shz@demo.ir · admin.isf@demo.ir · admin.snd@demo.ir · admin.tbz@demo.ir · admin.thr@demo.ir</td></tr>
@@ -91,6 +91,10 @@ sudo bash install.sh</pre></li>
     <tr><td>دبیر کمیسیون</td><td class="ltr">secretary.agr.yzd@demo.ir</td></tr>
     <tr><td>نایب‌رئیس / کارشناس</td><td class="ltr">vice.agr.yzd@demo.ir · expert.agr.yzd@demo.ir</td></tr>
     <tr><td>عضو کمیسیون</td><td class="ltr">member1.agr.yzd@demo.ir … member6.agr.yzd@demo.ir</td></tr>
+    <tr><td>رئیس اتاق استان (دبیر شورای گفت‌وگو)</td><td class="ltr">president.yzd@demo.ir · president.shz@demo.ir · …</td></tr>
+    <tr><td>دبیرخانهٔ شورای گفت‌وگوی استان</td><td class="ltr">council.sec.yzd@demo.ir · council.sec.shz@demo.ir · …</td></tr>
+    <tr><td>نمایندهٔ دستگاه دولتی (مدعو جلسهٔ کارشناسی)</td><td class="ltr">gov1.snd@demo.ir · gov2.snd@demo.ir</td></tr>
+    <tr><td>رئیس اتاق ایران (دبیر شورای ملی) / دبیرخانهٔ ملی شورا</td><td class="ltr">president.iran@demo.ir · council.sec.iran@demo.ir</td></tr>
   </table></div>
   <h3>الگوی نام کاربری</h3>
   <p><span class="ltr">نقش.کمیسیون.استان@demo.ir</span></p>
@@ -110,6 +114,7 @@ sudo bash install.sh</pre></li>
   <h2>۴. چه چیزهایی در اطلاعات ارائه هست</h2>
   <ul>
     <li>شش اتاق استانی، هر کدام با دورهٔ دهم و سه کمیسیون؛ هر کمیسیون رئیس، نایب‌رئیس، دبیر، شش عضو و یک کارشناس دارد.</li>
+    <li>شورای گفت‌وگو و کارگروه کارشناسی در هر استان و در اتاق ایران؛ هفت پرونده در مراحل مختلف: مختومه در شورای ملی (یزد)، منتظر تأیید رئیس اتاق برای ارجاع به ملی (شیراز)، حل‌شده در استان (اصفهان)، جلسهٔ کارشناسی آینده با نمایندگان دستگاه‌ها (سنندج)، در دستور جلسهٔ آیندهٔ شورای استان (تبریز)، در دستور شورای ملی و یک پروندهٔ محرمانهٔ بازگشت‌داده‌شده (تهران).</li>
     <li>برای هر کمیسیون: سه جلسهٔ گذشته که از روی صورتجلسهٔ کاغذی ثبت شده‌اند (با اسکن صورتجلسه)، یک جلسهٔ برگزارشده در سامانه (اعلام حضور، رأی‌گیری زنده، ارجاع کارشناسی) و یک جلسهٔ آینده با دعوت‌نامهٔ ارسال‌شده.</li>
     <li>صورتجلسه‌ها در همهٔ مراحل: پیش‌نویس، در انتظار تأیید رئیس، تأییدشده و قفل‌شده.</li>
     <li>مصوبات با چند دستگاه اجرایی و گزارش پیشرفت جداگانهٔ هر دستگاه؛ مصوبات انجام‌شده، در حال اجرا و معوق.</li>
@@ -127,6 +132,7 @@ sudo bash install.sh</pre></li>
     <li><strong>کار روزانهٔ کمیسیون</strong> — ورود با <span class="ltr">secretary.agr.yzd@demo.ir</span>: تقویم جلسات (تعطیلات روی تقویم)، جلسهٔ آینده و دستور جلسه، جلسهٔ برگزارشده با نتیجهٔ رأی‌گیری و صورتجلسه، جلسات ثبت‌شده از سوابق با اسکن امضاشده.</li>
     <li><strong>پیگیری مصوبات</strong> — «مصوبات و پیگیری»: مصوبات معوق در ابتدای فهرست، پیشرفت هر دستگاه اجرایی.</li>
     <li><strong>تأیید صورتجلسه</strong> — ورود با <span class="ltr">chair.enr.yzd@demo.ir</span>: صورتجلسهٔ در انتظار تأیید و تأیید و قفل آن.</li>
+    <li><strong>شورای گفت‌وگو</strong> — ورود با <span class="ltr">president.shz@demo.ir</span>: «پرونده‌های شورا»، پروندهٔ منتظر تأیید و تأیید ارجاع به شورای ملی توسط خود رئیس اتاق؛ سپس با <span class="ltr">council.sec.yzd@demo.ir</span> خط زمانی پرونده‌ای که در شورای ملی حل و مختومه شده است.</li>
     <li><strong>برنامهٔ موبایل</strong> — نصب فایل <span class="ltr">kx-commissions.apk</span> و ورود با <span class="ltr">member1.agr.yzd@demo.ir</span>؛ در صفحهٔ ورود، نشانی سرور را <span class="ltr">https://نشانی-سرور:5000</span> وارد کنید.</li>
   </ol>
 </section>

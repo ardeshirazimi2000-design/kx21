@@ -145,7 +145,7 @@ if [ "$FIRST" = "1" ]; then
   (umask 077; openssl rand -base64 24 | tr -d '/+=' | cut -c1-20 > "$ADMIN_FILE")
   docker compose exec -T -e ADMIN_EMAIL="$ADMIN_EMAIL" api node dist/db/create-admin.js < "$ADMIN_FILE"
   if [ "$MODE" = demo ]; then
-    say "ساخت اطلاعات ارائه (شش اتاق، ۱۸ کمیسیون، جلسات، مصوبات و شبکه‌ها) — حدود یک دقیقه…"
+    say "ساخت اطلاعات ارائه (شش اتاق و اتاق ایران، ۱۸ کمیسیون، جلسات، مصوبات، شبکه‌ها و شورای گفت‌وگو) — حدود دو دقیقه…"
     docker compose exec -T -e ALLOW_DEMO_SEED=1 -e LOG_LEVEL=warn -e SHOWCASE_PASSWORD="${SHOWCASE_PASSWORD:-}" api node dist/db/showcase.js
   fi
 fi
