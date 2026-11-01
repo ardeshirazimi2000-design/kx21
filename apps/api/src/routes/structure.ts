@@ -49,7 +49,7 @@ structureRouter.get('/chambers', async (req, res) => {
        CASE WHEN $2 OR c.id = ANY($3::uuid[]) THEN (
          SELECT COALESCE(json_agg(json_build_object('id', u.id, 'full_name', u.full_name, 'email', u.email, 'mobile', u.mobile) ORDER BY u.full_name), '[]')
            FROM chamber_admins a JOIN users u ON u.id = a.user_id WHERE a.chamber_id = c.id) END AS admins,
-       (SELECT count(*) FROM commissions k JOIN terms t ON t.id = k.term_id WHERE k.chamber_id = c.id AND t.status = 'active') AS commission_count
+       (SELECT count(*) FROM commissions k JOIN terms t ON t.id = k.term_id WHERE k.chamber_id = c.id AND t.status = 'active' AND k.body_type = 'commission') AS commission_count
      FROM chambers c WHERE ($1::uuid[] IS NULL OR c.id = ANY($1)) ORDER BY c.name`,
     [ids, u.isSuperAdmin, [...u.adminChambers, ...u.itChambers]],
   );
@@ -274,11 +274,13 @@ structureRouter.get('/commissions', async (req, res) => {
   const { page, pageSize, offset, q } = pageParams(req);
   const chamberId = req.query.chamberId ? uuid.parse(req.query.chamberId) : null;
   const termId = req.query.termId ? uuid.parse(req.query.termId) : null;
-  const where = `($1::uuid IS NULL OR c.chamber_id = $1) AND ($2::uuid IS NULL OR c.term_id = $2)
+  // The council of dialogue and its expert group are a section of their own (/council), not among the commissions.
+  const bodies = req.query.bodyType === 'council' ? ['council', 'expert_group'] : req.query.bodyType === 'all' ? ['commission', 'council', 'expert_group'] : ['commission'];
+  const where = `c.body_type = ANY($7::text[]) AND ($1::uuid IS NULL OR c.chamber_id = $1) AND ($2::uuid IS NULL OR c.term_id = $2)
     AND ($3::text IS NULL OR c.name ILIKE '%' || $3 || '%' OR c.code ILIKE '%' || $3 || '%' OR c.domain ILIKE '%' || $3 || '%')
     AND ($4::boolean OR c.chamber_id = ANY($5::uuid[])
          OR EXISTS (SELECT 1 FROM commission_memberships m WHERE m.commission_id = c.id AND m.user_id = $6 AND m.status = 'active'))`;
-  const params = [chamberId, termId, q, false, u.adminChambers, u.id];
+  const params = [chamberId, termId, q, false, u.adminChambers, u.id, bodies];
   const items = await query(
     `SELECT c.*, t.title AS term_title, t.number AS term_number, (SELECT ch.name FROM chambers ch WHERE ch.id = c.chamber_id) AS chamber_name,
        (SELECT count(*) FROM commission_memberships m WHERE m.commission_id = c.id AND m.status = 'active') AS member_count,

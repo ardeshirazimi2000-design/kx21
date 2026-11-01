@@ -71,6 +71,27 @@ export function CouncilPage() {
         actions={roles?.canOpen?.length > 0 && <Button onClick={() => setOpening(true)}>ثبت پروندهٔ تازه</Button>}
       />
       <ErrorBox error={error} />
+      {roles?.bodies?.length > 0 && (
+        <Card title="شورا و کارگروه کارشناسی">
+          <p className="muted small" style={{ marginTop: 0 }}>
+            اعضا، جلسات و مصوبات شورا و کارگروه کارشناسی آن جدا از کمیسیون‌های تخصصی در همین بخش اداره می‌شوند.
+          </p>
+          <ul className="list">
+            {roles.bodies.map((b: any) => (
+              <li key={b.id} className="row between gap wrap">
+                <span>
+                  <Badge tone={b.body_type === 'council' ? 'accent' : 'info'}>{b.body_type === 'council' ? 'شورا' : 'کارگروه کارشناسی'}</Badge>{' '}
+                  <Link to={`/commissions/${b.id}`}>{b.name}</Link>
+                </span>
+                <span className="muted small">
+                  {b.chamber_name}
+                  {b.body_type === 'council' && ` — دبیر شورا: ${b.council_secretary_name ?? 'تعیین نشده'}`}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </Card>
+      )}
       <Card>
         <div className="row gap-sm wrap mb" style={{ alignItems: 'flex-end' }}>
           <Field label="جست‌وجو">

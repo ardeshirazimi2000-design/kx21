@@ -83,8 +83,9 @@ reportsRouter.get('/me/overview', async (req, res) => {
   const yearTo = g(jy + 1, 1);
   const HELD = `('in_progress','agenda_processing','minutes_draft','pending_approval','approved','archived')`;
   // $1: the chamber an admin chose (else the user's own commissions), $2: the user.
-  const scope = `SELECT id FROM commissions WHERE $1::uuid IS NOT NULL AND chamber_id = $1 AND status = 'active'
-                 UNION SELECT commission_id FROM commission_memberships WHERE $1::uuid IS NULL AND user_id = $2 AND status = 'active'`;
+  const scope = `SELECT id FROM commissions WHERE $1::uuid IS NOT NULL AND chamber_id = $1 AND status = 'active' AND body_type = 'commission'
+                 UNION SELECT m.commission_id FROM commission_memberships m JOIN commissions k ON k.id = m.commission_id
+                  WHERE $1::uuid IS NULL AND m.user_id = $2 AND m.status = 'active' AND k.body_type = 'commission'`;
   // $1: the chamber (null: every chamber).
   const where = `($1::uuid IS NULL OR chamber_id = $1)`;
   const [mine, overall] = await Promise.all([
@@ -99,7 +100,7 @@ reportsRouter.get('/me/overview', async (req, res) => {
     ),
     one(
       `SELECT
-         (SELECT count(*)::int FROM commissions WHERE ${where} AND status = 'active') AS commissions,
+         (SELECT count(*)::int FROM commissions WHERE ${where} AND status = 'active' AND body_type = 'commission') AS commissions,
          (SELECT count(DISTINCT user_id)::int FROM commission_memberships WHERE ${where} AND status = 'active') AS members,
          (SELECT count(*)::int FROM meetings WHERE ${where} AND status IN ${HELD} AND scheduled_at >= $2 AND scheduled_at < $3) AS meetings_this_year,
          (SELECT count(*)::int FROM resolutions WHERE ${where} AND created_at >= $2 AND created_at < $3) AS resolutions_this_year`,
@@ -195,7 +196,7 @@ reportsRouter.get('/dashboard/chamber', async (req, res) => {
        (SELECT count(*) FROM resolutions r WHERE r.commission_id = c.id) AS resolutions_total,
        (SELECT count(*) FROM resolutions r WHERE r.commission_id = c.id AND r.status = 'done') AS resolutions_done,
        (SELECT count(*) FROM resolutions r WHERE r.commission_id = c.id AND r.due_date < current_date AND r.status NOT IN ('done','cancelled')) AS resolutions_overdue
-     FROM commissions c JOIN terms t ON t.id = c.term_id WHERE c.chamber_id = $1 AND t.status = 'active' ORDER BY c.name`,
+     FROM commissions c JOIN terms t ON t.id = c.term_id WHERE c.chamber_id = $1 AND t.status = 'active' AND c.body_type = 'commission' ORDER BY c.name`,
     [chamberId],
   );
   // The resolutions themselves only for the chamber's own admin; the national secretariat sees the numbers.
@@ -208,7 +209,7 @@ reportsRouter.get('/dashboard/chamber', async (req, res) => {
       )
     : [];
   const totals = await one(
-    `SELECT (SELECT count(*) FROM commissions c JOIN terms t ON t.id = c.term_id WHERE c.chamber_id = $1 AND t.status = 'active' AND c.status = 'active') AS commissions,
+    `SELECT (SELECT count(*) FROM commissions c JOIN terms t ON t.id = c.term_id WHERE c.chamber_id = $1 AND t.status = 'active' AND c.status = 'active' AND c.body_type = 'commission') AS commissions,
             (SELECT count(*) FROM meetings WHERE chamber_id = $1 AND scheduled_at > now() - interval '30 days' AND status <> 'cancelled') AS meetings_30d,
             (SELECT count(*) FROM resolutions WHERE chamber_id = $1 AND status NOT IN ('done','cancelled')) AS open_resolutions,
             (SELECT count(*) FROM meetings WHERE chamber_id = $1 AND status IN ('in_progress','agenda_processing')) AS live_meetings`,

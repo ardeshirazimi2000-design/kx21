@@ -88,6 +88,12 @@ describe('council bodies', () => {
     const ex = await as('admin').post('/api/commissions', { chamberId: yazd, termId: term, name: 'کارگروه کارشناسی یزد', code: 'KRG', bodyType: 'expert_group', councilSecretaryId: ids.president });
     expect(ex.status).toBe(400);
     body.expert = (await as('admin').post('/api/commissions', { chamberId: yazd, termId: term, name: 'کارگروه کارشناسی یزد', code: 'KRG', bodyType: 'expert_group' })).body.id;
+    // The council is a section of its own: not among the chamber's commissions or their statistics.
+    const codes = async (q = '') => (await as('admin').get(`/api/commissions?pageSize=100${q}`)).body.items.map((k: any) => k.code).sort();
+    expect(await codes()).not.toContain('SHG');
+    expect(await codes('&bodyType=council')).toEqual(['KRG', 'SHG']);
+    const dash = (await as('admin').get(`/api/dashboard/chamber?chamberId=${yazd}`)).body;
+    expect(dash.commissions.map((k: any) => k.code)).not.toContain('SHG');
     for (const [b, who, position] of [
       [body.council, 'councilSec', 'secretary'],
       [body.expert, 'councilSec', 'secretary'],

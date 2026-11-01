@@ -232,7 +232,7 @@ networksRouter.get('/networks/:id', async (req, res) => {
   const joinable = u.isNational || u.adminChambers.length
     ? await query(
         `SELECT c.id, c.name, ch.name AS chamber_name FROM commissions c JOIN chambers ch ON ch.id = c.chamber_id JOIN terms t ON t.id = c.term_id
-          WHERE c.status = 'active' AND t.status = 'active' AND ($2::boolean OR c.chamber_id = ANY($3::uuid[]))
+          WHERE c.status = 'active' AND t.status = 'active' AND c.body_type = 'commission' AND ($2::boolean OR c.chamber_id = ANY($3::uuid[]))
             AND NOT EXISTS (SELECT 1 FROM network_commissions nc WHERE nc.network_id = $1 AND nc.commission_id = c.id)
           ORDER BY ch.name, c.name`,
         [a.network.id, u.isNational, u.adminChambers],

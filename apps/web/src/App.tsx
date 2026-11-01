@@ -135,7 +135,7 @@ function Shell({ children }: { children: ReactNode }) {
   const networks = useApi<any[]>('/networks');
   // شورای گفت‌وگو: shown to whoever has a role in a council or sees a case (e.g. of their own commission).
   const council = useApi<any>('/council/me');
-  const inCouncil = !!council.data && (council.data.member.length > 0 || council.data.visibleCases > 0);
+  const inCouncil = !!council.data && (council.data.member.length > 0 || council.data.visibleCases > 0 || council.data.bodies.length > 0);
 
   const item = (to: string, label: string, icon: string, extra?: ReactNode) => (
     <NavLink to={to} end={to === '/'}>
