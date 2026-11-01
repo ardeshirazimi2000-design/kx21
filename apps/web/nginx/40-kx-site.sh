@@ -185,6 +185,8 @@ server {
   ssl_session_cache shared:kx_tls:10m;
   ssl_session_timeout 1h;
   ssl_session_tickets off;
+  # Plain HTTP sent to the HTTPS port (e.g. http://server:5000 typed by hand): send the browser to HTTPS instead of «400».
+  error_page 497 =301 https://\$host$REDIRECT_PORT\$request_uri;
   include /etc/nginx/kx/locations.conf;
 }
 EOF
