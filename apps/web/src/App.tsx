@@ -169,7 +169,7 @@ function Shell({ children }: { children: ReactNode }) {
           <img src="/iran-chamber-logo.png" width={50} height={50} alt="لوگوی اتاق ایران" />
           <span>
             اتاق بازرگانی، صنایع، معادن و کشاورزی ایران
-            <small>سامانه کمیسیون‌های تخصصی</small>
+            <small>سامانه کمیسیون‌های تخصصی و شورای گفت‌وگوی دولت و بخش خصوصی</small>
           </span>
         </Link>
         <form
@@ -240,7 +240,7 @@ function Shell({ children }: { children: ReactNode }) {
               {(me!.is_super_admin || me!.auditAll) && item('/security', 'تنظیمات امنیتی', ICONS.lock)}
             </NavGroup>
             {inCouncil && (
-              <NavGroup id="council" title="شورای گفت‌وگو" icon={ICONS.council} paths={['/council']}>
+              <NavGroup id="council" title="شورای گفت‌وگوی دولت و بخش خصوصی" icon={ICONS.council} paths={['/council']}>
                 {item('/council', 'پرونده‌های شورا', ICONS.council)}
               </NavGroup>
             )}

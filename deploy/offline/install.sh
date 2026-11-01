@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# نصب آفلاین سامانهٔ کمیسیون‌های تخصصی — Offline install of the commissions system.
+# نصب آفلاین سامانهٔ کمیسیون‌های تخصصی و شورای گفت‌وگوی دولت و بخش خصوصی — Offline install of the commissions system.
 #
 #   sudo bash install.sh            نصب با اطلاعات ارائه (شش اتاق استانی نمونه) — presentation data
 #   sudo bash install.sh --empty    نصب خالی برای استفادهٔ واقعی — empty, for real use

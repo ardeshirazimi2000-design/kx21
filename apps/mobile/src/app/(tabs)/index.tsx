@@ -35,7 +35,7 @@ export default function HomeScreen() {
       ))}
       {council.data && (council.data.member.length > 0 || council.data.visibleCases > 0) && (
         <Pressable onPress={() => router.push('/council')}>
-          <Card title="شورای گفت‌وگو" highlight={!!pending.data?.total && council.data.president.length > 0}>
+          <Card title="شورای گفت‌وگوی دولت و بخش خصوصی" highlight={!!pending.data?.total && council.data.president.length > 0}>
             <T>{fa(council.data.visibleCases)} پرونده</T>
             {council.data.president.length > 0 && !!pending.data?.total && (
               <T color={t.warning} bold>{fa(pending.data.total)} پرونده منتظر تأیید شما به‌عنوان دبیر شورا</T>

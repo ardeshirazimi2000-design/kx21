@@ -96,13 +96,13 @@ export function LoginPage() {
           <img src="/iran-chamber-logo.png" width={64} height={64} alt="لوگوی اتاق ایران" />
           <div>
             <div className="lg-hero-name">اتاق بازرگانی، صنایع، معادن و کشاورزی ایران</div>
-            <div className="lg-mobile-sub">پلتفرم کمیسیون‌های تخصصی</div>
+            <div className="lg-mobile-sub">پلتفرم کمیسیون‌های تخصصی و شورای گفت‌وگوی دولت و بخش خصوصی</div>
           </div>
         </div>
         <form className="lg-card" onSubmit={submit}>
           <div className="lg-card-body">
             <h1>ورود به سامانه</h1>
-            <p className="lg-lead">برای دسترسی به پلتفرم کمیسیون‌های تخصصی وارد حساب کاربری خود شوید.</p>
+            <p className="lg-lead">برای دسترسی به پلتفرم کمیسیون‌های تخصصی و شورای گفت‌وگوی دولت و بخش خصوصی وارد حساب کاربری خود شوید.</p>
             {notice && !error && <div className="alert alert-warning">{notice}</div>}
             <ErrorBox error={error} />
             {!mfaToken ? (
@@ -189,7 +189,10 @@ export function LoginPage() {
           </div>
         </div>
         <div className="lg-hero-text">
-          <h2>پلتفرم کمیسیون‌های تخصصی</h2>
+          <h2>
+            پلتفرم کمیسیون‌های تخصصی
+            <small className="lg-hero-sub">و شورای گفت‌وگوی دولت و بخش خصوصی</small>
+          </h2>
           <h3>اتاق بازرگانی، صنایع، معادن و کشاورزی ایران</h3>
           <span className="lg-hero-rule" />
           <p>
@@ -199,7 +202,7 @@ export function LoginPage() {
           </p>
         </div>
         <div className="lg-features">
-          <Feature icon={CHART} title="مدیریت هوشمند" sub="فرآیندهای کمیسیون‌ها" />
+          <Feature icon={CHART} title="مدیریت هوشمند" sub="کمیسیون‌ها و شورای گفت‌وگو" />
           <Feature icon={PEOPLE} title="ارتباط حرفه‌ای" sub="با اعضا و فعالان اقتصادی" />
           <Feature icon={SHIELD} title="امنیت بالا" sub="در دسترس و مطمئن" />
         </div>

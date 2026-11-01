@@ -11,7 +11,7 @@ export type BodyType = (typeof BODY_TYPES)[number];
 export const BODY_TYPE_LABELS: Record<BodyType, string> = {
   commission: 'کمیسیون',
   expert_group: 'کارگروه کارشناسی',
-  council: 'شورای گفت‌وگو',
+  council: 'شورای گفت‌وگوی دولت و بخش خصوصی',
 };
 
 export const CHAMBER_KINDS = ['provincial', 'national'] as const;

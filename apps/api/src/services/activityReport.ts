@@ -267,10 +267,10 @@ export async function buildActivityDocx(d: ActivityData): Promise<Buffer> {
           [10, 38, 18, 11, 13, 10],
         )
       : para('در این دوره مصوبه‌ای ثبت نشده است.'),
-    para(`این گزارش در تاریخ ${formatJalaliLong(new Date())} از سامانه کمیسیون‌های تخصصی تهیه شده است.`, { size: 18, color: '5D6D78' }),
+    para(`این گزارش در تاریخ ${formatJalaliLong(new Date())} از سامانه کمیسیون‌های تخصصی و شورای گفت‌وگوی دولت و بخش خصوصی تهیه شده است.`, { size: 18, color: '5D6D78' }),
   ];
   const doc = new Document({
-    creator: 'سامانه کمیسیون‌های تخصصی',
+    creator: 'سامانه کمیسیون‌های تخصصی و شورای گفت‌وگوی دولت و بخش خصوصی',
     title: `گزارش دوره‌ای ${d.commission.name}`,
     styles: { default: { document: { run: { font: FONT, rightToLeft: true } } } },
     sections: [{ properties: { page: { margin: { top: 1000, bottom: 1000, left: 1000, right: 1000 } } }, children }],

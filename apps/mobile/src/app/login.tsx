@@ -59,7 +59,7 @@ export default function LoginScreen() {
           اتاق بازرگانی، صنایع، معادن و کشاورزی ایران
         </T>
         <T color="#d6e6ea" style={{ textAlign: 'center' }}>
-          سامانه کمیسیون‌های تخصصی
+          سامانه کمیسیون‌های تخصصی و شورای گفت‌وگوی دولت و بخش خصوصی
         </T>
       </View>
       <Card>

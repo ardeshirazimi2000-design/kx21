@@ -66,7 +66,7 @@ export function CouncilPage() {
   return (
     <>
       <PageHeader
-        title="پرونده‌های شورای گفت‌وگو"
+        title="پرونده‌های شورای گفت‌وگوی دولت و بخش خصوصی"
         subtitle={roleText ? `نقش شما: ${roleText}` : 'پرونده‌هایی که از کمیسیون‌های شما یا به شورای اتاق شما رسیده است'}
         actions={roles?.canOpen?.length > 0 && <Button onClick={() => setOpening(true)}>ثبت پروندهٔ تازه</Button>}
       />

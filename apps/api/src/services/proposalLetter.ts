@@ -128,12 +128,12 @@ export async function buildLetterDocx(letter: Letter, d: LetterData, signer: str
   children.push(para([run(signer || 'دبیر شبکه', { bold: true })], { align: AlignmentType.END, after: 40 }));
   children.push(para([run(`دبیر ${d.network.name}`, { size: 20, color: '5D6D78' })], { align: AlignmentType.END, after: 400 }));
   children.push(
-    para([run(`این نامه بر اساس داده‌های سامانه کمیسیون‌های تخصصی در ${formatJalaliLong(new Date())} تهیه شده است.`, { size: 16, color: '8A99A3' })], {
+    para([run(`این نامه بر اساس داده‌های سامانه کمیسیون‌های تخصصی و شورای گفت‌وگوی دولت و بخش خصوصی در ${formatJalaliLong(new Date())} تهیه شده است.`, { size: 16, color: '8A99A3' })], {
       align: AlignmentType.CENTER,
     }),
   );
   const doc = new Document({
-    creator: 'سامانه کمیسیون‌های تخصصی',
+    creator: 'سامانه کمیسیون‌های تخصصی و شورای گفت‌وگوی دولت و بخش خصوصی',
     title: letter.subject,
     styles: { default: { document: { run: { font: FONT, rightToLeft: true } } } },
     sections: [{ properties: { page: { margin: { top: 1200, bottom: 1200, left: 1300, right: 1300 } } }, children }],

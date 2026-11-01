@@ -99,7 +99,10 @@ export function DashboardOverview({ upcoming }: { upcoming: any[] | undefined })
         <div className="dash-banner-text">
           <img src="/iran-chamber-logo.png" width={84} height={84} alt="" />
           <div>
-            <h1>به پلتفرم کمیسیون‌های تخصصی</h1>
+            <h1>
+              به پلتفرم کمیسیون‌های تخصصی
+              <small className="dash-banner-h1-sub">و شورای گفت‌وگوی دولت و بخش خصوصی</small>
+            </h1>
             <p className="dash-banner-sub">اتاق بازرگانی، صنایع، معادن و کشاورزی ایران خوش آمدید</p>
             <p className="dash-banner-tag">
               همکاری، مشورت، توسعه بخش خصوصی <span className="dash-rule" />

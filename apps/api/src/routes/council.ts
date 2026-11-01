@@ -229,7 +229,7 @@ councilRouter.post('/council-cases', async (req, res) => {
     await audit(c, req, { chamberId, action: 'council.case_opened', entity: 'council_case', entityId: created!.id, after: { code: created!.code, title, commissionId, resolutionId: b.resolutionId ?? null } });
     return created!;
   });
-  await notifyCase(row, 'council.case_opened', `پروندهٔ تازهٔ شورا: ${row.code}`, row.title, await councilPeople(row.origin_chamber_id, { president: true }));
+  await notifyCase(row, 'council.case_opened', `پروندهٔ تازهٔ شورا: \u2066${row.code}\u2069`, row.title, await councilPeople(row.origin_chamber_id, { president: true }));
   res.status(201).json(row);
 });
 
@@ -364,11 +364,11 @@ councilRouter.post('/council-cases/:id/actions', async (req, res) => {
   if (before.level !== after.level) for (const id of await councilPeople(await levelChamberId(before))) recipients.add(id);
   recipients.delete(u.id);
   const text = `${label} — وضعیت: ${CASE_STATUS_LABELS[after.status]} (${CASE_LEVEL_LABELS[after.level]})${b.reason ? `؛ ${b.reason}` : ''}`;
-  await notifyCase(after, 'council.case_updated', `پروندهٔ ${after.code}: ${CASE_STATUS_LABELS[after.status]}`, text, [...recipients]);
+  await notifyCase(after, 'council.case_updated', `پروندهٔ \u2066${after.code}\u2069: ${CASE_STATUS_LABELS[after.status]}`, text, [...recipients]);
   if (after.status === 'pending_approval') {
     const president = (await councilBodies(after.origin_chamber_id)).council?.council_secretary_id;
     if (president) {
-      await notifyCase(after, 'council.approval_needed', `تأیید ارجاع پروندهٔ ${after.code} به شورای ملی`, after.title, [president]);
+      await notifyCase(after, 'council.approval_needed', `تأیید ارجاع پروندهٔ \u2066${after.code}\u2069 به شورای ملی`, after.title, [president]);
     }
   }
   res.json(after);
@@ -391,7 +391,7 @@ export async function remindCouncilDeadlines(): Promise<void> {
   ] as const) {
     for (const cs of list) {
       const to = cs.status === 'returned' ? await originPeople(cs.origin_commission_id) : await councilPeople(await levelChamberId(cs));
-      await notifyCase(cs, 'council.case_due', `مهلت پروندهٔ ${cs.code} ${word}`, `${cs.title} — ${CASE_STATUS_LABELS[cs.status]}`, to);
+      await notifyCase(cs, 'council.case_due', `مهلت پروندهٔ \u2066${cs.code}\u2069 ${word}`, `${cs.title} — ${CASE_STATUS_LABELS[cs.status]}`, to);
     }
   }
 }
