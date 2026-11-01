@@ -11,7 +11,7 @@ export function ChambersPage() {
   const { data, reload, loading } = useApi<any[]>('/chambers');
   const [open, setOpen] = useState(false);
   const [adminFor, setAdminFor] = useState<any | null>(null);
-  const [form, setForm] = useState({ name: '', province: '', phone: '', email: '', address: '' });
+  const [form, setForm] = useState({ name: '', province: '', phone: '', email: '', address: '', kind: 'provincial' });
   const [err, setErr] = useState<Error | null>(null);
   const save = async () => {
     try {
@@ -52,7 +52,10 @@ export function ChambersPage() {
               <tbody>
                 {data?.map((c) => (
                   <tr key={c.id}>
-                    <td>{c.name}</td>
+                    <td>
+                      {c.name}
+                      {c.kind === 'national' && <> <Badge tone="accent">ملی</Badge></>}
+                    </td>
                     <td>{c.province}</td>
                     <td>{fa(c.commission_count)}</td>
                     <td>
@@ -94,6 +97,12 @@ export function ChambersPage() {
               <input className="input" value={form[k]} onChange={(e) => setForm({ ...form, [k]: e.target.value })} />
             </Field>
           ))}
+          <Field label="نوع اتاق" hint="اتاق ایران (ملی) یکی است و شورای ملی گفت‌وگو و کارگروه کارشناسی ملی در آن تعریف می‌شود">
+            <select className="input" value={form.kind} onChange={(e) => setForm({ ...form, kind: e.target.value })}>
+              <option value="provincial">اتاق استان</option>
+              <option value="national">اتاق ایران (ملی)</option>
+            </select>
+          </Field>
           <p className="muted small">پس از ایجاد، با «تعیین مدیر اتاق» مدیر استانی را مشخص کنید تا دوره‌ها و کمیسیون‌های این اتاق را تعریف کند.</p>
         </Modal>
       )}

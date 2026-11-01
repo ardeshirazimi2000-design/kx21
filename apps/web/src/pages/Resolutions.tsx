@@ -1,5 +1,6 @@
 import { RESOLUTION_STATUS_LABELS, RESOLUTION_STATUSES } from '@kx/shared';
 import { NetworkShareCard } from './Networks';
+import { ReferToCouncilButton } from './Council';
 import { useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { PriorityBadge, ResolutionBadge } from '../components/status';
@@ -200,6 +201,7 @@ export function ResolutionDetailPage() {
         actions={
           <>
             <ResolutionBadge status={r.status} overdue={!closed && r.due_date && new Date(r.due_date) < new Date()} />
+            <ReferToCouncilButton r={r} onDone={reload} />
             {r.canManage && !closed && (
               <>
                 <Button size="sm" variant="secondary" onClick={() => setEditing(true)}>

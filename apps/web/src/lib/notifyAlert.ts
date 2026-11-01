@@ -13,7 +13,9 @@ export interface LiveNotification {
 
 /** Page to open for a notification. */
 export const notificationLink = (n: { data?: Record<string, any> }) =>
-  n.data?.networkId
+  n.data?.councilCaseId
+    ? `/council/cases/${n.data.councilCaseId}`
+    : n.data?.networkId
     ? `/networks/${n.data.networkId}`
     : n.data?.meetingId
       ? `/meetings/${n.data.meetingId}`

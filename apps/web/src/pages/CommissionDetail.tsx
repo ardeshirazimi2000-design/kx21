@@ -48,6 +48,7 @@ export function CommissionDetailPage() {
       />
       <Tabs tabs={tabs} value={tab} onChange={setTab} />
       {tab === 'overview' && (caps.includes('report.commission') ? <CommissionDashboard commissionId={c.id} /> : <Empty>دسترسی به داشبورد ندارید.</Empty>)}
+      {tab === 'members' && c.body_type === 'council' && <CouncilSecretaryCard commission={c} onSaved={reload} />}
       {tab === 'members' && <Members commission={c} />}
       {tab === 'meetings' && <Meetings commission={c} />}
       {tab === 'archive' && <CommissionArchive commission={c} />}
@@ -492,6 +493,60 @@ function Settings({ commission, onSaved }: { commission: any; onSaved: () => voi
           </Field>
         </div>
       </div>
+    </Card>
+  );
+}
+
+/**
+ * دبیر شورا: the chamber's president, set by the chamber admin. He approves referral to the national council and
+ * reopens cases himself in the system, so he needs a login of his own.
+ */
+function CouncilSecretaryCard({ commission, onSaved }: { commission: any; onSaved: () => void }) {
+  const { me } = useAuth();
+  const canEdit = runsChamber(me, commission.chamber_id);
+  const [q, setQ] = useState('');
+  const people = useApi<any>(canEdit && q.trim().length >= 2 ? `/people?chamberId=${commission.chamber_id}&q=${encodeURIComponent(q.trim())}&pageSize=8` : null, [q]);
+  const [err, setErr] = useState<Error | null>(null);
+  const set = async (id: string | null) => {
+    setErr(null);
+    try {
+      await patch(`/commissions/${commission.id}`, { councilSecretaryId: id });
+      setQ('');
+      onSaved();
+    } catch (e) {
+      setErr(e as Error);
+    }
+  };
+  return (
+    <Card title="دبیر شورا (رئیس اتاق)">
+      <ErrorBox error={err} />
+      <p className="muted small" style={{ marginTop: 0 }}>
+        دبیر شورا ارجاع پرونده به شورای ملی را تأیید می‌کند و پروندهٔ مختومه را بازگشایی می‌کند؛ این تصمیم‌ها را خودش در سامانه ثبت می‌کند. کارهای اجرایی با
+        اعضای «دبیر» (دبیرخانهٔ شورا) است.
+      </p>
+      <div className="row gap-sm wrap" style={{ alignItems: 'center' }}>
+        {commission.councilSecretary ? <strong>{commission.councilSecretary.full_name}</strong> : <Badge tone="warning">تعیین نشده</Badge>}
+        {canEdit && commission.councilSecretary && (
+          <Button size="sm" variant="ghost" onClick={() => void set(null)}>
+            برداشتن
+          </Button>
+        )}
+      </div>
+      {canEdit && (
+        <Field group label="تعیین یا تغییر" hint="شخص باید حساب ورود داشته باشد">
+          <input className="input" value={q} onChange={(e) => setQ(e.target.value)} placeholder="جست‌وجوی نام" />
+          <ul className="list">
+            {people.data?.items?.map((p: any) => (
+              <li key={p.id}>
+                <button type="button" className="link-btn" disabled={!p.can_login} onClick={() => void set(p.id)}>
+                  {p.full_name}
+                </button>
+                {!p.can_login && <span className="muted small"> (بدون حساب ورود)</span>}
+              </li>
+            ))}
+          </ul>
+        </Field>
+      )}
     </Card>
   );
 }

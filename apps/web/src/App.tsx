@@ -29,6 +29,7 @@ import { RolesPage } from './pages/Roles';
 import { HolidaysPage } from './pages/Holidays';
 import { SearchPage } from './pages/Search';
 import { StaffRolesPage } from './pages/StaffRoles';
+import { CouncilCasePage, CouncilPage } from './pages/Council';
 import { TermsPage } from './pages/Terms';
 
 export function App() {
@@ -55,6 +56,8 @@ export function App() {
         <Route path="/notification-settings" element={<NotificationSettingsPage />} />
         <Route path="/security" element={<SecurityPolicyPage />} />
         <Route path="/staff-roles" element={<StaffRolesPage />} />
+        <Route path="/council" element={<CouncilPage />} />
+        <Route path="/council/cases/:id" element={<CouncilCasePage />} />
         <Route path="/integrations" element={<IntegrationsPage />} />
         <Route path="/meetings" element={<MeetingsPage />} />
         <Route path="/meetings/:id" element={<MeetingRoomPage />} />
@@ -130,6 +133,9 @@ function Shell({ children }: { children: ReactNode }) {
   const isOfficer = me!.memberships.some((m) => ['chair', 'vice_chair', 'secretary'].includes(m.position));
   const isExpert = me!.memberships.some((m) => m.position === 'expert');
   const networks = useApi<any[]>('/networks');
+  // شورای گفت‌وگو: shown to whoever has a role in a council or sees a case (e.g. of their own commission).
+  const council = useApi<any>('/council/me');
+  const inCouncil = !!council.data && (council.data.member.length > 0 || council.data.visibleCases > 0);
 
   const item = (to: string, label: string, icon: string, extra?: ReactNode) => (
     <NavLink to={to} end={to === '/'}>
@@ -233,6 +239,11 @@ function Shell({ children }: { children: ReactNode }) {
               {me!.is_super_admin && item('/staff-roles', 'نقش‌های مدیریتی', ICONS.key)}
               {(me!.is_super_admin || me!.auditAll) && item('/security', 'تنظیمات امنیتی', ICONS.lock)}
             </NavGroup>
+            {inCouncil && (
+              <NavGroup id="council" title="شورای گفت‌وگو" icon={ICONS.council} paths={['/council']}>
+                {item('/council', 'پرونده‌های شورا', ICONS.council)}
+              </NavGroup>
+            )}
             {(me!.isNational || !!networks.data?.length) && (
               <NavGroup id="networks" title="شبکه کمیسیون‌ها" icon={ICONS.network} paths={['/networks']}>
                 {item('/networks', 'شبکه‌های موضوعی', ICONS.network)}
@@ -292,6 +303,7 @@ const ICONS = {
   shield: 'M12 3l8 3v6c0 4.5-3.4 8.3-8 9-4.6-.7-8-4.5-8-9V6z',
   lock: 'M6 11h12v10H6zM8 11V7a4 4 0 0 1 8 0v4M12 15v2',
   key: 'M15 7a4 4 0 1 1-3.9 5H3v3h3v3h3v-3h2.1A4 4 0 0 1 15 7zM16 10h.01',
+  council: 'M3 21h18M5 21V10M19 21V10M9 21v-6h6v6M2 10l10-6 10 6',
   sun: 'M12 16a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4',
   megaphone: 'M3 11v2a1 1 0 0 0 1 1h3l6 4V6L7 10H4a1 1 0 0 0-1 1zM17 9a4 4 0 0 1 0 6',
   plug: 'M9 7V3M15 7V3M7 7h10v4a5 5 0 0 1-10 0zM12 16v5',

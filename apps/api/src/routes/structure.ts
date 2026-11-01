@@ -338,7 +338,10 @@ structureRouter.get('/commissions/:id', async (req, res) => {
       WHERE m.commission_id = $1 AND m.status = 'active' AND m.position IN ('chair','vice_chair','secretary')`,
     [a.commission.id],
   );
-  res.json({ ...a.commission, settings: a.settings, term, officers, myPosition: a.position, capabilities: [...a.caps] });
+  const councilSecretary = a.commission.council_secretary_id
+    ? await one('SELECT id, full_name, organization FROM users WHERE id = $1', [a.commission.council_secretary_id])
+    : null;
+  res.json({ ...a.commission, settings: a.settings, term, officers, councilSecretary, myPosition: a.position, capabilities: [...a.caps] });
 });
 
 structureRouter.patch('/commissions/:id', async (req, res) => {

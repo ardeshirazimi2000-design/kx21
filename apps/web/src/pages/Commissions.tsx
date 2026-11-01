@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { roleLabel } from '@kx/shared';
+import { BODY_TYPE_LABELS, roleLabel, type BodyType } from '@kx/shared';
 import { post } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { ChamberField } from './Structure';
@@ -64,6 +64,7 @@ export function CommissionsPage() {
                   <tr key={c.id} className="clickable" onClick={() => nav(`/commissions/${c.id}`)}>
                     <td>
                       <strong>{c.name}</strong>
+                      {c.body_type && c.body_type !== 'commission' && <> <Badge tone="accent">{BODY_TYPE_LABELS[c.body_type as BodyType]}</Badge></>}
                       <div className="muted small">{c.domain}</div>
                     </td>
                     {showChamber && <td className="small">{c.chamber_name}</td>}
@@ -90,7 +91,7 @@ export function CommissionsPage() {
 function NewCommissionModal({ chamberId: initialChamber, chambers, onClose, onSaved }: { chamberId: string; chambers: any[]; onClose: () => void; onSaved: (id: string) => void }) {
   const [chamberId, setChamberId] = useState(initialChamber);
   const terms = useApi<any[]>(`/terms?chamberId=${chamberId}`);
-  const [form, setForm] = useState({ termId: '', name: '', code: '', domain: '', description: '' });
+  const [form, setForm] = useState({ termId: '', name: '', code: '', domain: '', description: '', bodyType: 'commission' });
   const [err, setErr] = useState<Error | null>(null);
   const termId = form.termId || terms.data?.find((t) => t.status === 'active')?.id || '';
   const save = async () => {
@@ -120,6 +121,15 @@ function NewCommissionModal({ chamberId: initialChamber, chambers, onClose, onSa
             <option key={t.id} value={t.id}>
               {t.title}
               {t.status === 'active' ? ' (جاری)' : ''}
+            </option>
+          ))}
+        </select>
+      </Field>
+      <Field label="نوع" hint="شورای گفت‌وگو و کارگروه کارشناسی آن مثل کمیسیون عضو، جلسه و مصوبه دارند و پرونده‌های شورا در آن‌ها بررسی می‌شود؛ هر اتاق یکی از هر کدام">
+        <select className="input" value={form.bodyType} onChange={(e) => setForm({ ...form, bodyType: e.target.value })}>
+          {Object.entries(BODY_TYPE_LABELS).map(([k, v]) => (
+            <option key={k} value={k}>
+              {v}
             </option>
           ))}
         </select>

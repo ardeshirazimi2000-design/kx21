@@ -604,3 +604,11 @@ table.table { width: 100%; border-collapse: collapse; }
 .link-btn:hover { text-decoration: underline; }
 
 .audit-filters { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 0 12px; }
+
+/* Council case: details list and timeline */
+.dl { display: grid; grid-template-columns: max-content 1fr; gap: 6px 14px; margin: 0 0 12px; }
+.dl dt { color: var(--muted); font-size: .9em; }
+.dl dd { margin: 0; }
+.timeline { list-style: none; margin: 0 6px 0 0; padding: 0; border-inline-start: 2px solid var(--border); }
+.timeline li { position: relative; padding: 0 0 16px; padding-inline-start: 16px; }
+.timeline li::before { content: ''; position: absolute; inset-inline-start: -6px; top: 6px; width: 10px; height: 10px; border-radius: 50%; background: var(--primary); }

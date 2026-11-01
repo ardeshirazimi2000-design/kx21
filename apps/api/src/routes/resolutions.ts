@@ -167,7 +167,18 @@ resolutionsRouter.get('/resolutions/:id', async (req, res) => {
     loadExecutors(r.id),
   ]);
   const meeting = r.meeting_id ? await one<{ status: string }>('SELECT status FROM meetings WHERE id = $1', [r.meeting_id]) : null;
-  res.json({ ...r, ...extra, updates, tasks, documents, executors, canManage, isOwner, textLocked: textLocked(meeting) });
+  // شورای گفت‌وگو: the case this resolution referred, or whether it can still be referred.
+  const councilCase = await one('SELECT id, code, status, level FROM council_cases WHERE origin_resolution_id = $1', [r.id]);
+  const referable =
+    !councilCase && canManage && r.status !== 'cancelled'
+      ? !!(await one(
+          `SELECT 1 FROM commissions k JOIN chambers ch ON ch.id = k.chamber_id
+            WHERE k.id = $1 AND k.body_type = 'commission' AND ch.kind = 'provincial'
+              AND EXISTS (SELECT 1 FROM commissions b WHERE b.chamber_id = k.chamber_id AND b.body_type = 'council' AND b.status = 'active')`,
+          [r.commission_id],
+        ))
+      : false;
+  res.json({ ...r, ...extra, updates, tasks, documents, executors, canManage, isOwner, textLocked: textLocked(meeting), councilCase, canReferToCouncil: referable });
 });
 
 /** The text of a resolution is part of the minutes: once they are approved it stays as recorded. */

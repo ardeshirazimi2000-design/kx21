@@ -248,6 +248,14 @@ function Agenda({ m, run, reload }: { m: any; run: (fn: () => Promise<unknown>) 
                 <div>
                   <strong>
                     {fa(idx + 1)}. {item.title}
+                    {item.council_case_id && (
+                      <>
+                        {' '}
+                        <Link to={`/council/cases/${item.council_case_id}`} className="small" onClick={(e) => e.stopPropagation()}>
+                          پروندهٔ شورا
+                        </Link>
+                      </>
+                    )}
                   </strong>
                   <div className="muted small">
                     {item.presenter_full_name ?? item.presenter_name ? `ارائه‌دهنده: ${item.presenter_full_name ?? item.presenter_name} — ` : ''}
