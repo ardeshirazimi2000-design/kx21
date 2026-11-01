@@ -17,6 +17,7 @@ import { MeetingRoomPage } from './pages/MeetingRoom';
 import { MeetingsPage } from './pages/Meetings';
 import { NetworkDetailPage, NetworksPage } from './pages/Networks';
 import { NotificationSettingsPage } from './pages/NotificationSettings';
+import { SecurityPolicyPage } from './pages/SecurityPolicy';
 import { NOTIFICATIONS_CHANGED, NotificationsPage } from './pages/Notifications';
 import { PeoplePage } from './pages/People';
 import { ProfilePage } from './pages/Profile';
@@ -51,6 +52,7 @@ export function App() {
         <Route path="/roles" element={<RolesPage />} />
         <Route path="/holidays" element={<HolidaysPage />} />
         <Route path="/notification-settings" element={<NotificationSettingsPage />} />
+        <Route path="/security" element={<SecurityPolicyPage />} />
         <Route path="/integrations" element={<IntegrationsPage />} />
         <Route path="/meetings" element={<MeetingsPage />} />
         <Route path="/meetings/:id" element={<MeetingRoomPage />} />
@@ -211,7 +213,7 @@ function Shell({ children }: { children: ReactNode }) {
               {(isExpert || isOfficer) && item('/referrals', 'ارجاعات کارشناسی', ICONS.inbox)}
               {item('/notifications', 'اعلان‌ها', ICONS.bell, unreadCount ? <span className="count">{fa(unreadCount)}</span> : null)}
             </NavGroup>
-            <NavGroup id="structure" title="کمیسیون‌های تخصصی" icon={ICONS.building} paths={['/commissions', '/terms', '/people', '/roles', '/holidays', '/notification-settings', '/integrations', '/chambers']}>
+            <NavGroup id="structure" title="کمیسیون‌های تخصصی" icon={ICONS.building} paths={['/commissions', '/terms', '/people', '/roles', '/holidays', '/notification-settings', '/integrations', '/chambers', '/security']}>
               {item('/commissions', 'کمیسیون‌ها', ICONS.people)}
               {isAdmin && item('/terms', 'دوره‌ها', ICONS.layers)}
               {(isAdmin || isOfficer) && item('/people', 'اشخاص و کاربران', ICONS.user)}
@@ -220,6 +222,7 @@ function Shell({ children }: { children: ReactNode }) {
               {isAdmin && item('/notification-settings', 'تنظیمات اطلاع‌رسانی', ICONS.megaphone)}
               {isAdmin && item('/integrations', 'یکپارچه‌سازی', ICONS.plug)}
               {me!.is_super_admin && item('/chambers', 'اتاق‌ها', ICONS.building)}
+              {me!.is_super_admin && item('/security', 'تنظیمات امنیتی', ICONS.lock)}
             </NavGroup>
             {(me!.is_super_admin || !!networks.data?.length) && (
               <NavGroup id="networks" title="شبکه کمیسیون‌ها" icon={ICONS.network} paths={['/networks']}>
@@ -278,6 +281,7 @@ const ICONS = {
   layers: 'M12 3l9 5-9 5-9-5zM3 13l9 5 9-5',
   user: 'M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM4 21a8 8 0 0 1 16 0',
   shield: 'M12 3l8 3v6c0 4.5-3.4 8.3-8 9-4.6-.7-8-4.5-8-9V6z',
+  lock: 'M6 11h12v10H6zM8 11V7a4 4 0 0 1 8 0v4M12 15v2',
   sun: 'M12 16a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4',
   megaphone: 'M3 11v2a1 1 0 0 0 1 1h3l6 4V6L7 10H4a1 1 0 0 0-1 1zM17 9a4 4 0 0 1 0 6',
   plug: 'M9 7V3M15 7V3M7 7h10v4a5 5 0 0 1-10 0zM12 16v5',

@@ -2,7 +2,7 @@ import { TERM_STATUS_LABELS, type TermStatus } from '@kx/shared';
 import { useState } from 'react';
 import { del, patch, post } from '../lib/api';
 import { useAuth } from '../lib/auth';
-import { useApi } from '../lib/hooks';
+import { useApi, usePasswordRules } from '../lib/hooks';
 import { Badge, Button, Card, dateFa, Empty, ErrorBox, Field, fa, JalaliDateInput, Loading, Modal, PageHeader, Pager } from '../components/ui';
 
 /** Chambers (super admin): each provincial chamber has its own admins, terms and commissions. */
@@ -104,6 +104,7 @@ export function ChambersPage() {
 
 function ChamberAdminModal({ chamber, onClose, onSaved }: { chamber: any; onClose: () => void; onSaved: () => void }) {
   const [mode, setMode] = useState<'new' | 'existing'>('new');
+  const passwordRules = usePasswordRules();
   const [form, setForm] = useState({ mobile: '', email: '', password: '' });
   const [identity, setIdentity] = useState<any | null>(null);
   const [manual, setManual] = useState(false);
@@ -159,7 +160,7 @@ function ChamberAdminModal({ chamber, onClose, onSaved }: { chamber: any; onClos
               <input className="input ltr" placeholder="09xxxxxxxxx" value={form.mobile} onChange={(e) => setForm({ ...form, mobile: e.target.value })} />
             </Field>
           </div>
-          <Field label="رمز عبور اولیه" hint="حداقل ۸ کاراکتر؛ مدیر پس از ورود از «پروفایل» آن را تغییر دهد">
+          <Field label="رمز عبور اولیه" hint={`${passwordRules}؛ مدیر پس از ورود از «پروفایل» آن را تغییر دهد`}>
             <input className="input ltr" type="password" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} />
           </Field>
         </>
@@ -448,6 +449,7 @@ export function IdentityLookup({ chamberId, onResult }: { chamberId: string; onR
 
 export function PersonModal({ person, chamberId, chambers = [], canMove = false, canSetPassword, onClose, onSaved }: { person: any; chamberId: string; chambers?: any[]; canMove?: boolean; canSetPassword: boolean; onClose: () => void; onSaved: (p: any) => void }) {
   const [targetChamber, setTargetChamber] = useState<string>(person.chamber_id ?? chamberId);
+  const passwordRules = usePasswordRules();
   const [form, setForm] = useState({
     fullName: person.full_name ?? '',
     mobile: person.mobile ?? '',
@@ -539,7 +541,7 @@ export function PersonModal({ person, chamberId, chambers = [], canMove = false,
         {f('jobTitle', 'سمت سازمانی')}
       </div>
       {canSetPassword && (
-        <Field label={person.id ? 'رمز عبور جدید (اختیاری)' : 'رمز عبور (برای امکان ورود)'} hint="حداقل ۸ کاراکتر">
+        <Field label={person.id ? 'رمز عبور جدید (اختیاری)' : 'رمز عبور (برای امکان ورود)'} hint={passwordRules}>
           <input className="input ltr" type="password" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} />
         </Field>
       )}

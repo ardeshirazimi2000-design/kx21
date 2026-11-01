@@ -1,7 +1,7 @@
 import type { NextFunction, Request, Response } from 'express';
 import { one, query } from '../db/pool.js';
-import { unauthorized } from '../lib/errors.js';
-import { verifyToken } from './tokens.js';
+import { HttpError, unauthorized } from '../lib/errors.js';
+import { touchSession, verifyToken } from './tokens.js';
 
 export interface AuthUser {
   id: string;
@@ -9,6 +9,8 @@ export interface AuthUser {
   chamberId: string | null;
   isSuperAdmin: boolean;
   adminChambers: string[];
+  /** the sign-in session of this request's access token */
+  sessionId?: string;
 }
 
 declare global {
@@ -42,9 +44,14 @@ export async function authenticate(req: Request, _res: Response, next: NextFunct
   if (!token) throw unauthorized();
   const payload = verifyToken(token, 'access');
   if (!payload) throw unauthorized('توکن نامعتبر یا منقضی است');
+  if (payload.sid) {
+    const state = await touchSession(payload.sid);
+    if (state === 'idle') throw new HttpError(401, 'session_idle', 'نشست به‌دلیل بی‌کاری بسته شد؛ دوباره وارد شوید');
+    if (state === 'ended') throw new HttpError(401, 'session_ended', 'نشست پایان یافته است؛ دوباره وارد شوید');
+  }
   const user = await loadAuthUser(payload.sub);
   if (!user) throw unauthorized('حساب کاربری غیرفعال است');
-  req.user = user;
+  req.user = { ...user, sessionId: payload.sid };
   next();
 }
 

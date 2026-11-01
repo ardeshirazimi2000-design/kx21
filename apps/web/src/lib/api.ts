@@ -57,6 +57,26 @@ export function onSessionChange(l: (s: Session | null) => void) {
   };
 }
 
+const NOTICE_KEY = 'kx.loginNotice';
+/** A message for the next login page (why the session ended). */
+export function setLoginNotice(message: string | null) {
+  try {
+    if (message) sessionStorage.setItem(NOTICE_KEY, message);
+    else sessionStorage.removeItem(NOTICE_KEY);
+  } catch {
+    /* storage unavailable */
+  }
+}
+export function takeLoginNotice(): string | null {
+  try {
+    const m = sessionStorage.getItem(NOTICE_KEY);
+    sessionStorage.removeItem(NOTICE_KEY);
+    return m;
+  } catch {
+    return null;
+  }
+}
+
 let refreshing: Promise<boolean> | null = null;
 
 async function refresh(): Promise<boolean> {
@@ -69,10 +89,14 @@ async function refresh(): Promise<boolean> {
   })
     .then(async (r) => {
       if (!r.ok) {
+        // Ended for inactivity, or by a sign-in elsewhere: the login page says why.
+        const code = (await r.json().catch(() => null))?.error?.code;
+        setLoginNotice(code === 'session_idle' ? 'نشست شما به‌دلیل بی‌کاری بسته شد؛ دوباره وارد شوید.' : 'نشست شما پایان یافته است؛ دوباره وارد شوید.');
         setSession(null);
         return false;
       }
-      setSession(await r.json());
+      const t = await r.json();
+      setSession({ accessToken: t.accessToken, refreshToken: t.refreshToken });
       return true;
     })
     .finally(() => {
@@ -107,6 +131,7 @@ export async function api<T = any>(path: string, init: RequestInit & { json?: un
 export const get = <T = any>(p: string) => api<T>(p);
 export const post = <T = any>(p: string, json: unknown = {}) => api<T>(p, { method: 'POST', json });
 export const patch = <T = any>(p: string, json: unknown = {}) => api<T>(p, { method: 'PATCH', json });
+export const put = <T = any>(p: string, json: unknown = {}) => api<T>(p, { method: 'PUT', json });
 export const del = <T = any>(p: string, json: unknown = {}) => api<T>(p, { method: 'DELETE', json });
 
 /** Authenticated download (CSV, documents, .ics) */

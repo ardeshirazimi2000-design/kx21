@@ -100,6 +100,11 @@ describe('authentication', () => {
     // reusing the old token is rejected and revokes the family
     expect((await request(app).post('/api/auth/refresh').send({ refreshToken: l.body.refreshToken })).status).toBe(401);
     expect((await request(app).post('/api/auth/refresh').send({ refreshToken: r1.body.refreshToken })).status).toBe(401);
+    // ... and ends every session of that user at once, including access tokens already handed out.
+    const ended = await as('m1').get('/api/auth/me');
+    expect(ended.status).toBe(401);
+    expect(ended.body.error.code).toBe('session_ended');
+    await login('m1', 'member1@kx.local');
   });
 });
 

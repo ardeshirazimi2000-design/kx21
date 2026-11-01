@@ -3,7 +3,7 @@ import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { Badge, Button, Card, dateFa, dateTimeFa, Empty, ErrorBox, Field, fa, Loading, PageHeader, Pager } from '../components/ui';
 import { download, post } from '../lib/api';
 import { useAuth } from '../lib/auth';
-import { useApi } from '../lib/hooks';
+import { useApi, usePasswordRules } from '../lib/hooks';
 import { desktopPermission, notificationLink, playChime, requestDesktop, setSoundEnabled, soundEnabled } from '../lib/notifyAlert';
 
 export function ReferralsPage() {
@@ -256,6 +256,7 @@ export function AuditPage() {
 export function ProfilePage() {
   const { me, refreshMe } = useAuth();
   const [pw, setPw] = useState({ currentPassword: '', newPassword: '' });
+  const passwordRules = usePasswordRules();
   const [mfa, setMfa] = useState<{ secret: string; otpauthUrl: string } | null>(null);
   const [code, setCode] = useState('');
   const [msg, setMsg] = useState<string | null>(null);
@@ -280,7 +281,7 @@ export function ProfilePage() {
           <Field label="رمز فعلی">
             <input className="input ltr" type="password" value={pw.currentPassword} onChange={(e) => setPw({ ...pw, currentPassword: e.target.value })} />
           </Field>
-          <Field label="رمز جدید" hint="حداقل ۸ کاراکتر؛ پس از تغییر، سایر نشست‌ها خارج می‌شوند">
+          <Field label="رمز جدید" hint={`${passwordRules}؛ پس از تغییر، نشست‌های شما در دستگاه‌های دیگر بسته می‌شوند`}>
             <input className="input ltr" type="password" value={pw.newPassword} onChange={(e) => setPw({ ...pw, newPassword: e.target.value })} />
           </Field>
           <Button onClick={() => run(() => post('/auth/password', pw), 'رمز عبور تغییر کرد')}>ثبت</Button>

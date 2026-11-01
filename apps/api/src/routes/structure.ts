@@ -11,6 +11,7 @@ import { badRequest, conflict, forbidden, notFound } from '../lib/errors.js';
 import { body, dateStr, paged, pageParams, param, uuid } from '../lib/validate.js';
 import { identityEnabled, inquireIdentity } from '../services/identity.js';
 import { assertRole, loadRoleMatrix } from '../services/roles.js';
+import { assertPasswordAllowed } from '../services/security.js';
 import { commissionAccess, isChamberAdmin, requireChamberAdmin, requireSuperAdmin, visibleChamberIds } from '../services/access.js';
 
 export const structureRouter = Router();
@@ -108,7 +109,7 @@ structureRouter.post('/chambers/:id/admins', async (req, res) => {
   const b = body(
     req,
     z
-      .object({ userId: uuid.optional(), person: personSchema.extend({ password: z.string().min(8, 'رمز عبور باید حداقل ۸ کاراکتر باشد') }).optional() })
+      .object({ userId: uuid.optional(), person: personSchema.extend({ password: z.string().min(1, 'رمز عبور الزامی است').max(128) }).optional() })
       .refine((v) => v.userId || v.person, 'شخص موجود یا مشخصات شخص جدید لازم است'),
   );
   const admin = await tx(async (c) => {
@@ -417,7 +418,7 @@ export const personSchema = z.object({
   organization: z.string().nullish(),
   jobTitle: z.string().nullish(),
   bio: z.string().nullish(),
-  password: z.string().min(8).nullish(),
+  password: z.string().max(128).nullish(),
 });
 
 /** Runs the identity inquiry when national code + birth date are given; enforces IDENTITY_REQUIRED. */
@@ -434,6 +435,7 @@ export async function createPerson(c: any, req: any, chamberId: string, p: z.inf
     const dup = await one('SELECT id, full_name FROM users WHERE chamber_id = $1 AND national_id = $2', [chamberId, p.nationalId], c);
     if (dup) throw conflict(`شخصی با این کد ملی قبلاً در این اتاق ثبت شده است (${dup.full_name})`, 'duplicate_national_id');
   }
+  if (p.password) await assertPasswordAllowed(p.password, { email: p.email, mobile: p.mobile }, c);
   const hash = p.password ? await bcrypt.hash(p.password, 10) : null;
   try {
     const r = await one(
@@ -782,7 +784,10 @@ structureRouter.patch('/people/:id', async (req, res) => {
       if (busy.busy) throw conflict('این شخص در اتاق فعلی عضو کمیسیون یا مدیر اتاق است؛ ابتدا عضویت‌ها را پایان دهید یا حذف کنید', 'person_has_roles');
       await c.query('UPDATE users SET chamber_id = $2 WHERE id = $1', [id, b.chamberId]);
     }
+    if (b.password) await assertPasswordAllowed(b.password, { email: b.email ?? before.email, mobile: b.mobile ?? before.mobile }, c);
     const hash = b.password ? await bcrypt.hash(b.password, 10) : null;
+    // A password set by an administrator ends the person's open sessions.
+    if (hash) await c.query('UPDATE refresh_tokens SET revoked_at = now() WHERE user_id = $1 AND revoked_at IS NULL', [id]);
     const after = await one(
       `UPDATE users SET full_name = COALESCE($2, full_name), national_id = COALESCE($3, national_id), mobile = COALESCE($4, mobile),
          email = COALESCE($5, email), organization = COALESCE($6, organization), job_title = COALESCE($7, job_title),

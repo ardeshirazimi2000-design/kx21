@@ -5,6 +5,7 @@ import { Badge, Card, dateFa, dateTimeFa, Empty, fa, Loading, PageHeader, Progre
 import { useAuth } from '../lib/auth';
 import { useApi } from '../lib/hooks';
 import { DashboardOverview } from '../components/DashboardOverview';
+import { LastLoginNotice } from '../components/LastLoginNotice';
 
 export function HomePage() {
   const { me, isAdmin, chamberId } = useAuth();
@@ -13,6 +14,7 @@ export function HomePage() {
   const officerOf = me!.memberships.filter((m) => ['chair', 'vice_chair', 'secretary'].includes(m.position));
   return (
     <>
+      <LastLoginNotice />
       <DashboardOverview upcoming={home.data?.upcoming} />
       {isAdmin && chamberId && <ChamberDashboard chamberId={chamberId} />}
       {officerOf.map((m) => (

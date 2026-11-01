@@ -30,7 +30,7 @@ export interface Me {
 interface AuthState {
   me: Me | null;
   loading: boolean;
-  login: (identifier: string, password: string) => Promise<{ mfaToken?: string }>;
+  login: (identifier: string, password: string, captcha?: { captchaId: string; captchaAnswer: string }) => Promise<{ mfaToken?: string }>;
   verifyMfa: (mfaToken: string, code: string) => Promise<void>;
   logout: () => Promise<void>;
   refreshMe: () => Promise<void>;
@@ -68,17 +68,26 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     });
   }, [refreshMe]);
 
-  const login = async (identifier: string, password: string) => {
-    const r = await post('/auth/login', { identifier, password, device: 'web' });
-    if (r.mfaRequired) return { mfaToken: r.mfaToken as string };
-    setSession(r);
+  /** Keeps the tokens, and the previous sign-in for the dashboard to show once (AFTA: last login and failures since). */
+  const startSession = async (r: any) => {
+    setSession({ accessToken: r.accessToken, refreshToken: r.refreshToken });
+    try {
+      sessionStorage.setItem('kx.lastLogin', JSON.stringify({ lastLogin: r.lastLogin ?? null, endedSessions: r.endedSessions ?? 0 }));
+    } catch {
+      /* storage unavailable */
+    }
     await refreshMe();
+  };
+
+  const login = async (identifier: string, password: string, captcha?: { captchaId: string; captchaAnswer: string }) => {
+    const r = await post('/auth/login', { identifier, password, device: 'web', ...captcha });
+    if (r.mfaRequired) return { mfaToken: r.mfaToken as string };
+    await startSession(r);
     return {};
   };
 
   const verifyMfa = async (mfaToken: string, code: string) => {
-    setSession(await post('/auth/mfa/verify', { mfaToken, code, device: 'web' }));
-    await refreshMe();
+    await startSession(await post('/auth/mfa/verify', { mfaToken, code, device: 'web' }));
   };
 
   const logout = async () => {

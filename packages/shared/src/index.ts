@@ -8,3 +8,4 @@ export * from './labels.js';
 export * from './identity.js';
 export * from './notificationSettings.js';
 export * from './secrets.js';
+export * from './securityPolicy.js';

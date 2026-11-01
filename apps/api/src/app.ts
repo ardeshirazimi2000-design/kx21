@@ -23,6 +23,7 @@ import { reportsRouter } from './routes/reports.js';
 import { resolutionsRouter } from './routes/resolutions.js';
 import { networksRouter } from './routes/networks.js';
 import { notificationSettingsRouter } from './routes/notificationSettings.js';
+import { securityRouter } from './routes/security.js';
 import { presentationRouter } from './routes/presentation.js';
 import { rolesRouter } from './routes/roles.js';
 import { structureRouter } from './routes/structure.js';
@@ -93,6 +94,7 @@ export function createApp() {
     }),
   );
   api.use(structureRouter);
+  api.use(securityRouter);
   api.use(notificationSettingsRouter);
   api.use(holidaysRouter);
   api.use(archivalRouter);

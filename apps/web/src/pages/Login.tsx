@@ -1,6 +1,6 @@
 import { useState, type ReactNode } from 'react';
 import { ErrorBox, Modal } from '../components/ui';
-import { setRememberMe } from '../lib/api';
+import { ApiError, get, setRememberMe, takeLoginNotice } from '../lib/api';
 import { useAuth } from '../lib/auth';
 
 /** Support line shown under the login form. */
@@ -55,7 +55,18 @@ export function LoginPage() {
   const [error, setError] = useState<Error | null>(null);
   const [busy, setBusy] = useState(false);
   const [help, setHelp] = useState<null | 'forgot' | 'guide'>(null);
-
+  const [notice] = useState(() => takeLoginNotice());
+  // After repeated failed sign-ins the server asks for the code in an image (a CAPTCHA).
+  const [captcha, setCaptcha] = useState<{ id: string; image: string } | null>(null);
+  const [captchaAnswer, setCaptchaAnswer] = useState('');
+  const loadCaptcha = async () => {
+    setCaptchaAnswer('');
+    try {
+      setCaptcha(await get('/auth/captcha'));
+    } catch (e) {
+      setError(e as Error);
+    }
+  };
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     setBusy(true);
@@ -64,11 +75,15 @@ export function LoginPage() {
     try {
       if (mfaToken) await verifyMfa(mfaToken, code);
       else {
-        const r = await login(identifier, password);
+        const r = await login(identifier, password, captcha ? { captchaId: captcha.id, captchaAnswer } : undefined);
         if (r.mfaToken) setMfaToken(r.mfaToken);
       }
     } catch (err) {
       setError(err as Error);
+      // Each image is good for one attempt: a new one when the server still wants it, none once it does not.
+      const wants = err instanceof ApiError && (err.code === 'captcha_required' || (err.details as any)?.captchaRequired);
+      if (wants) await loadCaptcha();
+      else if (captcha) setCaptcha(null);
     } finally {
       setBusy(false);
     }
@@ -88,6 +103,7 @@ export function LoginPage() {
           <div className="lg-card-body">
             <h1>ورود به سامانه</h1>
             <p className="lg-lead">برای دسترسی به پلتفرم کمیسیون‌های تخصصی وارد حساب کاربری خود شوید.</p>
+            {notice && !error && <div className="alert alert-warning">{notice}</div>}
             <ErrorBox error={error} />
             {!mfaToken ? (
               <>
@@ -104,6 +120,25 @@ export function LoginPage() {
                 <InputWithIcon icon={LOCK}>
                   <input aria-label="رمز عبور" placeholder="رمز عبور" type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} required />
                 </InputWithIcon>
+                {captcha && (
+                  <div className="lg-captcha">
+                    <img src={captcha.image} width={180} height={60} alt="کد امنیتی" />
+                    <button type="button" className="lg-link" onClick={() => void loadCaptcha()} aria-label="تصویر دیگر">
+                      ↻ تصویر دیگر
+                    </button>
+                    <InputWithIcon icon={SHIELD}>
+                      <input
+                        aria-label="کد امنیتی"
+                        placeholder="عدد داخل تصویر"
+                        inputMode="numeric"
+                        maxLength={5}
+                        value={captchaAnswer}
+                        onChange={(e) => setCaptchaAnswer(e.target.value)}
+                        required
+                      />
+                    </InputWithIcon>
+                  </div>
+                )}
                 <label className="lg-remember">
                   <input type="checkbox" checked={remember} onChange={(e) => setRemember(e.target.checked)} />
                   مرا به خاطر بسپار

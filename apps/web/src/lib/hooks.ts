@@ -95,3 +95,8 @@ export function useRoles(chamberId: string | null | undefined) {
   const meetingRoles = [...positions, { key: 'guest', title: roleLabel('guest') }];
   return { label, positions, meetingRoles };
 }
+
+/** The password rules of the security policy, as one line for the hint under a password field. */
+export function usePasswordRules(): string {
+  return useApi<{ text: string }>('/password-rules').data?.text ?? '';
+}

@@ -449,6 +449,9 @@ table.table { width: 100%; border-collapse: collapse; }
 .lg-mobile-brand { display: none; }
 .lg-card h1 { margin: 0; text-align: center; font-size: 2.1rem; font-weight: 700; color: var(--lg-navy); }
 .lg-lead { margin: 0 0 8px; text-align: center; color: #5b6b85; line-height: 1.9; }
+.lg-captcha { display: grid; grid-template-columns: auto 1fr; align-items: center; gap: 8px 12px; }
+.lg-captcha img { border: 1px solid var(--lg-line); border-radius: 10px; background: #fff; }
+.lg-captcha .lg-input { grid-column: 1 / -1; }
 .lg-input { display: flex; align-items: center; gap: 10px; border: 1px solid var(--lg-line); border-radius: 12px; padding: 0 16px; background: #fff; transition: border-color 0.15s, box-shadow 0.15s; }
 .lg-input:focus-within { border-color: var(--lg-navy-2); box-shadow: 0 0 0 3px rgba(18, 63, 138, 0.15); }
 .lg-input-icon { color: #4c5d7a; display: inline-flex; }
