@@ -54,7 +54,7 @@
 <pre>tar -xf kx21-offline-*.tar
 cd kx21-offline-*
 sudo bash install.sh</pre></li>
-    <li>در پایان، نشانی سامانه نمایش داده می‌شود: <code>http://نشانی-سرور:5000</code></li>
+    <li>در پایان، نشانی سامانه نمایش داده می‌شود: <code>https://نشانی-سرور:5000</code></li>
   </ol>
   <h3>دو حالت نصب</h3>
   <table>
@@ -64,6 +64,18 @@ sudo bash install.sh</pre></li>
   </table>
   <p>پورت دیگر: <code>sudo WEB_PORT=8080 bash install.sh</code>. پیکربندی در <code>/opt/kx21</code> نگهداری می‌شود.</p>
   <p class="note">اطلاعات ارائه فقط روی پایگاه‌دادهٔ خالی ساخته می‌شود؛ اگر سامانه اطلاعات داشته باشد، برنامه خودش متوقف می‌شود. پس هیچ‌وقت با اطلاعات واقعی قاطی نمی‌شود.</p>
+</section>
+
+<section>
+  <h2>۲-۱. اتصال امن (HTTPS) و گواهی داخلی</h2>
+  <p>سامانه فقط روی HTTPS کار می‌کند (الزام سند افتا). نصاب یک گواهینامهٔ داخلی می‌سازد؛ تا گواهی مرجع آن روی دستگاه نصب نشود، مرورگر هشدار امنیتی می‌دهد و برنامهٔ موبایل وصل نمی‌شود. فایل گواهی مرجع: <code>/opt/kx21/tls/kx21-ca.crt</code> (برای ویندوز همان با پسوند <code>.cer</code>).</p>
+  <table>
+    <tr><th>دستگاه</th><th>نصب گواهی</th></tr>
+    <tr><td>ویندوز</td><td>دوبار کلیک روی <code>kx21-ca.cer</code> ← Install Certificate ← Local Machine ← Trusted Root Certification Authorities؛ سپس مرورگر را دوباره باز کنید.</td></tr>
+    <tr><td>اندروید</td><td>فایل را به گوشی بفرستید ← تنظیمات ← امنیت ← نصب گواهی ← «گواهی CA». برنامهٔ موبایل از نسخهٔ ۱٫۱٫۰ آن را می‌شناسد.</td></tr>
+    <tr><td>آیفون</td><td>فایل را باز و نمایه را نصب کنید؛ سپس تنظیمات ← عمومی ← درباره ← تنظیمات اعتماد به گواهی.</td></tr>
+  </table>
+  <p>اگر گواهینامهٔ رسمی دارید، پیش از نصب <code>fullchain.pem</code> و <code>privkey.pem</code> را در <code>/opt/kx21/tls</code> بگذارید؛ آن‌وقت نصب گواهی روی دستگاه‌ها لازم نیست. کلید <code>kx21-ca.key</code> هرگز از سرور خارج نشود.</p>
 </section>
 
 <section>
@@ -114,7 +126,7 @@ sudo bash install.sh</pre></li>
     <li><strong>کار روزانهٔ کمیسیون</strong> — ورود با <span class="ltr">secretary.agr.yzd@demo.ir</span>: تقویم جلسات (تعطیلات روی تقویم)، جلسهٔ آینده و دستور جلسه، جلسهٔ برگزارشده با نتیجهٔ رأی‌گیری و صورتجلسه، جلسات ثبت‌شده از سوابق با اسکن امضاشده.</li>
     <li><strong>پیگیری مصوبات</strong> — «مصوبات و پیگیری»: مصوبات معوق در ابتدای فهرست، پیشرفت هر دستگاه اجرایی.</li>
     <li><strong>تأیید صورتجلسه</strong> — ورود با <span class="ltr">chair.enr.yzd@demo.ir</span>: صورتجلسهٔ در انتظار تأیید و تأیید و قفل آن.</li>
-    <li><strong>برنامهٔ موبایل</strong> — نصب فایل <span class="ltr">kx-commissions.apk</span> و ورود با <span class="ltr">member1.agr.yzd@demo.ir</span>؛ در صفحهٔ ورود، نشانی سرور را <span class="ltr">http://نشانی-سرور:5000</span> وارد کنید.</li>
+    <li><strong>برنامهٔ موبایل</strong> — نصب فایل <span class="ltr">kx-commissions.apk</span> و ورود با <span class="ltr">member1.agr.yzd@demo.ir</span>؛ در صفحهٔ ورود، نشانی سرور را <span class="ltr">https://نشانی-سرور:5000</span> وارد کنید.</li>
   </ol>
 </section>
 

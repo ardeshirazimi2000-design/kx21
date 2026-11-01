@@ -33,7 +33,8 @@ const openapiPath = path.join(path.dirname(fileURLToPath(import.meta.url)), '..'
 
 export function createApp() {
   const app = express();
-  app.set('trust proxy', 1);
+  // Only the configured proxies may set the client address and scheme (X-Forwarded-For / -Proto); see TRUST_PROXY.
+  app.set('trust proxy', config.trustProxy);
   app.disable('x-powered-by');
   app.use(
     helmet({
@@ -73,6 +74,12 @@ export function createApp() {
     res.type('text/yaml').send(readFileSync(openapiPath, 'utf8'));
   });
 
+  // With PUBLIC_HTTPS, passwords, codes and tokens are never accepted over plain HTTP. req.secure is true only for a
+  // TLS connection or when a trusted proxy (TRUST_PROXY) reports X-Forwarded-Proto: https.
+  app.use('/api/auth', (req, _res, next) => {
+    if (config.publicHttps && !req.secure) throw new HttpError(403, 'https_required', 'ورود و احراز هویت فقط از طریق اتصال امن (HTTPS) ممکن است');
+    next();
+  });
   app.use('/api/auth', authRouter);
   app.use('/api', filesRouter);
   // Machine-to-machine API for integrated systems (API key / OAuth2 client credentials).

@@ -87,7 +87,7 @@ docker load -i "$BUNDLE/images/kx21-images.tar.gz" >/dev/null
 # ───── 3. Configuration ─────
 mkdir -p "$INSTALL_DIR/deploy"
 cp "$BUNDLE/docker-compose.yml" "$INSTALL_DIR/"
-cp "$BUNDLE/deploy/backup.sh" "$BUNDLE/deploy/restore.sh" "$INSTALL_DIR/deploy/"
+cp "$BUNDLE/deploy/backup.sh" "$BUNDLE/deploy/restore.sh" "$BUNDLE/deploy/make-cert.sh" "$INSTALL_DIR/deploy/"
 cd "$INSTALL_DIR"
 FIRST=0
 if [ ! -f .env ]; then
@@ -105,7 +105,7 @@ KX_VERSION=$VERSION
 WEB_PORT=$WEB_PORT
 JWT_SECRET=$(openssl rand -hex 32)
 POSTGRES_PASSWORD=$(openssl rand -hex 16)
-CORS_ORIGINS=http://${IP:-localhost}:$WEB_PORT,http://localhost:$WEB_PORT
+CORS_ORIGINS=https://${IP:-localhost}:$WEB_PORT,https://localhost:$WEB_PORT
 SMS_PROVIDER=log
 IDENTITY_PROVIDER=none
 IDENTITY_API_TOKEN=
@@ -117,13 +117,26 @@ else
   sed -i "s/^KX_VERSION=.*/KX_VERSION=$VERSION/" .env
   say "نصب قبلی پیدا شد؛ ارتقا به نسخهٔ $VERSION با حفظ اطلاعات."
 fi
+# HTTPS certificate (AFTA 2-9): the chamber's own in $INSTALL_DIR/tls if put there before installing, otherwise an
+# internal one made now; users install tls/kx21-ca.crt once to trust it.
+if ! grep -q '^KX_TLS_DIR=' .env; then
+  echo "KX_TLS_DIR=$INSTALL_DIR/tls" >> .env
+  sed -i "s#^CORS_ORIGINS=http://#CORS_ORIGINS=https://#; s#,http://localhost:#,https://localhost:#" .env
+fi
+TLS_DIR="$(grep '^KX_TLS_DIR=' .env | cut -d= -f2-)"
+if [ ! -s "$TLS_DIR/fullchain.pem" ] || [ ! -s "$TLS_DIR/privkey.pem" ]; then
+  say "ساخت گواهینامهٔ داخلی HTTPS…"
+  IP="$(hostname -I 2>/dev/null | awk '{print $1}')"
+  bash "$INSTALL_DIR/deploy/make-cert.sh" "$TLS_DIR" ${IP:+"$IP"} "$(hostname)" localhost 127.0.0.1 >/dev/null
+fi
 set -a; . ./.env; set +a
 
 # ───── 4. Start ─────
 say "راه‌اندازی سامانه…"
 docker compose up -d
-for _ in $(seq 1 90); do curl -fs "http://127.0.0.1:${WEB_PORT}/health" >/dev/null && break; sleep 2; done
-curl -fs "http://127.0.0.1:${WEB_PORT}/health" >/dev/null || { docker compose logs --tail 50 api; die "سامانه بالا نیامد"; }
+health() { curl -fsk --noproxy '*' "https://127.0.0.1:${WEB_PORT}/health" >/dev/null 2>&1; }
+for _ in $(seq 1 90); do health && break; sleep 2; done
+health || { docker compose logs --tail 50 api web; die "سامانه بالا نیامد"; }
 
 # ───── 5. First super admin, then presentation data ─────
 ADMIN_FILE="$INSTALL_DIR/admin-password.txt"
@@ -139,7 +152,8 @@ fi
 
 IP="$(hostname -I 2>/dev/null | awk '{print $1}')"
 echo
-echo "سامانه آماده است:   http://${IP:-localhost}:${WEB_PORT}"
+echo "سامانه آماده است:   https://${IP:-localhost}:${WEB_PORT}"
+[ -s "$TLS_DIR/kx21-ca.crt" ] && echo "گواهی داخلی:        $TLS_DIR/kx21-ca.crt را یک‌بار روی رایانه‌ها و گوشی‌ها نصب کنید (راهنما.html)"
 if [ "$FIRST" = "1" ]; then
   echo "مدیر سامانه:        ${ADMIN_EMAIL}   — رمز در فایل $ADMIN_FILE"
   [ "$MODE" = demo ] && echo "حساب‌های ارائه:      رمز همه ${SHOWCASE_PASSWORD:-Demo@1405} — فهرست در «راهنما.html»"

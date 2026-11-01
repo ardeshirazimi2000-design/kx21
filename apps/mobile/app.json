@@ -2,7 +2,7 @@
   "expo": {
     "name": "کمیسیون‌های اتاق",
     "slug": "kx-commissions",
-    "version": "1.0.10",
+    "version": "1.1.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "automatic",
@@ -19,7 +19,7 @@
       },
       "predictiveBackGestureEnabled": false,
       "package": "ir.chamber.commissions",
-      "versionCode": 11
+      "versionCode": 12
     },
     "web": {
       "favicon": "./assets/favicon.png"
@@ -57,7 +57,8 @@
             "enableShrinkResourcesInReleaseBuilds": true
           }
         }
-      ]
+      ],
+      "./plugins/withUserCertificates"
     ],
     "scheme": "kxcommissions",
     "extra": {

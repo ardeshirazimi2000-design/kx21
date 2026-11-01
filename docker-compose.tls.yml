@@ -1,0 +1,18 @@
+# HTTPS for the commissions system, served by the web container itself (docs/11-https.md). Turned on by
+#   bash deploy/tls/enable-https.sh
+# which writes, in .env: COMPOSE_FILE=docker-compose.yml:docker-compose.tls.yml, KX_TLS_DIR (a folder outside the
+# repository with fullchain.pem and privkey.pem) and HTTPS_PORT. The HTTP port (WEB_PORT) then only redirects.
+services:
+  web:
+    environment:
+      KX_TLS: "1"
+      KX_HTTPS_PUBLIC_PORT: ${HTTPS_PORT:-8443}
+      KX_TRUSTED_PROXIES: ${KX_TRUSTED_PROXIES:-}
+      KX_HSTS_MAX_AGE: ${KX_HSTS_MAX_AGE:-86400}
+    ports:
+      - "${HTTPS_PORT:-8443}:443"
+    volumes:
+      - ${KX_TLS_DIR:?set KX_TLS_DIR to the folder with fullchain.pem and privkey.pem}:/etc/nginx/tls:ro
+  api:
+    environment:
+      PUBLIC_HTTPS: "true"

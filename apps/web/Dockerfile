@@ -13,6 +13,8 @@ COPY apps/web apps/web
 RUN npm run build -w @kx/shared && npm run build -w @kx/web
 
 FROM nginx:1.27-alpine
-COPY apps/web/nginx.conf /etc/nginx/conf.d/default.conf
+# The site (HTTP, or HTTPS with a mounted certificate) is written from the environment at start: see the script.
+COPY apps/web/nginx/40-kx-site.sh /docker-entrypoint.d/40-kx-site.sh
+RUN chmod 755 /docker-entrypoint.d/40-kx-site.sh && rm -f /etc/nginx/conf.d/default.conf
 COPY --from=build /app/apps/web/dist /usr/share/nginx/html
-EXPOSE 80
+EXPOSE 80 443

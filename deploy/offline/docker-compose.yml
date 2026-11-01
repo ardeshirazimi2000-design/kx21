@@ -35,6 +35,7 @@ services:
       WEBINAR_APP_ID: ${WEBINAR_APP_ID:-kx-commissions}
       WEBINAR_APP_SECRET: ${WEBINAR_APP_SECRET:-}
       MAX_RECORDING_MB: ${MAX_RECORDING_MB:-2048}
+      PUBLIC_HTTPS: "true"
     volumes:
       - uploads:/data/uploads
     depends_on:
@@ -46,8 +47,15 @@ services:
     restart: unless-stopped
     depends_on:
       - api
+    # HTTPS only (AFTA 2-9): the certificate made by install.sh, or the chamber's own, from KX_TLS_DIR.
+    environment:
+      KX_TLS: "1"
+      KX_HTTPS_PUBLIC_PORT: ${WEB_PORT:-5000}
+      KX_TRUSTED_PROXIES: ${KX_TRUSTED_PROXIES:-}
     ports:
-      - "${WEB_PORT:-5000}:80"
+      - "${WEB_PORT:-5000}:443"
+    volumes:
+      - ${KX_TLS_DIR:?set KX_TLS_DIR}:/etc/nginx/tls:ro
 
 volumes:
   db-data:

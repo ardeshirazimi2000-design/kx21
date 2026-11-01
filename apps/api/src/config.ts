@@ -1,3 +1,4 @@
+import net from 'node:net';
 import { sampleSecretProblems } from '@kx/shared';
 
 // Dates in minutes/notifications are rendered in Iran time unless configured otherwise.
@@ -11,10 +12,35 @@ function env(name: string, fallback?: string): string {
 
 const isProd = process.env.NODE_ENV === 'production';
 
+/**
+ * Which reverse proxies may set X-Forwarded-For / X-Forwarded-Proto (Express `trust proxy`), as in the office API:
+ *  a number → that many proxy hops in front (default 1: the web container's nginx);
+ *  "", "false", "0" → none; a comma list of addresses, CIDR ranges or loopback / linklocal / uniquelocal → only those.
+ * "true" (trust whoever connects) is refused: any client could then choose its own address.
+ */
+export function parseTrustProxy(raw: string | undefined): false | number | string[] {
+  const v = (raw ?? '1').trim();
+  if (v === '' || v === 'false' || v === '0') return false;
+  if (/^\d+$/.test(v)) return Number(v);
+  if (v === 'true') throw new Error('TRUST_PROXY=true would trust a client-chosen address; give the number of proxies or their addresses');
+  const items = v.split(',').map((s) => s.trim()).filter(Boolean);
+  for (const item of items) {
+    const [addr, bits, extra] = item.split('/');
+    const keyword = ['loopback', 'linklocal', 'uniquelocal'].includes(item);
+    const family = net.isIP(addr);
+    const prefixOk = bits === undefined || (/^\d+$/.test(bits) && Number(bits) <= (family === 6 ? 128 : 32));
+    if (!keyword && (!family || !prefixOk || extra !== undefined)) throw new Error(`TRUST_PROXY: "${item}" is not an address, a CIDR range or loopback/linklocal/uniquelocal`);
+  }
+  return items;
+}
+
 export const config = {
   isProd,
   isTest: process.env.NODE_ENV === 'test' || !!process.env.VITEST,
   port: Number(env('PORT', '4000')),
+  trustProxy: parseTrustProxy(process.env.TRUST_PROXY),
+  /** Users reach the system over HTTPS: HSTS, upgrade-insecure-requests, and sign-in refused over plain HTTP (AFTA 2-9, docs/11-https.md). */
+  publicHttps: ['true', '1'].includes((process.env.PUBLIC_HTTPS ?? '').trim().toLowerCase()),
   databaseUrl: env('DATABASE_URL', 'postgres://kx:kx@localhost:5432/kx'),
   jwtSecret: env('JWT_SECRET', isProd ? undefined : 'dev-only-secret-do-not-use-in-production'),
   accessTokenTtl: env('ACCESS_TOKEN_TTL', '15m'),
@@ -43,8 +69,6 @@ export const config = {
   meetingHolidayCheck: process.env.MEETING_HOLIDAY_CHECK !== 'false',
   /** Built web app (apps/web/dist) to serve from this process, for single-port installs. */
   webDistDir: process.env.WEB_DIST_DIR,
-  /** Set to true once the site is served over HTTPS (enables HSTS and upgrade-insecure-requests). */
-  publicHttps: process.env.PUBLIC_HTTPS === 'true',
   /**
    * Built-in webinar (self-hosted Jitsi Meet with JWT authentication, see deploy/webinar).
    * Enabled when both the public URL and the shared secret are set.

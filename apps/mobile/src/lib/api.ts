@@ -12,6 +12,7 @@ export class ApiError extends Error {
     public status: number,
     public code: string,
     message: string,
+    public details?: unknown,
   ) {
     super(message);
   }
@@ -104,7 +105,7 @@ export async function api<T = any>(path: string, init: { method?: string; json?:
   if (res.status === 204) return undefined as T;
   const data = await res.json().catch(() => null);
   if (!res.ok) {
-    throw new ApiError(res.status, data?.error?.code ?? 'error', data?.error?.message ?? 'خطا در ارتباط با سرور');
+    throw new ApiError(res.status, data?.error?.code ?? 'error', data?.error?.message ?? 'خطا در ارتباط با سرور', data?.error?.details);
   }
   return data as T;
 }

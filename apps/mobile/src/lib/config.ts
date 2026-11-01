@@ -16,11 +16,27 @@ export function getApiUrl(): string {
   return current;
 }
 
-/** Accepts "1.2.3.4:8000", "example.ir" or a full URL; returns the normalised base URL. */
+/** Accepts "1.2.3.4:8000", "example.ir" or a full URL; returns the normalised base URL (https:// unless given). */
 export function normalizeServerUrl(input: string): string {
   let v = input.trim().replace(/\/+$/, '');
-  if (!/^https?:\/\//i.test(v)) v = `http://${v}`;
+  if (!/^https?:\/\//i.test(v)) v = `https://${v}`;
   return v.replace(/\/api$/, '');
+}
+
+/**
+ * The address to use for what the user typed: HTTPS first; plain HTTP only when they typed no scheme and the server
+ * has no HTTPS (an older install). Null when neither answers.
+ */
+export async function reachableServerUrl(input: string): Promise<string | null> {
+  const typed = input.trim();
+  const candidates = /^https?:\/\//i.test(typed) ? [normalizeServerUrl(typed)] : [normalizeServerUrl(typed), normalizeServerUrl(`http://${typed}`)];
+  for (const base of candidates) {
+    const ok = await fetch(`${base}/health`)
+      .then((r) => r.ok)
+      .catch(() => false);
+    if (ok) return base;
+  }
+  return null;
 }
 
 export async function loadApiUrl(): Promise<string> {

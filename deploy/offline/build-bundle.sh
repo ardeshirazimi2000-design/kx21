@@ -42,7 +42,7 @@ fi
 
 cp "$REPO/deploy/offline/docker-compose.yml" "$REPO/deploy/offline/install.sh" "$STAGE/"
 cp "$REPO/deploy/offline/راهنما.html" "$STAGE/"
-cp "$REPO/deploy/backup.sh" "$REPO/deploy/restore.sh" "$STAGE/deploy/"
+cp "$REPO/deploy/backup.sh" "$REPO/deploy/restore.sh" "$REPO/deploy/tls/make-cert.sh" "$STAGE/deploy/"
 echo "$VERSION" > "$STAGE/VERSION"
 [ -n "${APK:-}" ] && cp "$APK" "$STAGE/kx-commissions.apk"
 (cd "$STAGE" && find . -type f ! -name SHA256SUMS -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS)

@@ -18,7 +18,7 @@ export interface Me {
 interface AuthState {
   me: Me | null;
   ready: boolean;
-  login: (identifier: string, password: string) => Promise<{ mfaToken?: string }>;
+  login: (identifier: string, password: string, captcha?: { captchaId: string; captchaAnswer: string }) => Promise<{ mfaToken?: string }>;
   verifyMfa: (mfaToken: string, code: string) => Promise<void>;
   logout: () => Promise<void>;
 }
@@ -51,15 +51,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (me) void registerForPush();
   }, [me?.id]);
 
-  const login = async (identifier: string, password: string) => {
-    const r = await post('/auth/login', { identifier, password, device: 'mobile' });
+  const login = async (identifier: string, password: string, captcha?: { captchaId: string; captchaAnswer: string }) => {
+    const r = await post('/auth/login', { identifier, password, device: 'mobile', ...captcha });
     if (r.mfaRequired) return { mfaToken: r.mfaToken as string };
-    await setSession(r);
+    await setSession({ accessToken: r.accessToken, refreshToken: r.refreshToken });
     await loadMe();
     return {};
   };
   const verifyMfa = async (mfaToken: string, code: string) => {
-    await setSession(await post('/auth/mfa/verify', { mfaToken, code, device: 'mobile' }));
+    const r = await post('/auth/mfa/verify', { mfaToken, code, device: 'mobile' });
+    await setSession({ accessToken: r.accessToken, refreshToken: r.refreshToken });
     await loadMe();
   };
   const logout = async () => {
