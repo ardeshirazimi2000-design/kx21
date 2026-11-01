@@ -40,6 +40,13 @@ services:
       AI_BASE_URL: ${AI_BASE_URL:-}
       AI_EMBEDDING_MODEL: ${AI_EMBEDDING_MODEL:-bge-m3}
       AI_SIMILARITY_MIN: ${AI_SIMILARITY_MIN:-0.6}
+      # Draft minutes from the meeting's recording (deploy/ai/README-stt.md): Whisper speech-to-text + chat model on Ollama.
+      AI_CHAT_MODEL: ${AI_CHAT_MODEL:-}
+      AI_CHAT_CONTEXT: ${AI_CHAT_CONTEXT:-16384}
+      STT_BASE_URL: ${STT_BASE_URL:-}
+      STT_API_KEY: ${STT_API_KEY:-}
+      STT_MODEL: ${STT_MODEL:-whisper-1}
+      STT_LANGUAGE: ${STT_LANGUAGE:-fa}
     volumes:
       - uploads:/data/uploads
     depends_on:

@@ -27,6 +27,7 @@ import { securityRouter } from './routes/security.js';
 import { presentationRouter } from './routes/presentation.js';
 import { rolesRouter } from './routes/roles.js';
 import { structureRouter } from './routes/structure.js';
+import { transcriptsRouter } from './routes/transcripts.js';
 import rateLimit, { ipKeyGenerator } from 'express-rate-limit';
 
 const openapiPath = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'openapi.yaml');
@@ -108,6 +109,7 @@ export function createApp() {
   api.use(meetingsRouter);
   api.use(agendaRouter);
   api.use(minutesRouter);
+  api.use(transcriptsRouter);
   api.use(resolutionsRouter);
   api.use(networksRouter);
   api.use(presentationRouter);

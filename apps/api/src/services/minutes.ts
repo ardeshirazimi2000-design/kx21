@@ -169,3 +169,23 @@ export async function generateMinutesDraft(db: Db, req: Request, meetingId: stri
   await audit(db, req, { chamberId: m.chamber_id, action: 'minutes.generated', entity: 'minutes', entityId: row.id, after: { version: row.version } });
   return row;
 }
+
+export const DISCUSSION_HEADING = '## شرح مذاکرات جلسه';
+
+/**
+ * Puts the drafted «شرح مذاکرات جلسه» into a minutes text: replaces that section if it is already there, otherwise
+ * adds it after the agenda and decisions (before the closing line), leaving the attendance section untouched.
+ */
+export function withDiscussionSection(body: string, discussion: string): string {
+  const section = `${DISCUSSION_HEADING}\n\n${discussion.trim()}\n`;
+  const start = body.indexOf(DISCUSSION_HEADING);
+  if (start >= 0) {
+    const after = body.slice(start + DISCUSSION_HEADING.length);
+    const next = after.search(/\n## |\n---\s*\n|\n---\s*$/);
+    const end = next < 0 ? body.length : start + DISCUSSION_HEADING.length + next;
+    return `${body.slice(0, start)}${section}${body.slice(end)}`;
+  }
+  const footer = body.search(/\n---\s*\n[^\n]*\s*$/);
+  if (footer >= 0) return `${body.slice(0, footer).trimEnd()}\n\n${section}${body.slice(footer)}`;
+  return `${body.trimEnd()}\n\n${section}`;
+}

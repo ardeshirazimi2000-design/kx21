@@ -58,6 +58,14 @@ const ALLOWED: Record<string, { mime: string; magic: number[][] | null; at?: num
   // Meeting recordings: the webinar's local recording saves WebM; phones and other tools produce MP4.
   '.webm': { mime: 'video/webm', magic: [[0x1a, 0x45, 0xdf, 0xa3]], kind: 'recording' },
   '.mp4': { mime: 'video/mp4', magic: [[0x66, 0x74, 0x79, 0x70]], at: 4, kind: 'recording' },
+  // Audio recordings of meetings (voice recorders, phones, messaging apps), the source of the transcript draft.
+  '.mp3': { mime: 'audio/mpeg', magic: [[0x49, 0x44, 0x33], [0xff, 0xfb], [0xff, 0xf3], [0xff, 0xf2], [0xff, 0xfa], [0xff, 0xe3]], kind: 'recording' },
+  '.m4a': { mime: 'audio/mp4', magic: [[0x66, 0x74, 0x79, 0x70]], at: 4, kind: 'recording' },
+  '.wav': { mime: 'audio/wav', magic: [[0x52, 0x49, 0x46, 0x46]], kind: 'recording' },
+  '.ogg': { mime: 'audio/ogg', magic: [[0x4f, 0x67, 0x67, 0x53]], kind: 'recording' },
+  '.opus': { mime: 'audio/ogg', magic: [[0x4f, 0x67, 0x67, 0x53]], kind: 'recording' },
+  '.amr': { mime: 'audio/amr', magic: [[0x23, 0x21, 0x41, 0x4d, 0x52]], kind: 'recording' },
+  '.aac': { mime: 'audio/aac', magic: [[0xff, 0xf1], [0xff, 0xf9]], kind: 'recording' },
 };
 
 export const ALLOWED_EXTENSIONS = Object.keys(ALLOWED);
@@ -242,8 +250,8 @@ export async function authorizedDocument(u: AuthUser, id: string) {
   return d;
 }
 
-const INLINE_TYPES = ['application/pdf', 'image/png', 'image/jpeg', 'image/webp', 'video/webm', 'video/mp4'];
-const isVideo = (mime: string) => mime.startsWith('video/');
+const INLINE_TYPES = ['application/pdf', 'image/png', 'image/jpeg', 'image/webp', 'video/webm', 'video/mp4', 'audio/mpeg', 'audio/mp4', 'audio/wav', 'audio/ogg', 'audio/aac'];
+const isVideo = (mime: string) => mime.startsWith('video/') || mime.startsWith('audio/');
 
 /** Streams a stored document; byte ranges are supported so recordings can be played and seeked in the browser. */
 export async function sendDocument(res: Response, d: any, inline = false) {

@@ -50,6 +50,7 @@ export const NOTIFICATION_EVENT_LABELS: Record<NotificationEvent, string> = {
   'minutes.returned': 'برگشت صورتجلسه برای اصلاح',
   'minutes.approved': 'تأیید نهایی صورتجلسه',
   'minutes.reopened': 'بازگشایی صورتجلسه برای اصلاح',
+  'minutes.transcript_ready': 'آماده شدن پیش‌نویس صورتجلسه از فایل صوتی',
   'resolution.created': 'ثبت مصوبه و تعیین مسئول اجرا',
   'resolution.due_soon': 'نزدیک شدن مهلت مصوبه',
   'resolution.overdue': 'گذشتن مهلت مصوبه',
@@ -121,6 +122,7 @@ export const DEFAULT_NOTIFICATION_SETTINGS: NotificationSettings = {
     'minutes.returned': ev(null, null),
     'minutes.approved': ev(null, null),
     'minutes.reopened': ev(null, null),
+    'minutes.transcript_ready': ev(null, null),
     'resolution.created': ev(
       null,
       '{نام} گرامی،\n\nمصوبه {شماره_مصوبه} {کمیسیون} برای اجرا به شما سپرده شد:\n«{متن_مصوبه}»\nمهلت اجرا: {مهلت}\n\nمشاهده و ثبت گزارش اجرا: {لینک}' + SIGN,

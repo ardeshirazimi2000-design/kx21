@@ -216,6 +216,9 @@ const AUDIT_LABELS: Record<string, string> = {
   'document.opened': 'مشاهدهٔ فایل',
   'document.uploaded': 'بارگذاری فایل',
   'document.deleted': 'حذف فایل',
+  'transcript.requested': 'درخواست تبدیل فایل جلسه به متن',
+  'transcript.cancelled': 'لغو تبدیل فایل جلسه به متن',
+  'minutes.transcript_applied': 'افزودن شرح مذاکرات از فایل صوتی به صورتجلسه',
   'report.resolutions_exported': 'خروجی مصوبات (CSV)',
   'report.activity_exported': 'خروجی گزارش دوره‌ای',
 };

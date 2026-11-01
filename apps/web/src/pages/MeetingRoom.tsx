@@ -19,6 +19,7 @@ import { DocActions, DocKind, UploadFiles, ViewButton } from '../components/docs
 import { cleanExecutors, ExecutorsEditor, type ExecutorDraft } from '../components/Executors';
 import { ArchivalPanel, ItemSummaryModal, ManualVoteModal } from '../components/Archival';
 import { PresentationCard } from '../components/Presentation';
+import { TranscriptPanel, type DraftResolution } from '../components/Transcript';
 import { KPI_HINT, KPI_LABEL } from './Resolutions';
 import { AgendaBadge, AttendanceBadge, MeetingStatusBadge, MinutesBadge, ResolutionBadge } from '../components/status';
 import { Badge, Button, Card, dateFa, dateTimeFa, Empty, ErrorBox, Field, fa, JalaliDateInput, JalaliDateTimeInput, Loading, Modal, PageHeader, Tabs } from '../components/ui';
@@ -905,6 +906,7 @@ function Minutes({ m, reloadMeeting }: { m: any; reloadMeeting: () => Promise<vo
   const [editing, setEditing] = useState(false);
   const [body, setBody] = useState('');
   const [reopening, setReopening] = useState(false);
+  const [drafted, setDrafted] = useState<{ r: DraftResolution; saved: () => void } | null>(null);
   const [err, setErr] = useState<Error | null>(null);
   if (error) return <ErrorBox error={error} />;
   if (!data) return <Loading />;
@@ -922,6 +924,19 @@ function Minutes({ m, reloadMeeting }: { m: any; reloadMeeting: () => Promise<vo
   };
   const draft = m.status === 'minutes_draft';
   return (
+    <>
+      {draft && can('meeting.manage') && <TranscriptPanel m={m} onApplied={reload} onResolution={(r, saved) => setDrafted({ r, saved })} />}
+      {drafted && (
+        <NewResolutionModal
+          m={m}
+          initial={drafted.r}
+          onClose={() => setDrafted(null)}
+          onSaved={() => {
+            drafted.saved();
+            setDrafted(null);
+          }}
+        />
+      )}
     <Card
       title={
         <span className="row gap-sm">
@@ -1029,6 +1044,7 @@ function Minutes({ m, reloadMeeting }: { m: any; reloadMeeting: () => Promise<vo
         </p>
       )}
     </Card>
+    </>
   );
 }
 
@@ -1099,11 +1115,11 @@ function MeetingResolutions({ m }: { m: any }) {
   );
 }
 
-function NewResolutionModal({ m, vote, onClose, onSaved }: { m: any; vote?: any; onClose: () => void; onSaved: () => void }) {
+function NewResolutionModal({ m, vote, initial, onClose, onSaved }: { m: any; vote?: any; initial?: DraftResolution; onClose: () => void; onSaved: () => void }) {
   const item = vote ? m.agenda.find((a: any) => a.id === vote.agenda_item_id) : null;
   const [form, setForm] = useState({
-    agendaItemId: item?.id ?? '',
-    text: item?.proposed_resolution ?? item?.decision ?? '',
+    agendaItemId: item?.id ?? initial?.agendaItemId ?? '',
+    text: item?.proposed_resolution ?? item?.decision ?? initial?.text ?? '',
     ownerId: '',
     dueDate: '',
     priority: 'normal',
@@ -1143,6 +1159,11 @@ function NewResolutionModal({ m, vote, onClose, onSaved }: { m: any; vote?: any;
   return (
     <Modal title="ثبت مصوبه" wide onClose={onClose} footer={<Button onClick={save}>{m.archival ? 'ثبت مصوبه' : 'ثبت مصوبه و ایجاد وظیفه'}</Button>}>
       <ErrorBox error={err} />
+      {initial && (initial.responsible || initial.deadline) && (
+        <div className="alert alert-info small">
+          از پیش‌نویس فایل صوتی — {[initial.responsible && `مسئول گفته‌شده: ${initial.responsible}`, initial.deadline && `مهلت گفته‌شده: ${initial.deadline}`].filter(Boolean).join(' — ')}
+        </div>
+      )}
       {m.archival && (
         <Field label="شمارهٔ مصوبه در صورتجلسهٔ کاغذی" hint="خالی بگذارید تا خودکار شماره‌گذاری شود">
           <input className="input" value={form.number} onChange={(e) => setForm({ ...form, number: e.target.value })} />

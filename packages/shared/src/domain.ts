@@ -93,6 +93,7 @@ export const NOTIFICATION_EVENTS = [
   'minutes.returned',
   'minutes.approved',
   'minutes.reopened',
+  'minutes.transcript_ready',
   'resolution.created',
   'resolution.due_soon',
   'resolution.overdue',

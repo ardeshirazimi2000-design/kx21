@@ -7,6 +7,7 @@ import { logger } from './lib/logger.js';
 import { initRealtime } from './realtime.js';
 import { startIntegrationWorker } from './services/integrations.js';
 import { startScheduler } from './services/scheduler.js';
+import { startTranscriptWorker } from './services/transcripts.js';
 
 async function main() {
   if (process.env.MIGRATE_ON_START !== 'false') await migrate(false);
@@ -19,6 +20,7 @@ async function main() {
   initRealtime(server);
   if (process.env.SCHEDULER_ENABLED !== 'false') startScheduler();
   if (config.integrationWorkerEnabled) startIntegrationWorker();
+  if (config.transcriptWorkerEnabled) await startTranscriptWorker();
   server.listen(config.port, () => logger.info(`API listening on :${config.port}`));
 }
 

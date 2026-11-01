@@ -88,7 +88,27 @@ export const config = {
     embeddingModel: process.env.AI_EMBEDDING_MODEL ?? 'bge-m3',
     /** Minimum cosine similarity (0–1) of two resolutions to be suggested as similar. */
     minScore: Number(process.env.AI_SIMILARITY_MIN ?? 0.6),
+    /**
+     * Drafting the minutes text and resolutions from a transcript: a chat model on the same Ollama (AI_BASE_URL).
+     * Unset → no drafting (the transcript alone is still produced).
+     */
+    chatModel: process.env.AI_CHAT_MODEL ?? '',
+    /** Context window given to the model (tokens); long transcripts are summarised in parts that fit in it. */
+    chatContext: Number(process.env.AI_CHAT_CONTEXT ?? 16384),
+    chatTimeoutMinutes: Number(process.env.AI_CHAT_TIMEOUT_MINUTES ?? 60),
   },
+  /**
+   * Speech-to-text of meeting recordings on the organisation's own server: any OpenAI-compatible
+   * /audio/transcriptions service, e.g. faster-whisper (speaches) or whisper.cpp server (deploy/ai/README-stt.md).
+   */
+  stt: {
+    baseUrl: (process.env.STT_BASE_URL ?? '').replace(/\/+$/, ''),
+    apiKey: process.env.STT_API_KEY ?? '',
+    model: process.env.STT_MODEL ?? 'whisper-1',
+    language: process.env.STT_LANGUAGE ?? 'fa',
+    timeoutMinutes: Number(process.env.STT_TIMEOUT_MINUTES ?? 240),
+  },
+  transcriptWorkerEnabled: process.env.TRANSCRIPT_WORKER_ENABLED !== 'false',
   webinar: {
     url: (process.env.WEBINAR_URL ?? '').replace(/\/+$/, ''),
     appId: process.env.WEBINAR_APP_ID ?? 'kx-commissions',

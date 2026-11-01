@@ -35,6 +35,14 @@ services:
       WEBINAR_APP_ID: ${WEBINAR_APP_ID:-kx-commissions}
       WEBINAR_APP_SECRET: ${WEBINAR_APP_SECRET:-}
       MAX_RECORDING_MB: ${MAX_RECORDING_MB:-2048}
+      AI_BASE_URL: ${AI_BASE_URL:-}
+      # Draft minutes from the meeting's recording (deploy/ai/README-stt.md): Whisper speech-to-text + chat model on Ollama.
+      AI_CHAT_MODEL: ${AI_CHAT_MODEL:-}
+      AI_CHAT_CONTEXT: ${AI_CHAT_CONTEXT:-16384}
+      STT_BASE_URL: ${STT_BASE_URL:-}
+      STT_API_KEY: ${STT_API_KEY:-}
+      STT_MODEL: ${STT_MODEL:-whisper-1}
+      STT_LANGUAGE: ${STT_LANGUAGE:-fa}
       PUBLIC_HTTPS: "true"
     volumes:
       - uploads:/data/uploads

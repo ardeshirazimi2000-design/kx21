@@ -9,14 +9,14 @@ export const DOC_KINDS: Record<string, { label: string; tone: Tone; icon: string
   report: { label: 'گزارش', tone: 'info', icon: '📑' },
   letter: { label: 'نامه', tone: 'warning', icon: '✉️' },
   evidence: { label: 'مستند اقدام', tone: 'info', icon: '📎' },
-  recording: { label: 'فیلم جلسه', tone: 'accent', icon: '🎬' },
+  recording: { label: 'فیلم یا صدای جلسه', tone: 'accent', icon: '🎬' },
   minutes_scan: { label: 'صورتجلسهٔ امضاشده', tone: 'success', icon: '✍️' },
 };
 
-export const ACCEPT = '.pdf,.ppt,.pptx,.ppsx,.doc,.docx,.xls,.xlsx,.png,.jpg,.jpeg,.webp,.heic,.txt,.webm,.mp4';
-export const ACCEPT_HINT = 'پاورپوینت، PDF، عکس، Word و Excel تا ۵۰ مگابایت؛ فیلم جلسه (WebM یا MP4) تا ۲ گیگابایت';
+export const ACCEPT = '.pdf,.ppt,.pptx,.ppsx,.doc,.docx,.xls,.xlsx,.png,.jpg,.jpeg,.webp,.heic,.txt,.webm,.mp4,.mp3,.m4a,.wav,.ogg,.opus,.amr,.aac';
+export const ACCEPT_HINT = 'پاورپوینت، PDF، عکس، Word و Excel تا ۵۰ مگابایت؛ فیلم یا صدای ضبط‌شدهٔ جلسه (MP4، WebM، MP3، M4A، WAV، OGG، AMR) تا ۲ گیگابایت';
 
-const VIDEO = ['video/webm', 'video/mp4'];
+const VIDEO = ['video/webm', 'video/mp4', 'audio/mpeg', 'audio/mp4', 'audio/wav', 'audio/ogg', 'audio/aac'];
 const VIEWABLE = ['application/pdf', 'image/png', 'image/jpeg', 'image/webp', ...VIDEO];
 
 /** Signed same-origin link to a document (inline = open in the browser instead of downloading). */
