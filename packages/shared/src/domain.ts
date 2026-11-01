@@ -105,6 +105,10 @@ export const NOTIFICATION_EVENTS = [
   'network.proposal_national',
   'network.proposal_updated',
   'network.similar_found',
+  'council.case_opened',
+  'council.case_updated',
+  'council.approval_needed',
+  'council.case_due',
 ] as const;
 export type NotificationEvent = (typeof NOTIFICATION_EVENTS)[number];
 

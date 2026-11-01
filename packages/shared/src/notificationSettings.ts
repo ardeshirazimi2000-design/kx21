@@ -62,6 +62,10 @@ export const NOTIFICATION_EVENT_LABELS: Record<NotificationEvent, string> = {
   'network.proposal_national': 'تبدیل مصوبه به پیشنهاد ملی',
   'network.proposal_updated': 'نتیجه پیگیری پیشنهاد ملی',
   'network.similar_found': 'انتشار مصوبه مشابه مسئله کمیسیون (موتور هوشمند)',
+  'council.case_opened': 'ثبت پروندهٔ تازه در شورای گفت‌وگو',
+  'council.case_updated': 'تغییر وضعیت پروندهٔ شورا',
+  'council.approval_needed': 'پرونده در انتظار تأیید دبیر شورا',
+  'council.case_due': 'نزدیک شدن یا گذشتن مهلت پروندهٔ شورا',
 };
 
 /** Variables that can be used in message texts; meeting/resolution ones apply when the event has one. */
@@ -138,6 +142,10 @@ export const DEFAULT_NOTIFICATION_SETTINGS: NotificationSettings = {
     'network.proposal_national': ev(null, null),
     'network.proposal_updated': ev(null, null),
     'network.similar_found': ev(null, null),
+    'council.case_opened': ev(null, null),
+    'council.case_updated': ev(null, null),
+    'council.approval_needed': ev(null, null),
+    'council.case_due': ev(null, null),
   },
 };
 

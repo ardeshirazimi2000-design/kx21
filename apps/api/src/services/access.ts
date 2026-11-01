@@ -78,6 +78,9 @@ export interface CommissionRow {
   code: string;
   status: string;
   settings: unknown;
+  /** commission, or a council body: expert_group / council (شورای گفت‌وگو). */
+  body_type: string;
+  council_secretary_id: string | null;
 }
 
 export interface CommissionAccess {

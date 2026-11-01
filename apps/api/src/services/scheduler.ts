@@ -4,6 +4,7 @@ import { query } from '../db/pool.js';
 import { logger } from '../lib/logger.js';
 import { notify } from './notifications.js';
 import { backfillEmbeddings } from './similarity.js';
+import { remindCouncilDeadlines } from '../routes/council.js';
 
 /**
  * Periodic jobs:
@@ -72,6 +73,7 @@ export async function runScheduledJobs(): Promise<void> {
       data: { meetingId: m.meeting_id },
     });
   }
+  await remindCouncilDeadlines();
   // Embeddings for similar-resolution suggestions; an unreachable AI server must not stop the other jobs.
   await backfillEmbeddings().catch((e) => logger.warn({ err: (e as Error).message }, 'embedding backfill failed'));
   if (dueSoon.length || overdue.length || pending.length) {

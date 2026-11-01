@@ -37,6 +37,8 @@ const chamberSchema = z.object({
   email: z.string().email().nullish(),
   address: z.string().nullish(),
   settings: z.record(z.string(), z.unknown()).optional(),
+  /** Iran Chamber (national): home of the national council; set by the system's IT administrator. */
+  kind: z.enum(['provincial', 'national']).optional(),
 });
 
 structureRouter.get('/chambers', async (req, res) => {
@@ -60,11 +62,14 @@ structureRouter.post('/chambers', async (req, res) => {
   const b = body(req, chamberSchema);
   const row = await tx(async (c) => {
     const r = await one(
-      `INSERT INTO chambers (name, province, logo_url, phone, email, address, settings)
-       VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *`,
-      [b.name, b.province, b.logoUrl ?? null, b.phone ?? null, b.email ?? null, b.address ?? null, JSON.stringify(b.settings ?? {})],
+      `INSERT INTO chambers (name, province, logo_url, phone, email, address, settings, kind)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *`,
+      [b.name, b.province, b.logoUrl ?? null, b.phone ?? null, b.email ?? null, b.address ?? null, JSON.stringify(b.settings ?? {}), b.kind ?? 'provincial'],
       c,
-    );
+    ).catch((e) => {
+      if (e.code === '23505') throw conflict('اتاق ایران (اتاق ملی) قبلاً تعریف شده است', 'national_exists');
+      throw e;
+    });
     await audit(c, req, { chamberId: r.id, action: 'chamber.created', entity: 'chamber', entityId: r.id, after: r });
     return r;
   });
@@ -84,16 +89,20 @@ structureRouter.patch('/chambers/:id', async (req, res) => {
   const id = param(req, 'id');
   if (!isAnyChamberAdmin(currentUser(req), id)) throw forbidden();
   const b = body(req, chamberSchema.partial());
+  if (b.kind !== undefined) requireSuperAdmin(currentUser(req));
   const row = await tx(async (c) => {
     const before = await one('SELECT * FROM chambers WHERE id = $1 FOR UPDATE', [id], c);
     if (!before) throw notFound();
     const after = await one(
       `UPDATE chambers SET name = COALESCE($2, name), province = COALESCE($3, province), logo_url = COALESCE($4, logo_url),
          phone = COALESCE($5, phone), email = COALESCE($6, email), address = COALESCE($7, address),
-         settings = COALESCE($8, settings), updated_at = now() WHERE id = $1 RETURNING *`,
-      [id, b.name, b.province, b.logoUrl, b.phone, b.email, b.address, b.settings ? JSON.stringify(b.settings) : null],
+         settings = COALESCE($8, settings), kind = COALESCE($9, kind), updated_at = now() WHERE id = $1 RETURNING *`,
+      [id, b.name, b.province, b.logoUrl, b.phone, b.email, b.address, b.settings ? JSON.stringify(b.settings) : null, b.kind ?? null],
       c,
-    );
+    ).catch((e) => {
+      if (e.code === '23505') throw conflict('اتاق ایران (اتاق ملی) قبلاً تعریف شده است', 'national_exists');
+      throw e;
+    });
     await audit(c, req, { chamberId: id, action: 'chamber.updated', entity: 'chamber', entityId: id, before, after });
     return after;
   });
@@ -254,6 +263,10 @@ const commissionSchema = z.object({
   description: z.string().nullish(),
   status: z.enum(['active', 'inactive', 'dissolved']).default('active'),
   settings: settingsSchema.optional(),
+  /** A council body (شورای گفت‌وگو or its expert group) instead of a commission. */
+  bodyType: z.enum(['commission', 'expert_group', 'council']).default('commission'),
+  /** دبیر شورا (the chamber president), for a council. */
+  councilSecretaryId: uuid.nullish(),
 });
 
 structureRouter.get('/commissions', async (req, res) => {
@@ -284,6 +297,15 @@ structureRouter.get('/commissions', async (req, res) => {
   res.json(paged(items, count, page, pageSize));
 });
 
+/** دبیر شورا: only for a council, a person of the same chamber who can sign in (they approve in the system themselves). */
+async function assertCouncilSecretary(c: Db, chamberId: string, bodyType: string, userId: string | null | undefined) {
+  if (!userId) return;
+  if (bodyType !== 'council') throw badRequest('دبیر شورا فقط برای شورای گفت‌وگو تعیین می‌شود');
+  const p = await one('SELECT chamber_id, is_active, password_hash IS NOT NULL AS can_login FROM users WHERE id = $1', [userId], c);
+  if (!p || p.chamber_id !== chamberId) throw badRequest('دبیر شورا باید از اشخاص همین اتاق باشد');
+  if (!p.is_active || !p.can_login) throw badRequest('دبیر شورا تأییدها را خودش در سامانه ثبت می‌کند و باید حساب ورود فعال داشته باشد');
+}
+
 structureRouter.post('/commissions', async (req, res) => {
   const b = body(req, commissionSchema);
   requireChamberAdmin(currentUser(req), b.chamberId);
@@ -291,15 +313,17 @@ structureRouter.post('/commissions', async (req, res) => {
   if (!term || term.chamber_id !== b.chamberId) throw badRequest('دوره متعلق به این اتاق نیست');
   const settings = { ...DEFAULT_COMMISSION_SETTINGS, ...(b.settings ?? {}), quorum: { ...DEFAULT_COMMISSION_SETTINGS.quorum, ...(b.settings?.quorum ?? {}) } };
   const row = await tx(async (c) => {
+    await assertCouncilSecretary(c, b.chamberId, b.bodyType, b.councilSecretaryId);
     const r = await one(
-      `INSERT INTO commissions (chamber_id, term_id, name, code, domain, description, status, settings)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *`,
-      [b.chamberId, b.termId, b.name, b.code, b.domain ?? null, b.description ?? null, b.status, JSON.stringify(settings)],
+      `INSERT INTO commissions (chamber_id, term_id, name, code, domain, description, status, settings, body_type, council_secretary_id)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING *`,
+      [b.chamberId, b.termId, b.name, b.code, b.domain ?? null, b.description ?? null, b.status, JSON.stringify(settings), b.bodyType, b.councilSecretaryId ?? null],
       c,
     );
     await audit(c, req, { chamberId: b.chamberId, action: 'commission.created', entity: 'commission', entityId: r.id, after: r });
     return r;
   }).catch((e) => {
+    if (e.code === '23505' && e.constraint === 'commissions_one_council_body') throw conflict('این اتاق شورای گفت‌وگو یا کارگروه کارشناسی فعال دارد', 'council_exists');
     if (e.code === '23505') throw conflict('کد کمیسیون در این دوره تکراری است');
     throw e;
   });
@@ -319,11 +343,12 @@ structureRouter.get('/commissions/:id', async (req, res) => {
 
 structureRouter.patch('/commissions/:id', async (req, res) => {
   const id = param(req, 'id');
-  const b = body(req, commissionSchema.omit({ chamberId: true, termId: true }).partial());
+  const b = body(req, commissionSchema.omit({ chamberId: true, termId: true, bodyType: true }).partial());
   const row = await tx(async (c) => {
     const before = await one('SELECT * FROM commissions WHERE id = $1 FOR UPDATE', [id], c);
     if (!before) throw notFound();
     requireChamberAdmin(currentUser(req), before.chamber_id);
+    if (b.councilSecretaryId !== undefined) await assertCouncilSecretary(c, before.chamber_id, before.body_type, b.councilSecretaryId);
     let settings = null;
     if (b.settings) {
       const cur = { ...DEFAULT_COMMISSION_SETTINGS, ...before.settings };
@@ -331,9 +356,10 @@ structureRouter.patch('/commissions/:id', async (req, res) => {
     }
     const after = await one(
       `UPDATE commissions SET name = COALESCE($2, name), code = COALESCE($3, code), domain = COALESCE($4, domain),
-         description = COALESCE($5, description), status = COALESCE($6, status), settings = COALESCE($7, settings), updated_at = now()
+         description = COALESCE($5, description), status = COALESCE($6, status), settings = COALESCE($7, settings),
+         council_secretary_id = CASE WHEN $8 THEN $9 ELSE council_secretary_id END, updated_at = now()
        WHERE id = $1 RETURNING *`,
-      [id, b.name, b.code, b.domain, b.description, b.status, settings],
+      [id, b.name, b.code, b.domain, b.description, b.status, settings, b.councilSecretaryId !== undefined, b.councilSecretaryId ?? null],
       c,
     );
     await audit(c, req, { chamberId: before.chamber_id, action: 'commission.updated', entity: 'commission', entityId: id, before, after });
