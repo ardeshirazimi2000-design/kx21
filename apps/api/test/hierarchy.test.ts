@@ -81,14 +81,16 @@ describe('chamber → term → commission hierarchy', () => {
     expect((await as('root').post('/api/commissions', { chamberId: sdj, termId: sdjTerm, name: 'فناوری', code: 'IT' })).status).toBe(403);
   });
 
-  it('chamber admins see only their chamber’s commissions; the Super Admin sees all', async () => {
+  it('chamber admins see only their chamber’s commissions; the national secretariat only their numbers', async () => {
     const sdjList = names(await as('sdjAdmin').get('/api/commissions'));
     expect(sdjList).toEqual(['کمیسیون کسب و کارهای دانش بنیان']);
     const yazdList = names(await as('yazdAdmin').get('/api/commissions'));
     expect(yazdList).not.toContain('کمیسیون کسب و کارهای دانش بنیان');
     expect(yazdList.length).toBeGreaterThan(0);
-    const all = (await as('root').get('/api/commissions?pageSize=100')).body.items;
-    expect(all.find((c: any) => c.id === kb)?.chamber_name).toBe('اتاق بازرگانی سنندج');
+    // root is the national secretariat too: numbers per province, not the commissions themselves.
+    expect((await as('root').get('/api/commissions?pageSize=100')).body.items.find((c: any) => c.id === kb)).toBeUndefined();
+    const national = (await as('root').get('/api/dashboard/national')).body;
+    expect(national.chambers.find((c: any) => c.id === sdj).commissions).toBe(1);
     expect((await as('yazdAdmin').get(`/api/commissions/${kb}`)).status).toBe(404);
   });
 

@@ -12,8 +12,7 @@ import { notify } from './notifications.js';
  *    secretary (دبیر شورا, the chamber president) of the case's current level: every case of their level;
  *  - members of those bodies: the level's cases, a confidential one only once it was on the council's agenda;
  *  - the originating commission: its cases at every level (a confidential one: its secretariat only);
- *  - the chamber admin: their chamber's cases, and the national secretariat role cases that reached the national
- *    level, to follow them (no action);
+ *  - the chamber admin: their chamber's cases, to follow them (no action);
  *  - invitees of a meeting with the case on its agenda (e.g. government representatives in an expert meeting).
  * A case that may not be seen is «not found».
  */
@@ -103,13 +102,12 @@ export function caseVisibility(u: AuthUser, ctx: CouncilContext, from: number): 
     OR (c.origin_commission_id = ANY(${p(2)}::uuid[]) AND NOT c.confidential)
     OR c.origin_commission_id = ANY(${p(3)}::uuid[])
     OR c.origin_chamber_id = ANY(${p(4)}::uuid[])
-    OR (${p(6)}::boolean AND c.national_reached_at IS NOT NULL)
     OR EXISTS (SELECT 1 FROM agenda_items ai JOIN meeting_invitees i ON i.meeting_id = ai.meeting_id
-                WHERE ai.council_case_id = c.id AND i.user_id = ${p(7)})
+                WHERE ai.council_case_id = c.id AND i.user_id = ${p(6)})
   )`;
   return {
     where,
-    params: [full, ctx.member, ctx.originAll, ctx.originSecretariat, u.adminChambers, ctx.nationalChamber, u.isNational, u.id],
+    params: [full, ctx.member, ctx.originAll, ctx.originSecretariat, u.adminChambers, ctx.nationalChamber, u.id],
   };
 }
 

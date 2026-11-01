@@ -8,7 +8,7 @@ import { audit } from '../lib/audit.js';
 import { dateStr, listParam, paged, pageParams, param, uuid } from '../lib/validate.js';
 import { buildActivityDocx, buildActivityPptx, loadActivityData, summarize } from '../services/activityReport.js';
 import { pool } from '../db/pool.js';
-import { canAudit, canOverseeChamber, commissionAccess } from '../services/access.js';
+import { canAudit, canOverseeChamber, commissionAccess, isChamberAdmin } from '../services/access.js';
 import { tehranDate } from '../services/holidays.js';
 import { adminBrowsableChambers, browsableCommissionIds } from '../services/roles.js';
 
@@ -198,12 +198,15 @@ reportsRouter.get('/dashboard/chamber', async (req, res) => {
      FROM commissions c JOIN terms t ON t.id = c.term_id WHERE c.chamber_id = $1 AND t.status = 'active' ORDER BY c.name`,
     [chamberId],
   );
-  const overdue = await query(
-    `SELECT r.id, r.number, r.text, r.due_date, r.progress, c.name AS commission_name, u.full_name AS owner_name, (current_date - r.due_date) AS days_late
-       FROM resolutions r JOIN commissions c ON c.id = r.commission_id LEFT JOIN users u ON u.id = r.owner_id
-      WHERE r.chamber_id = $1 AND r.due_date < current_date AND r.status NOT IN ('done','cancelled') ORDER BY r.due_date LIMIT 50`,
-    [chamberId],
-  );
+  // The resolutions themselves only for the chamber's own admin; the national secretariat sees the numbers.
+  const overdue = isChamberAdmin(u, chamberId)
+    ? await query(
+        `SELECT r.id, r.number, r.text, r.due_date, r.progress, c.name AS commission_name, u.full_name AS owner_name, (current_date - r.due_date) AS days_late
+           FROM resolutions r JOIN commissions c ON c.id = r.commission_id LEFT JOIN users u ON u.id = r.owner_id
+          WHERE r.chamber_id = $1 AND r.due_date < current_date AND r.status NOT IN ('done','cancelled') ORDER BY r.due_date LIMIT 50`,
+        [chamberId],
+      )
+    : [];
   const totals = await one(
     `SELECT (SELECT count(*) FROM commissions c JOIN terms t ON t.id = c.term_id WHERE c.chamber_id = $1 AND t.status = 'active' AND c.status = 'active') AS commissions,
             (SELECT count(*) FROM meetings WHERE chamber_id = $1 AND scheduled_at > now() - interval '30 days' AND status <> 'cancelled') AS meetings_30d,
@@ -211,7 +214,33 @@ reportsRouter.get('/dashboard/chamber', async (req, res) => {
             (SELECT count(*) FROM meetings WHERE chamber_id = $1 AND status IN ('in_progress','agenda_processing')) AS live_meetings`,
     [chamberId],
   );
-  res.json({ totals, commissions, overdueResolutions: overdue });
+  res.json({ totals, commissions, overdueResolutions: overdue, statsOnly: !isChamberAdmin(u, chamberId) });
+});
+
+/**
+ * The national secretariat's dashboard: numbers per province, never the content of meetings, minutes or resolutions.
+ */
+reportsRouter.get('/dashboard/national', async (req, res) => {
+  const u = currentUser(req);
+  if (!u.isNational) throw forbidden('داشبورد ملی برای دبیرخانهٔ ملی است');
+  const chambers = await query(
+    `SELECT ch.id, ch.name, ch.province, ch.kind,
+       (SELECT count(*)::int FROM commissions c JOIN terms t ON t.id = c.term_id WHERE c.chamber_id = ch.id AND t.status = 'active' AND c.status = 'active' AND c.body_type = 'commission') AS commissions,
+       (SELECT count(*)::int FROM meetings m WHERE m.chamber_id = ch.id AND m.status IN ('minutes_draft','pending_approval','approved','archived')) AS meetings_held,
+       (SELECT count(*)::int FROM meetings m WHERE m.chamber_id = ch.id AND m.status IN ('minutes_draft','pending_approval','approved','archived') AND m.scheduled_at > now() - interval '90 days') AS meetings_90d,
+       (SELECT count(*)::int FROM resolutions r WHERE r.chamber_id = ch.id) AS resolutions_total,
+       (SELECT count(*)::int FROM resolutions r WHERE r.chamber_id = ch.id AND r.status = 'done') AS resolutions_done,
+       (SELECT count(*)::int FROM resolutions r WHERE r.chamber_id = ch.id AND r.due_date < current_date AND r.status NOT IN ('done','cancelled')) AS resolutions_overdue,
+       (SELECT count(*)::int FROM council_cases k WHERE k.origin_chamber_id = ch.id) AS cases_total,
+       (SELECT count(*)::int FROM council_cases k WHERE k.origin_chamber_id = ch.id AND k.status NOT IN ('resolved','closed')) AS cases_open,
+       (SELECT count(*)::int FROM council_cases k WHERE k.origin_chamber_id = ch.id AND k.national_reached_at IS NOT NULL) AS cases_national
+     FROM chambers ch ORDER BY ch.kind DESC, ch.province`,
+  );
+  const sum = (k: string) => chambers.reduce((n: number, c: any) => n + (c[k] ?? 0), 0);
+  const totals = Object.fromEntries(
+    ['commissions', 'meetings_held', 'meetings_90d', 'resolutions_total', 'resolutions_done', 'resolutions_overdue', 'cases_total', 'cases_open', 'cases_national'].map((k) => [k, sum(k)]),
+  );
+  res.json({ chambers, totals });
 });
 
 // ─────────────────────────────── Reports & export ───────────────────────────────
@@ -232,7 +261,7 @@ reportsRouter.get('/reports/resolutions', async (req, res) => {
   const chamberId = req.query.chamberId ? uuid.parse(req.query.chamberId) : null;
   if (commissionId) (await commissionAccess(u, commissionId)).require('report.commission');
   else if (chamberId) {
-    if (!canOverseeChamber(u, chamberId)) throw forbidden();
+    if (!isChamberAdmin(u, chamberId)) throw forbidden();
   } else throw forbidden('کمیسیون یا اتاق را مشخص کنید');
   const status = listParam(req.query.status);
   const rows = await query(
@@ -338,7 +367,7 @@ reportsRouter.get('/search', async (req, res) => {
   }
   const [browse, adminBrowse] = await Promise.all([browsableCommissionIds(u), adminBrowsableChambers(u)]);
   const commissionVisible = `($2::boolean OR c.chamber_id = ANY($3::uuid[]) OR c.id = ANY($5::uuid[]))`;
-  const p = [q, u.isNational, adminBrowse, u.id, browse];
+  const p = [q, false, adminBrowse, u.id, browse];
   const [commissions, meetings, resolutions] = await Promise.all([
     query(`SELECT c.id, c.name, c.code FROM commissions c WHERE c.name ILIKE '%' || $1 || '%' AND ${commissionVisible} LIMIT 10`, p),
     query(

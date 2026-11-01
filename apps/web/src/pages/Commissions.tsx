@@ -12,8 +12,8 @@ export function CommissionsPage() {
   const nav = useNavigate();
   const [page, setPage] = useState(1);
   const [q, setQ] = useState('');
-  // The national secretariat can list the commissions of every chamber at once.
-  const superAdmin = !!me?.isNational;
+  // Commissions are listed per chamber (the national secretariat sees statistics only).
+  const superAdmin = false;
   const [allChambers, setAllChambers] = useState(superAdmin);
   const scoped = isAdmin && chamberId && !(superAdmin && allChambers);
   const { data, loading, reload } = useApi(`/commissions?page=${page}&q=${encodeURIComponent(q)}${scoped ? `&chamberId=${chamberId}` : ''}`);

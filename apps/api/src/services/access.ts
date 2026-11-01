@@ -51,7 +51,7 @@ export function canAudit(user: AuthUser, chamberId: string | null): boolean {
   return user.auditAll || (!!chamberId && user.auditChambers.includes(chamberId));
 }
 
-/** Chambers whose reports and commissions the user oversees: their own as chamber admin, or all (national). */
+/** Chambers whose statistics the user sees: their own as chamber admin, or every chamber's numbers (national secretariat). */
 export function canOverseeChamber(user: AuthUser, chamberId: string): boolean {
   return user.isNational || isChamberAdmin(user, chamberId);
 }
@@ -110,7 +110,6 @@ export async function commissionAccess(user: AuthUser, commissionId: string, db:
   const ctx: AccessContext = {
     isSuperAdmin: false,
     isChamberAdmin: user.adminChambers.includes(commission.chamber_id),
-    isNational: user.isNational,
     position,
     resultVisibility: settings.resultVisibility,
     roleMatrix: await loadRoleMatrix(commission.chamber_id, db),
@@ -205,7 +204,6 @@ export async function meetingAccess(
   const caps = resolveCapabilities({
     isSuperAdmin: false,
     isChamberAdmin: user.adminChambers.includes(meeting.chamber_id),
-    isNational: user.isNational,
     position,
     inviteeRole: inv?.role ?? (delegation ? 'guest' : null),
     hasVote: inv?.has_vote ?? false,

@@ -278,7 +278,7 @@ structureRouter.get('/commissions', async (req, res) => {
     AND ($3::text IS NULL OR c.name ILIKE '%' || $3 || '%' OR c.code ILIKE '%' || $3 || '%' OR c.domain ILIKE '%' || $3 || '%')
     AND ($4::boolean OR c.chamber_id = ANY($5::uuid[])
          OR EXISTS (SELECT 1 FROM commission_memberships m WHERE m.commission_id = c.id AND m.user_id = $6 AND m.status = 'active'))`;
-  const params = [chamberId, termId, q, u.isNational, u.adminChambers, u.id];
+  const params = [chamberId, termId, q, false, u.adminChambers, u.id];
   const items = await query(
     `SELECT c.*, t.title AS term_title, t.number AS term_number, (SELECT ch.name FROM chambers ch WHERE ch.id = c.chamber_id) AS chamber_name,
        (SELECT count(*) FROM commission_memberships m WHERE m.commission_id = c.id AND m.status = 'active') AS member_count,

@@ -16,6 +16,7 @@ export function HomePage() {
     <>
       <LastLoginNotice />
       <DashboardOverview upcoming={home.data?.upcoming} />
+      {me!.isNational && <NationalDashboard />}
       {isAdmin && chamberId && <ChamberDashboard chamberId={chamberId} />}
       {officerOf.map((m) => (
         <CommissionDashboard key={m.commission_id} commissionId={m.commission_id} name={m.commission_name} />
@@ -91,7 +92,12 @@ function ChamberDashboard({ chamberId }: { chamberId: string }) {
         <Stat label="کمیسیون‌های فعال" value={fa(data.totals.commissions)} />
         <Stat label="جلسات ۳۰ روز اخیر" value={fa(data.totals.meetings_30d)} tone="info" />
         <Stat label="مصوبات باز" value={fa(data.totals.open_resolutions)} tone="warning" />
-        <Stat label="مصوبات معوق" value={fa(data.overdueResolutions.length)} tone="danger" hint={`${fa(data.totals.live_meetings)} جلسه در حال برگزاری`} />
+        <Stat
+          label="مصوبات معوق"
+          value={fa(data.commissions.reduce((n: number, c: any) => n + Number(c.resolutions_overdue), 0))}
+          tone="danger"
+          hint={`${fa(data.totals.live_meetings)} جلسه در حال برگزاری`}
+        />
       </div>
       <div className="grid grid-2 mt">
         <Card title="عملکرد کمیسیون‌ها (دوره جاری)">
@@ -110,7 +116,7 @@ function ChamberDashboard({ chamberId }: { chamberId: string }) {
                 {data.commissions.map((c: any) => (
                   <tr key={c.id}>
                     <td>
-                      <Link to={`/commissions/${c.id}`}>{c.name}</Link>
+                      {data.statsOnly ? c.name : <Link to={`/commissions/${c.id}`}>{c.name}</Link>}
                     </td>
                     <td>{fa(c.meetings_held)}</td>
                     <td>{fa(c.resolutions_total)}</td>
@@ -122,7 +128,15 @@ function ChamberDashboard({ chamberId }: { chamberId: string }) {
             </table>
           </div>
         </Card>
-        <OverdueCard rows={data.overdueResolutions} showCommission />
+        {data.statsOnly ? (
+          <Card title="آمار">
+            <p className="muted small" style={{ margin: 0 }}>
+              دبیرخانهٔ ملی آمار اتاق‌ها را می‌بیند؛ محتوای جلسات، صورتجلسات و مصوبات هر اتاق فقط برای اعضا و مدیر همان اتاق است.
+            </p>
+          </Card>
+        ) : (
+          <OverdueCard rows={data.overdueResolutions} showCommission />
+        )}
       </div>
     </>
   );
@@ -205,5 +219,61 @@ export function CommissionDashboard({ commissionId, name }: { commissionId: stri
         <OverdueCard rows={data.overdueResolutions} />
       </div>
     </div>
+  );
+}
+
+/** دبیرخانهٔ ملی: the numbers of every chamber, without the content of their meetings or resolutions. */
+function NationalDashboard() {
+  const { data } = useApi<any>('/dashboard/national');
+  if (!data) return null;
+  const t = data.totals;
+  const pct = (a: number, b: number) => (b ? Math.round((a / b) * 100) : 0);
+  return (
+    <>
+      <PageHeader title="داشبورد ملی" subtitle="آمار اتاق‌های سراسر کشور؛ محتوای جلسات و مصوبات هر اتاق در اختیار همان اتاق است" />
+      <div className="grid grid-4">
+        <Stat label="کمیسیون‌های فعال" value={fa(t.commissions)} />
+        <Stat label="جلسات برگزارشده (۹۰ روز)" value={fa(t.meetings_90d)} tone="info" hint={`در مجموع ${fa(t.meetings_held)} جلسه`} />
+        <Stat label="اجرای مصوبات" value={`${fa(pct(t.resolutions_done, t.resolutions_total))}٪`} tone="success" hint={`${fa(t.resolutions_done)} از ${fa(t.resolutions_total)} مصوبه`} />
+        <Stat label="مصوبات معوق" value={fa(t.resolutions_overdue)} tone="danger" hint={`پرونده‌های شورا: ${fa(t.cases_open)} باز، ${fa(t.cases_national)} در سطح ملی`} />
+      </div>
+      <Card title="اتاق‌ها" className="mt">
+        <div className="table-wrap">
+          <table className="table">
+            <thead>
+              <tr>
+                <th>اتاق</th>
+                <th>کمیسیون</th>
+                <th>جلسات</th>
+                <th>مصوبات</th>
+                <th>اجرا</th>
+                <th>معوق</th>
+                <th>پرونده‌های شورا (باز / ملی)</th>
+              </tr>
+            </thead>
+            <tbody>
+              {data.chambers.map((c: any) => (
+                <tr key={c.id}>
+                  <td>
+                    {c.province}
+                    {c.kind === 'national' && <> <Badge tone="accent">ملی</Badge></>}
+                  </td>
+                  <td>{fa(c.commissions)}</td>
+                  <td>{fa(c.meetings_held)}</td>
+                  <td>{fa(c.resolutions_total)}</td>
+                  <td>
+                    <Progress value={pct(c.resolutions_done, c.resolutions_total)} />
+                  </td>
+                  <td>{c.resolutions_overdue > 0 ? <Badge tone="danger">{fa(c.resolutions_overdue)}</Badge> : fa(0)}</td>
+                  <td>
+                    {fa(c.cases_total)} ({fa(c.cases_open)} / {fa(c.cases_national)})
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </Card>
+    </>
   );
 }

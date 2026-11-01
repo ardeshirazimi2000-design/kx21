@@ -99,22 +99,29 @@ describe('separation of duties', () => {
     expect((await as('admin').get(`/api/meetings/${meetingId}`)).status).toBe(200);
   });
 
-  it('the national secretariat sees every chamber’s commissions without acting in them', async () => {
+  it('the national secretariat sees every chamber’s numbers, never their meetings or resolutions', async () => {
     expect((await as('root').del('/api/staff-roles', { userId: ids.root, role: 'chamber_admin', chamberId: yazd })).status).toBe(400);
     // root holds national + chamber admin; a second IT administrator takes root's chamber role away.
     expect((await as('root').post('/api/staff-roles', { userId: ids.vice, role: 'system_it' })).status).toBe(201);
     await login('vice', 'vice@kx.local');
     expect((await as('vice').del('/api/staff-roles', { userId: ids.root, role: 'chamber_admin', chamberId: yazd })).status).toBe(204);
     await login('root', 'root@kx.local');
-    const m = await as('root').get(`/api/meetings/${meetingId}`);
-    expect(m.status).toBe(200);
-    expect(m.body.capabilities).not.toContain('meeting.manage');
-    expect((await as('root').post(`/api/meetings/${meetingId}/agenda`, { title: 'از دبیرخانهٔ ملی' })).status).toBe(403);
-    expect((await as('root').get(`/api/dashboard/chamber?chamberId=${yazd}`)).status).toBe(200);
-    // Without the national role, the IT administrator sees no meeting content at all.
+    expect((await as('root').get(`/api/meetings/${meetingId}`)).status).toBe(404);
+    expect((await as('root').get('/api/meetings?pageSize=100')).body.items).toEqual([]);
+    expect((await as('root').get('/api/resolutions?pageSize=100')).body.items).toEqual([]);
+    expect((await as('root').get(`/api/reports/resolutions?chamberId=${yazd}&format=csv`)).status).toBe(403);
+    const dash = await as('root').get(`/api/dashboard/chamber?chamberId=${yazd}`);
+    expect(dash.status).toBe(200);
+    expect(dash.body).toMatchObject({ statsOnly: true, overdueResolutions: [] });
+    expect(Number(dash.body.totals.commissions)).toBeGreaterThan(0);
+    const national = await as('root').get('/api/dashboard/national');
+    expect(national.status).toBe(200);
+    expect(national.body.chambers.find((c: any) => c.id === yazd).resolutions_total).toBeGreaterThan(0);
+    expect(national.body.chambers[0]).not.toHaveProperty('text');
+    expect((await as('admin').get('/api/dashboard/national')).status).toBe(403);
+    // Without the national role, no numbers either.
     expect((await as('vice').del('/api/staff-roles', { userId: ids.root, role: 'national' })).status).toBe(204);
     await login('root', 'root@kx.local');
-    expect((await as('root').get(`/api/meetings/${meetingId}`)).status).toBe(404);
     expect((await as('root').get(`/api/dashboard/chamber?chamberId=${yazd}`)).status).toBe(403);
     expect((await as('root').get(`/api/people?chamberId=${yazd}`)).status).toBe(200);
   });
