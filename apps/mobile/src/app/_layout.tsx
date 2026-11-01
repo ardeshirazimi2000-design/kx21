@@ -28,6 +28,8 @@ export default function RootLayout() {
           <Stack.Screen name="login" options={{ headerShown: false }} />
           <Stack.Screen name="meeting/[id]" options={{ title: 'اتاق جلسه' }} />
           <Stack.Screen name="resolution/[id]" options={{ title: 'مصوبه' }} />
+          <Stack.Screen name="council/index" options={{ title: 'پرونده‌های شورای گفت‌وگو' }} />
+          <Stack.Screen name="council/[id]" options={{ title: 'پروندهٔ شورا' }} />
         </Stack>
       </AuthProvider>
     </SafeAreaProvider>

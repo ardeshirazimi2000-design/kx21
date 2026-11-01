@@ -14,7 +14,8 @@ export default function NotificationsScreen() {
   useRealtime({ notification: () => void reload() });
   const open = async (n: any) => {
     if (!n.read_at) await post(`/notifications/${n.id}/read`).then(notifyUnreadChanged, () => {});
-    if (n.data?.meetingId) router.push(`/meeting/${n.data.meetingId}`);
+    if (n.data?.councilCaseId) router.push(`/council/${n.data.councilCaseId}`);
+    else if (n.data?.meetingId) router.push(`/meeting/${n.data.meetingId}`);
     else if (n.data?.resolutionId && !n.data?.networkId) router.push(`/resolution/${n.data.resolutionId}`);
     else void reload();
   };

@@ -11,6 +11,9 @@ export default function HomeScreen() {
   const { me } = useAuth();
   const t = useTheme();
   const { data, loading, reload } = useApi('/me/home');
+  // شورای گفت‌وگو: shown to whoever has a role in a council or a case to follow.
+  const council = useApi('/council/me');
+  const pending = useApi(council.data?.president?.length ? '/council-cases?status=pending_approval&pageSize=1' : null);
   useRealtime({ notification: () => void reload() }, { onReconnect: () => void reload() });
   if (!data) return <Screen>{loading ? <Loading /> : <Empty text="اطلاعاتی در دسترس نیست" />}</Screen>;
   return (
@@ -30,6 +33,17 @@ export default function HomeScreen() {
           </Card>
         </Pressable>
       ))}
+      {council.data && (council.data.member.length > 0 || council.data.visibleCases > 0) && (
+        <Pressable onPress={() => router.push('/council')}>
+          <Card title="شورای گفت‌وگو" highlight={!!pending.data?.total && council.data.president.length > 0}>
+            <T>{fa(council.data.visibleCases)} پرونده</T>
+            {council.data.president.length > 0 && !!pending.data?.total && (
+              <T color={t.warning} bold>{fa(pending.data.total)} پرونده منتظر تأیید شما به‌عنوان دبیر شورا</T>
+            )}
+            <T color={t.primary} bold>مشاهدهٔ پرونده‌ها ←</T>
+          </Card>
+        </Pressable>
+      )}
       <Card title="جلسات پیش رو">
         {data.upcoming.length === 0 && <Empty text="جلسه‌ای برای شما برنامه‌ریزی نشده است" />}
         {data.upcoming.map((m: any) => (
