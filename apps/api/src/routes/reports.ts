@@ -8,7 +8,7 @@ import { audit } from '../lib/audit.js';
 import { dateStr, listParam, paged, pageParams, param, uuid } from '../lib/validate.js';
 import { buildActivityDocx, buildActivityPptx, loadActivityData, summarize } from '../services/activityReport.js';
 import { pool } from '../db/pool.js';
-import { commissionAccess, requireChamberAdmin } from '../services/access.js';
+import { canAudit, canOverseeChamber, commissionAccess } from '../services/access.js';
 import { tehranDate } from '../services/holidays.js';
 import { adminBrowsableChambers, browsableCommissionIds } from '../services/roles.js';
 
@@ -66,7 +66,7 @@ reportsRouter.get('/me/home', async (req, res) => {
 reportsRouter.get('/me/overview', async (req, res) => {
   const u = currentUser(req);
   const asked = typeof req.query.chamberId === 'string' ? uuid.parse(req.query.chamberId) : null;
-  const adminOf = asked && (u.isSuperAdmin || u.adminChambers.includes(asked)) ? asked : null;
+  const adminOf = asked && canOverseeChamber(u, asked) ? asked : null;
   const home = await one<{ chamber_id: string | null }>(
     `SELECT COALESCE(u.chamber_id, (SELECT m.chamber_id FROM commission_memberships m WHERE m.user_id = u.id AND m.status = 'active' LIMIT 1)) AS chamber_id
        FROM users u WHERE u.id = $1`,
@@ -188,7 +188,7 @@ reportsRouter.get('/dashboard/commission', async (req, res) => {
 reportsRouter.get('/dashboard/chamber', async (req, res) => {
   const u = currentUser(req);
   const chamberId = uuid.parse(req.query.chamberId);
-  requireChamberAdmin(u, chamberId);
+  if (!canOverseeChamber(u, chamberId)) throw forbidden();
   const commissions = await query(
     `SELECT c.id, c.name, c.code,
        (SELECT count(*) FROM meetings m WHERE m.commission_id = c.id AND m.status IN ('minutes_draft','pending_approval','approved','archived')) AS meetings_held,
@@ -231,8 +231,9 @@ reportsRouter.get('/reports/resolutions', async (req, res) => {
   const commissionId = req.query.commissionId ? uuid.parse(req.query.commissionId) : null;
   const chamberId = req.query.chamberId ? uuid.parse(req.query.chamberId) : null;
   if (commissionId) (await commissionAccess(u, commissionId)).require('report.commission');
-  else if (chamberId) requireChamberAdmin(u, chamberId);
-  else throw forbidden('کمیسیون یا اتاق را مشخص کنید');
+  else if (chamberId) {
+    if (!canOverseeChamber(u, chamberId)) throw forbidden();
+  } else throw forbidden('کمیسیون یا اتاق را مشخص کنید');
   const status = listParam(req.query.status);
   const rows = await query(
     `SELECT r.number, r.text, c.name AS commission_name, u.full_name AS owner_name, r.addressee, r.due_date, r.priority, r.status, r.progress,
@@ -337,7 +338,7 @@ reportsRouter.get('/search', async (req, res) => {
   }
   const [browse, adminBrowse] = await Promise.all([browsableCommissionIds(u), adminBrowsableChambers(u)]);
   const commissionVisible = `($2::boolean OR c.chamber_id = ANY($3::uuid[]) OR c.id = ANY($5::uuid[]))`;
-  const p = [q, u.isSuperAdmin, adminBrowse, u.id, browse];
+  const p = [q, u.isNational, adminBrowse, u.id, browse];
   const [commissions, meetings, resolutions] = await Promise.all([
     query(`SELECT c.id, c.name, c.code FROM commissions c WHERE c.name ILIKE '%' || $1 || '%' AND ${commissionVisible} LIMIT 10`, p),
     query(
@@ -360,10 +361,10 @@ reportsRouter.get('/search', async (req, res) => {
 reportsRouter.get('/audit', async (req, res) => {
   const u = currentUser(req);
   const chamberId = req.query.chamberId ? uuid.parse(req.query.chamberId) : null;
-  if (chamberId) requireChamberAdmin(u, chamberId);
-  else if (!u.isSuperAdmin && !u.adminChambers.length) throw forbidden();
-  // Without an explicit chamber, chamber admins see the logs of all chambers they administer.
-  const scope = chamberId ? [chamberId] : u.isSuperAdmin ? null : u.adminChambers;
+  // Only the security auditor reads the log (AFTA: separation of duties), never the administrators whose actions it records.
+  if (chamberId ? !canAudit(u, chamberId) : !u.auditAll && !u.auditChambers.length) throw forbidden('رویدادنگاری را فقط ممیز امنیت می‌بیند');
+  // Without an explicit chamber, a chamber's auditor sees the logs of the chambers they audit.
+  const scope = chamberId ? [chamberId] : u.auditAll ? null : u.auditChambers;
   const { page, pageSize, offset } = pageParams(req);
   const text = (k: string) => (typeof req.query[k] === 'string' && req.query[k] ? String(req.query[k]).slice(0, 200) : null);
   const entity = text('entity');
@@ -386,7 +387,7 @@ reportsRouter.get('/audit', async (req, res) => {
   // Reading the audit log is itself recorded (AFTA 2-1), with the filters used.
   if (page === 1) {
     await tx((c) => audit(c, req, {
-      // Under the chamber whose log was read, so its own administrators see it too.
+      // Under the chamber whose log was read, so that chamber's auditors see it too.
       chamberId: chamberId ?? (scope?.length === 1 ? scope[0] : null),
       action: 'audit.viewed',
       entity: 'audit_log',
@@ -399,10 +400,8 @@ reportsRouter.get('/audit', async (req, res) => {
       ORDER BY l.id ${order} LIMIT ${pageSize} OFFSET ${offset}`,
     params,
   );
-  // Secret ballots: only super admins may see the recorded choice.
-  const masked = items.map((l: any) =>
-    l.action === 'vote.cast' && l.after?.secret && !u.isSuperAdmin ? { ...l, after: { secret: true, choice: '***' } } : l,
-  );
+  // Secret ballots: the recorded choice is never shown.
+  const masked = items.map((l: any) => (l.action === 'vote.cast' && l.after?.secret ? { ...l, after: { secret: true, choice: '***' } } : l));
   const [{ count }] = await query(`SELECT count(*) FROM audit_logs l WHERE ${where}`, params);
   res.json(paged(masked, count, page, pageSize));
 });
@@ -410,8 +409,7 @@ reportsRouter.get('/audit', async (req, res) => {
 reportsRouter.get('/audit/verify', async (req, res) => {
   const u = currentUser(req);
   const chamberId = req.query.chamberId ? uuid.parse(req.query.chamberId) : null;
-  if (chamberId) requireChamberAdmin(u, chamberId);
-  else if (!u.isSuperAdmin) throw forbidden();
+  if (!canAudit(u, chamberId)) throw forbidden('بررسی سلامت رویدادنگاری با ممیز امنیت است');
   const brokenAt = await verifyAuditChain(chamberId);
   res.json({ intact: brokenAt === null, brokenAt });
 });

@@ -1,7 +1,7 @@
 import { TERM_STATUS_LABELS, type TermStatus } from '@kx/shared';
 import { useState } from 'react';
 import { del, patch, post } from '../lib/api';
-import { useAuth } from '../lib/auth';
+import { itOfChamber, runsChamber, useAuth } from '../lib/auth';
 import { useApi, usePasswordRules } from '../lib/hooks';
 import { Badge, Button, Card, dateFa, Empty, ErrorBox, Field, fa, JalaliDateInput, Loading, Modal, PageHeader, Pager } from '../components/ui';
 
@@ -209,7 +209,7 @@ export function TermsPage() {
   const { chamberId, setChamberId, me } = useAuth();
   const { data, reload } = useApi<any[]>(chamberId ? `/terms?chamberId=${chamberId}` : null);
   const chambers = useApi<any[]>('/chambers');
-  const adminChambers = (chambers.data ?? []).filter((c) => me?.is_super_admin || me?.adminChambers.includes(c.id));
+  const adminChambers = (chambers.data ?? []).filter((c) => me?.adminChambers.includes(c.id));
   const currentChamber = chambers.data?.find((c) => c.id === chamberId)?.name;
   const [open, setOpen] = useState(false);
   const [target, setTarget] = useState('');
@@ -307,14 +307,16 @@ export function TermsPage() {
 /** People */
 /** People belong to one chamber; chamber admins see only their chamber, the Super Admin may list all. */
 export function PeoplePage() {
-  const { chamberId, isAdmin, me } = useAuth();
+  const { chamberId, isItAdmin, me } = useAuth();
   const superAdmin = !!me?.is_super_admin;
+  // Either administrator of the chamber keeps people's details; logins and passwords are the IT administrator's.
+  const isAdmin = runsChamber(me, chamberId) || itOfChamber(me, chamberId);
   const [page, setPage] = useState(1);
   const [q, setQ] = useState('');
   const [allChambers, setAllChambers] = useState(false);
   const showChamber = superAdmin && allChambers;
   const { data, reload } = useApi(chamberId ? `/people?${showChamber ? '' : `chamberId=${chamberId}&`}page=${page}&q=${encodeURIComponent(q)}` : null);
-  const chambers = useApi<any[]>(isAdmin ? '/chambers' : null);
+  const chambers = useApi<any[]>(isAdmin || isItAdmin ? '/chambers' : null);
   const currentChamber = chambers.data?.find((c) => c.id === chamberId)?.name;
   const [edit, setEdit] = useState<any | null>(null);
   const [err, setErr] = useState<Error | null>(null);
@@ -395,7 +397,7 @@ export function PeoplePage() {
         </div>
         {data && <Pager page={page} pageSize={data.pageSize} total={data.total} onPage={setPage} />}
       </Card>
-      {edit && <PersonModal person={edit} chamberId={chamberId!} chambers={(chambers.data ?? []).filter((c) => superAdmin || me?.adminChambers.includes(c.id))} canMove={superAdmin} canSetPassword={isAdmin} onClose={() => setEdit(null)} onSaved={() => { setEdit(null); void reload(); }} />}
+      {edit && <PersonModal person={edit} chamberId={chamberId!} chambers={(chambers.data ?? []).filter((c) => superAdmin || me?.adminChambers.includes(c.id))} canMove={superAdmin} canSetPassword={itOfChamber(me, chamberId)} onClose={() => setEdit(null)} onSaved={() => { setEdit(null); void reload(); }} />}
     </>
   );
 }

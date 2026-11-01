@@ -12,7 +12,8 @@ import { body, dateStr, paged, pageParams, param, uuid } from '../lib/validate.j
 import { identityEnabled, inquireIdentity } from '../services/identity.js';
 import { assertRole, loadRoleMatrix } from '../services/roles.js';
 import { assertPasswordAllowed } from '../services/security.js';
-import { commissionAccess, isChamberAdmin, requireChamberAdmin, requireSuperAdmin, visibleChamberIds } from '../services/access.js';
+import { commissionAccess, isAnyChamberAdmin, isChamberAdmin, isItAdmin, requireChamberAdmin, requireSuperAdmin, visibleChamberIds } from '../services/access.js';
+import { assertNotAuditor } from '../services/staff.js';
 
 export const structureRouter = Router();
 
@@ -48,7 +49,7 @@ structureRouter.get('/chambers', async (req, res) => {
            FROM chamber_admins a JOIN users u ON u.id = a.user_id WHERE a.chamber_id = c.id) END AS admins,
        (SELECT count(*) FROM commissions k JOIN terms t ON t.id = k.term_id WHERE k.chamber_id = c.id AND t.status = 'active') AS commission_count
      FROM chambers c WHERE ($1::uuid[] IS NULL OR c.id = ANY($1)) ORDER BY c.name`,
-    [ids, u.isSuperAdmin, u.adminChambers],
+    [ids, u.isSuperAdmin, [...u.adminChambers, ...u.itChambers]],
   );
   res.json(rows);
 });
@@ -81,7 +82,7 @@ structureRouter.get('/chambers/:id', async (req, res) => {
 
 structureRouter.patch('/chambers/:id', async (req, res) => {
   const id = param(req, 'id');
-  requireChamberAdmin(currentUser(req), id);
+  if (!isAnyChamberAdmin(currentUser(req), id)) throw forbidden();
   const b = body(req, chamberSchema.partial());
   const row = await tx(async (c) => {
     const before = await one('SELECT * FROM chambers WHERE id = $1 FOR UPDATE', [id], c);
@@ -123,6 +124,7 @@ structureRouter.post('/chambers/:id/admins', async (req, res) => {
     } else {
       userId = (await createPerson(c, req, id, b.person!)).id;
     }
+    await assertNotAuditor(c, userId!);
     await c.query('INSERT INTO chamber_admins (chamber_id, user_id) VALUES ($1,$2) ON CONFLICT DO NOTHING', [id, userId]);
     await audit(c, req, { chamberId: id, action: 'chamber.admin_added', entity: 'user', entityId: userId });
     return one('SELECT id, full_name, email, mobile FROM users WHERE id = $1', [userId], c);
@@ -263,7 +265,7 @@ structureRouter.get('/commissions', async (req, res) => {
     AND ($3::text IS NULL OR c.name ILIKE '%' || $3 || '%' OR c.code ILIKE '%' || $3 || '%' OR c.domain ILIKE '%' || $3 || '%')
     AND ($4::boolean OR c.chamber_id = ANY($5::uuid[])
          OR EXISTS (SELECT 1 FROM commission_memberships m WHERE m.commission_id = c.id AND m.user_id = $6 AND m.status = 'active'))`;
-  const params = [chamberId, termId, q, u.isSuperAdmin, u.adminChambers, u.id];
+  const params = [chamberId, termId, q, u.isNational, u.adminChambers, u.id];
   const items = await query(
     `SELECT c.*, t.title AS term_title, t.number AS term_number, (SELECT ch.name FROM chambers ch WHERE ch.id = c.chamber_id) AS chamber_name,
        (SELECT count(*) FROM commission_memberships m WHERE m.commission_id = c.id AND m.status = 'active') AS member_count,
@@ -486,7 +488,7 @@ structureRouter.post('/people/:id/verify-identity', identityLimiter, async (req,
   const b = body(req, z.object({ nationalCode: z.string(), birthDate: z.string() }));
   const person = await one('SELECT id, chamber_id, full_name, national_id FROM users WHERE id = $1', [id]);
   if (!person?.chamber_id) throw notFound();
-  requireChamberAdmin(u, person.chamber_id);
+  if (!isAnyChamberAdmin(u, person.chamber_id)) throw forbidden();
   const r = await inquireIdentity(b.nationalCode, b.birthDate);
   const row = await tx(async (c) => {
     const dup = await one('SELECT id FROM users WHERE chamber_id = $1 AND national_id = $2 AND id <> $3', [person.chamber_id, r.nationalCode, id], c);
@@ -525,7 +527,7 @@ structureRouter.post('/commissions/:id/members', async (req, res) => {
     const commission = await one('SELECT * FROM commissions WHERE id = $1 FOR UPDATE', [commissionId], c);
     if (!commission) throw notFound('کمیسیون یافت نشد');
     await requireMembersManager(u, commission, [b.position], c);
-    if (b.person?.password && !isChamberAdmin(u, commission.chamber_id)) throw forbidden('تعریف رمز عبور با مدیر اتاق است');
+    if (b.person?.password && !isItAdmin(u, commission.chamber_id)) throw forbidden('تعریف رمز عبور با مدیر فناوری اطلاعات است');
     const userId = b.userId ?? (await createPerson(c, req, commission.chamber_id, b.person!)).id;
     if (b.userId) {
       const person = await one('SELECT chamber_id FROM users WHERE id = $1', [b.userId], c);
@@ -661,7 +663,7 @@ structureRouter.delete('/memberships/:id', async (req, res) => {
 
 /** Officers may search people of their chamber (to invite guests); admins manage people. */
 async function canSearchPeople(u: AuthUser, chamberId: string) {
-  if (isChamberAdmin(u, chamberId)) return true;
+  if (isAnyChamberAdmin(u, chamberId)) return true;
   const r = await one(
     `SELECT 1 FROM commission_memberships WHERE user_id = $1 AND chamber_id = $2 AND status = 'active'
        AND position IN ('chair','vice_chair','secretary')`,
@@ -694,8 +696,8 @@ structureRouter.post('/people', async (req, res) => {
   const u = currentUser(req);
   const b = body(req, personSchema.extend({ chamberId: uuid }));
   if (!(await canSearchPeople(u, b.chamberId))) throw forbidden();
-  // Only admins may give a login password to a new person.
-  if (b.password && !isChamberAdmin(u, b.chamberId)) throw forbidden();
+  // Only the IT administrator gives a login password to a new person.
+  if (b.password && !isItAdmin(u, b.chamberId)) throw forbidden('تعریف رمز عبور با مدیر فناوری اطلاعات است');
   const row = await tx((c) => createPerson(c, req, b.chamberId, b));
   res.status(201).json(row);
 });
@@ -707,7 +709,7 @@ structureRouter.get('/people/:id', async (req, res) => {
     'SELECT id, chamber_id, full_name, national_id, mobile, email, organization, job_title, bio, is_active, created_at, first_name, last_name, father_name, birth_date_jalali, identity_verified_at, identity_source FROM users WHERE id = $1',
     [id],
   );
-  if (!p || (u.id !== id && !(p.chamber_id && isChamberAdmin(u, p.chamber_id)))) throw notFound();
+  if (!p || (u.id !== id && !(p.chamber_id && isAnyChamberAdmin(u, p.chamber_id)))) throw notFound();
   const memberships = await query(
     `SELECT m.*, c.name AS commission_name, t.title AS term_title FROM commission_memberships m
        JOIN commissions c ON c.id = m.commission_id JOIN terms t ON t.id = c.term_id
@@ -727,13 +729,13 @@ structureRouter.delete('/people/:id', async (req, res) => {
   const id = param(req, 'id');
   await tx(async (c) => {
     const p = await one('SELECT * FROM users WHERE id = $1 FOR UPDATE', [id], c);
-    if (!p || !p.chamber_id || !isChamberAdmin(u, p.chamber_id)) throw notFound();
+    if (!p || !p.chamber_id || !isAnyChamberAdmin(u, p.chamber_id)) throw notFound();
     if (p.id === u.id) throw badRequest('حساب خودتان را نمی‌توانید حذف کنید');
     if (p.identity_verified_at) {
       throw conflict('هویت این شخص با استعلام ثبت احوال تأیید شده و قابل حذف نیست؛ در صورت نیاز آن را غیرفعال کنید', 'person_verified');
     }
-    if (await one('SELECT 1 FROM chamber_admins WHERE user_id = $1', [id], c)) {
-      throw conflict('این شخص مدیر اتاق است؛ ابتدا او را از مدیران اتاق حذف کنید', 'person_is_admin');
+    if (await one('SELECT 1 FROM chamber_admins WHERE user_id = $1 UNION ALL SELECT 1 FROM staff_roles WHERE user_id = $1', [id], c)) {
+      throw conflict('این شخص نقش مدیریتی یا ممیزی دارد؛ ابتدا نقش او را بردارید', 'person_is_admin');
     }
     const h = await one<{ used: boolean }>(
       `SELECT EXISTS (SELECT 1 FROM commission_memberships m WHERE m.user_id = $1 AND ${MEMBER_HISTORY('m.commission_id', '$1::uuid')}) AS used`,
@@ -769,7 +771,11 @@ structureRouter.patch('/people/:id', async (req, res) => {
   const row = await tx(async (c) => {
     const before = await one('SELECT id, chamber_id, full_name, mobile, email, organization, job_title, is_active FROM users WHERE id = $1 FOR UPDATE', [id], c);
     if (!before || !before.chamber_id) throw notFound();
-    requireChamberAdmin(u, before.chamber_id);
+    if (!isAnyChamberAdmin(u, before.chamber_id)) throw forbidden();
+    // Logins (password, activation) are the IT administrator's; the chamber admin keeps people's details current.
+    if ((b.password || b.isActive !== undefined) && !isItAdmin(u, before.chamber_id)) {
+      throw forbidden('تعریف رمز عبور و فعال یا غیرفعال کردن حساب با مدیر فناوری اطلاعات است');
+    }
     // Moving a person to another chamber (e.g. registered in the wrong one): Super Admin only, and only
     // while they hold no active role in their current chamber.
     if (b.chamberId && b.chamberId !== before.chamber_id) {

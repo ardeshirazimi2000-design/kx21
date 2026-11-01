@@ -26,7 +26,7 @@ export function HolidaysPage() {
   const { data, reload } = useApi<any[]>(`/holidays/defined?${chamberId ? `chamberId=${chamberId}&` : ''}from=${gDay(year, 1, 1)}&to=${gDay(year + 1, 1, 1)}`);
   const chambers = useApi<any[]>('/chambers');
   const chamberName = chambers.data?.find((c) => c.id === chamberId)?.name;
-  const canEdit = (h: any) => (h.chamber_id ? superAdmin || me!.adminChambers.includes(h.chamber_id) : superAdmin);
+  const canEdit = (h: any) => (h.chamber_id ? me!.adminChambers.includes(h.chamber_id) : superAdmin);
 
   const [form, setForm] = useState({ date: '', title: '', scope: superAdmin ? 'national' : 'chamber' });
   const [err, setErr] = useState<Error | null>(null);

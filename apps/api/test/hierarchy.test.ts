@@ -75,8 +75,10 @@ describe('chamber → term → commission hierarchy', () => {
     kb = k.body.id;
     expect((await as('yazdAdmin').post('/api/commissions', { chamberId: sdj, termId: sdjTerm, name: 'نفوذی', code: 'X' })).status).toBe(403);
     const yazdTerm = (await pool.query(`SELECT id FROM terms WHERE chamber_id = $1`, [yazd])).rows[0].id;
-    // A term of another chamber cannot be used, even by the Super Admin.
-    expect((await as('root').post('/api/commissions', { chamberId: sdj, termId: yazdTerm, name: 'اشتباه', code: 'Y' })).status).toBe(400);
+    // A term of another chamber cannot be used.
+    expect((await as('sdjAdmin').post('/api/commissions', { chamberId: sdj, termId: yazdTerm, name: 'اشتباه', code: 'Y' })).status).toBe(400);
+    // The IT administrator does not run the chamber's processes (separation of duties).
+    expect((await as('root').post('/api/commissions', { chamberId: sdj, termId: sdjTerm, name: 'فناوری', code: 'IT' })).status).toBe(403);
   });
 
   it('chamber admins see only their chamber’s commissions; the Super Admin sees all', async () => {
@@ -91,9 +93,12 @@ describe('chamber → term → commission hierarchy', () => {
   });
 
   it('the secretary and members see only their own commission', async () => {
-    const person = await as('sdjAdmin').post('/api/people', { chamberId: sdj, fullName: 'دبیر دانش بنیان', email: 'kb-sec@kx.local', mobile: '09182222222', password: PW });
+    // Logins are given by the IT administrator, not the chamber admin.
+    const denied = await as('sdjAdmin').post('/api/people', { chamberId: sdj, fullName: 'دبیر دانش بنیان', email: 'kb-sec@kx.local', mobile: '09182222222', password: PW });
+    expect(denied.status).toBe(403);
+    const person = await as('root').post('/api/people', { chamberId: sdj, fullName: 'دبیر دانش بنیان', email: 'kb-sec@kx.local', mobile: '09182222222', password: PW });
     expect(person.status).toBe(201);
-    const member = await as('sdjAdmin').post('/api/people', { chamberId: sdj, fullName: 'عضو دانش بنیان', email: 'kb-m@kx.local', mobile: '09183333333', password: PW });
+    const member = await as('root').post('/api/people', { chamberId: sdj, fullName: 'عضو دانش بنیان', email: 'kb-m@kx.local', mobile: '09183333333', password: PW });
     for (const [id, position] of [
       [person.body.id, 'secretary'],
       [member.body.id, 'member'],

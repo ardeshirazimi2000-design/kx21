@@ -211,6 +211,10 @@ const AUDIT_LABELS: Record<string, string> = {
   'auth.password_changed': 'تغییر رمز عبور',
   'auth.mfa_enabled': 'فعال‌سازی ورود دومرحله‌ای',
   'security.policy_changed': 'تغییر تنظیمات امنیتی',
+  'staff.role_granted': 'واگذاری نقش مدیریتی',
+  'staff.role_revoked': 'برداشتن نقش مدیریتی',
+  'chamber.admin_added': 'تعیین مدیر اتاق',
+  'chamber.admin_removed': 'برداشتن مدیر اتاق',
   'audit.viewed': 'مشاهدهٔ رویدادنگاری',
   'document.downloaded': 'دریافت فایل',
   'document.opened': 'مشاهدهٔ فایل',
@@ -226,7 +230,7 @@ const AUDIT_LABELS: Record<string, string> = {
 const NO_FILTER = { person: '', action: '', ip: '', from: '', to: '', order: 'desc' };
 
 export function AuditPage() {
-  const { chamberId } = useAuth();
+  const { me } = useAuth();
   const [page, setPage] = useState(1);
   // Filters apply on «نمایش», not on every keystroke: each query of the log is itself recorded.
   const [form, setForm] = useState(NO_FILTER);
@@ -236,7 +240,8 @@ export function AuditPage() {
     .map(([k, v]) => `&${k}=${encodeURIComponent(v)}`)
     .join('');
   const { data } = useApi(`/audit?page=${page}&pageSize=50${qs}`);
-  const verify = useApi(chamberId ? `/audit/verify?chamberId=${chamberId}` : null);
+  // The auditor of every chamber checks the whole chain; a chamber's auditor that chamber's.
+  const verify = useApi(me?.auditAll ? '/audit/verify' : me?.auditChambers[0] ? `/audit/verify?chamberId=${me.auditChambers[0]}` : null);
   const apply = (f = form) => {
     setApplied(f);
     setPage(1);

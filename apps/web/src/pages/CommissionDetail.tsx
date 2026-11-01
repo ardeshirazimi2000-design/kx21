@@ -4,7 +4,7 @@ import { Link, useParams } from 'react-router-dom';
 import { MeetingStatusBadge } from '../components/status';
 import { Badge, Button, Card, dateFa, dateTimeFa, Empty, ErrorBox, Field, fa, JalaliDateInput, Loading, Modal, PageHeader, Tabs } from '../components/ui';
 import { del, patch, post } from '../lib/api';
-import { useAuth } from '../lib/auth';
+import { itOfChamber, runsChamber, useAuth } from '../lib/auth';
 import { useApi, useRoles } from '../lib/hooks';
 import { ActivityReport, CommissionArchive } from './CommissionArchive';
 import { CommissionDashboard } from './Home';
@@ -63,7 +63,7 @@ const OFFICER_POSITIONS = ['chair', 'vice_chair', 'secretary'];
 function Members({ commission }: { commission: any }) {
   const { me } = useAuth();
   // Chamber admins manage every membership; the chair and secretary (members.manage) the other members.
-  const isAdmin = me!.is_super_admin || me!.adminChambers.includes(commission.chamber_id);
+  const isAdmin = me!.adminChambers.includes(commission.chamber_id);
   const canManage = isAdmin || commission.capabilities.includes('members.manage');
   const manages = (m: any) => isAdmin || (canManage && !OFFICER_POSITIONS.includes(m.position));
   const [showEnded, setShowEnded] = useState(false);
@@ -154,6 +154,7 @@ function Members({ commission }: { commission: any }) {
 }
 
 function AddMemberModal({ commission, chamberId, isAdmin, onClose, onSaved }: { commission: any; chamberId: string; isAdmin: boolean; onClose: () => void; onSaved: () => void }) {
+  const { me } = useAuth();
   const [q, setQ] = useState('');
   const people = useApi(q.length >= 2 ? `/people?chamberId=${chamberId}&q=${encodeURIComponent(q)}&pageSize=8` : null);
   const [userId, setUserId] = useState<string | null>(null);
@@ -212,7 +213,7 @@ function AddMemberModal({ commission, chamberId, isAdmin, onClose, onSaved }: { 
         <PersonModal
           person={{}}
           chamberId={chamberId}
-          canSetPassword={isAdmin}
+          canSetPassword={itOfChamber(me, chamberId)}
           onClose={() => setCreating(false)}
           onSaved={(p) => {
             setCreating(false);
@@ -415,7 +416,8 @@ function ReferralModal({ commissionId, issue, experts, onClose, onSaved }: { com
 }
 
 function Settings({ commission, onSaved }: { commission: any; onSaved: () => void }) {
-  const { isAdmin } = useAuth();
+  const { me } = useAuth();
+  const isAdmin = runsChamber(me, commission.chamber_id);
   const [s, setS] = useState<CommissionSettings>(commission.settings);
   const [msg, setMsg] = useState<string | null>(null);
   const [err, setErr] = useState<Error | null>(null);

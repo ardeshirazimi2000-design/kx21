@@ -12,8 +12,8 @@ export function CommissionsPage() {
   const nav = useNavigate();
   const [page, setPage] = useState(1);
   const [q, setQ] = useState('');
-  // The super admin can list the commissions of every chamber at once.
-  const superAdmin = !!me?.is_super_admin;
+  // The national secretariat can list the commissions of every chamber at once.
+  const superAdmin = !!me?.isNational;
   const [allChambers, setAllChambers] = useState(superAdmin);
   const scoped = isAdmin && chamberId && !(superAdmin && allChambers);
   const { data, loading, reload } = useApi(`/commissions?page=${page}&q=${encodeURIComponent(q)}${scoped ? `&chamberId=${chamberId}` : ''}`);
@@ -81,7 +81,7 @@ export function CommissionsPage() {
         )}
         {data && <Pager page={page} pageSize={data.pageSize} total={data.total} onPage={setPage} />}
       </Card>
-      {open && chamberId && <NewCommissionModal chamberId={chamberId} chambers={(chambers.data ?? []).filter((c) => superAdmin || me?.adminChambers.includes(c.id))} onClose={() => setOpen(false)} onSaved={(id) => { setOpen(false); void reload(); nav(`/commissions/${id}`); }} />}
+      {open && chamberId && <NewCommissionModal chamberId={chamberId} chambers={(chambers.data ?? []).filter((c) => me?.adminChambers.includes(c.id))} onClose={() => setOpen(false)} onSaved={(id) => { setOpen(false); void reload(); nav(`/commissions/${id}`); }} />}
     </>
   );
 }

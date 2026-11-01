@@ -19,9 +19,18 @@ export interface Me {
   mobile: string | null;
   organization: string | null;
   chamber_id: string | null;
+  /** The system's IT administrator (مدیر فناوری اطلاعات سامانه). */
   is_super_admin: boolean;
   mfa_enabled: boolean;
+  /** Chambers whose processes the user runs (مدیر اتاق). */
   adminChambers: string[];
+  /** Chambers whose logins and roles the user manages (مدیر فناوری اطلاعات اتاق). */
+  itChambers: string[];
+  /** Security auditor (ممیز امنیت) of every chamber, or of these. */
+  auditAll: boolean;
+  auditChambers: string[];
+  /** Iran Chamber's secretariat (دبیرخانهٔ ملی). */
+  isNational: boolean;
   memberships: Membership[];
   /** Optional server features (e.g. the built-in webinar). */
   features?: { webinar?: boolean };
@@ -34,7 +43,12 @@ interface AuthState {
   verifyMfa: (mfaToken: string, code: string) => Promise<void>;
   logout: () => Promise<void>;
   refreshMe: () => Promise<void>;
+  /** Oversees a chamber's processes: its chamber admin, or the national secretariat. */
   isAdmin: boolean;
+  /** Manages logins and roles: the system's IT administrator or a chamber's. */
+  isItAdmin: boolean;
+  /** Reads the audit log. */
+  isAuditor: boolean;
   /** Chamber in focus for admin pages (selectable by super admins / multi-chamber admins). */
   chamberId: string | null;
   setChamberId: (id: string) => void;
@@ -97,7 +111,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setMe(null);
   };
 
-  const isAdmin = !!me && (me.is_super_admin || me.adminChambers.length > 0);
+  const isAdmin = !!me && (me.isNational || me.adminChambers.length > 0);
+  const isItAdmin = !!me && (me.is_super_admin || me.itChambers.length > 0);
+  const isAuditor = !!me && (me.auditAll || me.auditChambers.length > 0);
   const [selected, setSelected] = useState<string | null>(() => {
     try {
       return localStorage.getItem('kx.chamber');
@@ -113,15 +129,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       /* ignore */
     }
   };
-  const allowedSelection = !!me && !!selected && (me.is_super_admin || me.adminChambers.includes(selected));
+  const allowedSelection = !!me && !!selected && chamberSelectable(me, selected);
   const chamberId = me
     ? allowedSelection
       ? selected
-      : (me.adminChambers[0] ?? me.chamber_id ?? me.memberships[0]?.chamber_id ?? null)
+      : (me.adminChambers[0] ?? me.itChambers[0] ?? me.chamber_id ?? me.memberships[0]?.chamber_id ?? null)
     : null;
 
   return (
-    <Ctx.Provider value={{ me, loading, login, verifyMfa, logout, refreshMe, isAdmin, chamberId, setChamberId }}>{children}</Ctx.Provider>
+    <Ctx.Provider value={{ me, loading, login, verifyMfa, logout, refreshMe, isAdmin, isItAdmin, isAuditor, chamberId, setChamberId }}>{children}</Ctx.Provider>
   );
 }
 
@@ -130,3 +146,13 @@ export function useAuth() {
   if (!c) throw new Error('AuthProvider missing');
   return c;
 }
+
+/** Chambers an administrator may pick in the top bar: all of them for the system's IT administrator and the national secretariat. */
+export function chamberSelectable(me: Me, chamberId: string): boolean {
+  return me.is_super_admin || me.isNational || me.adminChambers.includes(chamberId) || me.itChambers.includes(chamberId);
+}
+
+/** مدیر اتاق of this chamber. */
+export const runsChamber = (me: Me | null, chamberId: string | null | undefined) => !!me && !!chamberId && me.adminChambers.includes(chamberId);
+/** Manages this chamber's logins and roles. */
+export const itOfChamber = (me: Me | null, chamberId: string | null | undefined) => !!me && !!chamberId && (me.is_super_admin || me.itChambers.includes(chamberId));

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Button, Card, ErrorBox, Field, fa, Loading, PageHeader } from '../components/ui';
 import { put } from '../lib/api';
+import { useAuth } from '../lib/auth';
 import { useApi } from '../lib/hooks';
 
 type Policy = {
@@ -14,6 +15,8 @@ type Policy = {
  * rules, temporary lockout and CAPTCHA after failed sign-ins, and session limits.
  */
 export function SecurityPolicyPage() {
+  // The security auditor reviews the settings without changing them.
+  const readOnly = !useAuth().me?.is_super_admin;
   const { data, error, reload } = useApi<{ policy: Policy; defaults: Policy; limits: Record<string, [number, number]> }>('/security-policy');
   const [form, setForm] = useState<Policy | null>(null);
   const [busy, setBusy] = useState(false);
@@ -63,6 +66,7 @@ export function SecurityPolicyPage() {
         title="تنظیمات امنیتی"
         subtitle="سیاست رمز عبور، قفل حساب و نشست‌ها برای همهٔ کاربران سامانه؛ هر تغییر در رویدادنگاری ثبت می‌شود"
         actions={
+          !readOnly && (
           <>
             <Button variant="ghost" onClick={() => setForm(data.defaults)}>
               مقادیر پیشنهادی
@@ -71,11 +75,13 @@ export function SecurityPolicyPage() {
               ذخیره
             </Button>
           </>
+          )
         }
       />
+      {readOnly && <div className="alert alert-info">نمایش برای ممیز امنیت؛ تغییر تنظیمات با مدیر فناوری اطلاعات سامانه است.</div>}
       <ErrorBox error={err} />
       {saved && <div className="alert alert-success">تنظیمات امنیتی ذخیره شد و از همین حالا اعمال می‌شود.</div>}
-      <div className="grid grid-2">
+      <fieldset disabled={readOnly} className="grid grid-2" style={{ border: 0, padding: 0, margin: 0, minWidth: 0 }}>
         <Card title="رمز عبور">
           {num('password', 'minLength', 'حداقل طول', 'نویسه')}
           {check('requireUpper', 'حرف بزرگ لاتین (A-Z) لازم است')}
@@ -94,7 +100,7 @@ export function SecurityPolicyPage() {
           {num('session', 'webIdleMinutes', 'بستن نشست وب پس از بی‌کاری', 'دقیقه')}
           {num('session', 'mobileIdleDays', 'بستن نشست برنامهٔ موبایل پس از بی‌کاری', 'روز')}
         </Card>
-      </div>
+      </fieldset>
     </>
   );
 }

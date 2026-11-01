@@ -6,7 +6,7 @@ import { one, query, tx, type Db, pool } from '../db/pool.js';
 import { audit } from '../lib/audit.js';
 import { badRequest, conflict, forbidden, notFound } from '../lib/errors.js';
 import { body, dateStr, param, uuid } from '../lib/validate.js';
-import { commissionAccess, isChamberAdmin, requireSuperAdmin } from '../services/access.js';
+import { commissionAccess, isChamberAdmin, requireNational } from '../services/access.js';
 import { notify } from '../services/notifications.js';
 import { buildLetterDocx, draftLetter, loadLetterData } from '../services/proposalLetter.js';
 import { engineInfo, similarPairs } from '../services/similarity.js';
@@ -54,8 +54,8 @@ async function networkAccess(u: AuthUser, id: string, db: Db = pool): Promise<Ne
   );
   const adminOfMember = members.some((m) => u.adminChambers.includes(m.chamber_id));
   const memberOfMember = members.some((m) => m.is_member);
-  if (!u.isSuperAdmin && !isCoordinator && !adminOfMember && !memberOfMember) throw notFound('شبکه یافت نشد');
-  const isNational = u.isSuperAdmin || isCoordinator;
+  if (!u.isNational && !isCoordinator && !adminOfMember && !memberOfMember) throw notFound('شبکه یافت نشد');
+  const isNational = u.isNational || isCoordinator;
   return {
     network,
     isCoordinator,
@@ -111,14 +111,14 @@ networksRouter.get('/networks', async (req, res) => {
                     WHERE nc.network_id = n.id AND (c.chamber_id = ANY($3::uuid[])
                       OR EXISTS (SELECT 1 FROM commission_memberships m WHERE m.commission_id = c.id AND m.user_id = $1 AND m.status = 'active')))
      ORDER BY n.status, n.name`,
-    [u.id, u.isSuperAdmin, u.adminChambers],
+    [u.id, u.isNational, u.adminChambers],
   );
   res.json(rows);
 });
 
 networksRouter.post('/networks', async (req, res) => {
   const u = currentUser(req);
-  requireSuperAdmin(u);
+  requireNational(u);
   const b = body(req, networkSchema);
   const row = await tx(async (c) => {
     const r = await one(
@@ -137,7 +137,7 @@ networksRouter.post('/networks', async (req, res) => {
 
 networksRouter.patch('/networks/:id', async (req, res) => {
   const u = currentUser(req);
-  requireSuperAdmin(u);
+  requireNational(u);
   const id = param(req, 'id');
   const b = body(req, networkSchema.partial());
   const row = await tx(async (c) => {
@@ -174,7 +174,7 @@ networksRouter.get('/networks/map', async (req, res) => {
                     WHERE nc.network_id = n.id AND (c.chamber_id = ANY($3::uuid[])
                       OR EXISTS (SELECT 1 FROM commission_memberships m WHERE m.commission_id = c.id AND m.user_id = $1 AND m.status = 'active')))
      ORDER BY n.name`,
-    [u.id, u.isSuperAdmin, u.adminChambers],
+    [u.id, u.isNational, u.adminChambers],
   );
   const ids = networks.map((n: any) => n.id);
   const links = ids.length
@@ -190,7 +190,7 @@ networksRouter.get('/networks/map', async (req, res) => {
     ? await query(
         `SELECT ch.id, ch.name, ch.province, ($2::boolean OR ch.id = ANY($3::uuid[]) OR ch.id = $4) AS mine
            FROM chambers ch WHERE ch.id = ANY($1) ORDER BY ch.province`,
-        [chamberIds, u.isSuperAdmin, u.adminChambers, u.chamberId],
+        [chamberIds, u.isNational, u.adminChambers, u.chamberId],
       )
     : [];
   res.json({ networks, chambers, links });
@@ -212,7 +212,7 @@ networksRouter.get('/networks/:id', async (req, res) => {
      FROM network_commissions nc JOIN commissions c ON c.id = nc.commission_id JOIN chambers ch ON ch.id = c.chamber_id
      JOIN terms t ON t.id = c.term_id
      WHERE nc.network_id = $1 ORDER BY ch.province, c.name`,
-    [a.network.id, u.isSuperAdmin, u.adminChambers, u.id],
+    [a.network.id, u.isNational, u.adminChambers, u.id],
   );
   // Endorsements between the network's commissions (supporter → originating commission), for the network map.
   const links = await query(
@@ -228,14 +228,14 @@ networksRouter.get('/networks/:id', async (req, res) => {
        LEFT JOIN chambers ch ON ch.id = u.chamber_id WHERE k.network_id = $1 ORDER BY u.full_name`,
     [a.network.id],
   );
-  // Commissions of the caller's chambers that can still join (chamber admins / Super Admin pick them in the UI).
-  const joinable = u.isSuperAdmin || u.adminChambers.length
+  // Commissions of the caller's chambers that can still join (chamber admins / the national secretariat pick them in the UI).
+  const joinable = u.isNational || u.adminChambers.length
     ? await query(
         `SELECT c.id, c.name, ch.name AS chamber_name FROM commissions c JOIN chambers ch ON ch.id = c.chamber_id JOIN terms t ON t.id = c.term_id
           WHERE c.status = 'active' AND t.status = 'active' AND ($2::boolean OR c.chamber_id = ANY($3::uuid[]))
             AND NOT EXISTS (SELECT 1 FROM network_commissions nc WHERE nc.network_id = $1 AND nc.commission_id = c.id)
           ORDER BY ch.name, c.name`,
-        [a.network.id, u.isSuperAdmin, u.adminChambers],
+        [a.network.id, u.isNational, u.adminChambers],
       )
     : [];
   res.json({
@@ -245,11 +245,11 @@ networksRouter.get('/networks/:id', async (req, res) => {
     coordinators,
     joinable,
     permissions: {
-      manage: u.isSuperAdmin,
+      manage: u.isNational,
       national: a.isNational,
       dashboard: a.canDashboard,
       actFor: a.actFor,
-      removable: commissions.filter((c: any) => u.isSuperAdmin || u.adminChambers.includes(c.chamber_id)).map((c: any) => c.id),
+      removable: commissions.filter((c: any) => u.isNational || u.adminChambers.includes(c.chamber_id)).map((c: any) => c.id),
     },
   });
 });
@@ -264,7 +264,7 @@ networksRouter.post('/networks/:id/commissions', async (req, res) => {
     if (n.status !== 'active') throw conflict('این شبکه بایگانی شده است');
     const k = await one('SELECT chamber_id FROM commissions WHERE id = $1', [b.commissionId], c);
     if (!k) throw notFound('کمیسیون یافت نشد');
-    if (!isChamberAdmin(u, k.chamber_id)) throw forbidden();
+    if (!isChamberAdmin(u, k.chamber_id) && !u.isNational) throw forbidden();
     await c.query('INSERT INTO network_commissions (network_id, commission_id, added_by) VALUES ($1,$2,$3) ON CONFLICT DO NOTHING', [id, b.commissionId, u.id]);
     await audit(c, req, { chamberId: k.chamber_id, action: 'network.commission_added', entity: 'network', entityId: id, after: { commissionId: b.commissionId } });
   });
@@ -278,7 +278,7 @@ networksRouter.delete('/networks/:id/commissions/:commissionId', async (req, res
   await tx(async (c) => {
     const k = await one('SELECT chamber_id FROM commissions WHERE id = $1', [commissionId], c);
     if (!k) throw notFound('کمیسیون یافت نشد');
-    if (!isChamberAdmin(u, k.chamber_id)) throw forbidden();
+    if (!isChamberAdmin(u, k.chamber_id) && !u.isNational) throw forbidden();
     await c.query('DELETE FROM network_commissions WHERE network_id = $1 AND commission_id = $2', [id, commissionId]);
     await audit(c, req, { chamberId: k.chamber_id, action: 'network.commission_removed', entity: 'network', entityId: id, before: { commissionId } });
   });
@@ -287,7 +287,7 @@ networksRouter.delete('/networks/:id/commissions/:commissionId', async (req, res
 
 networksRouter.post('/networks/:id/coordinators', async (req, res) => {
   const u = currentUser(req);
-  requireSuperAdmin(u);
+  requireNational(u);
   const id = param(req, 'id');
   const b = body(req, z.object({ userId: uuid }));
   await tx(async (c) => {
@@ -301,7 +301,7 @@ networksRouter.post('/networks/:id/coordinators', async (req, res) => {
 
 networksRouter.delete('/networks/:id/coordinators/:userId', async (req, res) => {
   const u = currentUser(req);
-  requireSuperAdmin(u);
+  requireNational(u);
   const id = param(req, 'id');
   const userId = param(req, 'userId');
   await tx(async (c) => {

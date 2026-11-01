@@ -7,8 +7,17 @@ export interface AuthUser {
   id: string;
   fullName: string;
   chamberId: string | null;
+  /** The system's IT administrator (مدیر فناوری اطلاعات سامانه): chambers, people, logins, roles, security settings. */
   isSuperAdmin: boolean;
+  /** Chambers whose processes the user runs (مدیر اتاق). */
   adminChambers: string[];
+  /** Chambers whose people, logins and roles the user manages (مدیر فناوری اطلاعات اتاق). */
+  itChambers: string[];
+  /** Security auditor (ممیز امنیت): of every chamber, or of these. */
+  auditAll: boolean;
+  auditChambers: string[];
+  /** Iran Chamber's secretariat (دبیرخانهٔ ملی): sees every chamber's commissions, runs the networks. */
+  isNational: boolean;
   /** the sign-in session of this request's access token */
   sessionId?: string;
 }
@@ -29,12 +38,18 @@ export async function loadAuthUser(userId: string): Promise<AuthUser | null> {
   );
   if (!u || !u.is_active) return null;
   const admin = await query<{ chamber_id: string }>('SELECT chamber_id FROM chamber_admins WHERE user_id = $1', [userId]);
+  const staff = await query<{ role: string; chamber_id: string | null }>('SELECT role, chamber_id FROM staff_roles WHERE user_id = $1', [userId]);
+  const of = (role: string) => staff.filter((s) => s.role === role);
   return {
     id: u.id,
     fullName: u.full_name,
     chamberId: u.chamber_id,
     isSuperAdmin: u.is_super_admin,
     adminChambers: admin.map((a) => a.chamber_id),
+    itChambers: of('it_admin').map((s) => s.chamber_id!),
+    auditAll: of('auditor').some((s) => !s.chamber_id),
+    auditChambers: of('auditor').flatMap((s) => (s.chamber_id ? [s.chamber_id] : [])),
+    isNational: of('national').length > 0,
   };
 }
 

@@ -74,6 +74,7 @@ beforeAll(async () => {
   baseUrl = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
   await login('admin', 'admin@kx.local');
   await login('root', 'root@kx.local');
+  await login('auditor', 'auditor@kx.local');
   await login('chair', 'chair@kx.local');
   await login('secretary', 'secretary@kx.local');
   for (let i = 1; i <= 6; i++) await login(`m${i}`, `member${i}@kx.local`);
@@ -187,7 +188,7 @@ describe('meeting lifecycle', () => {
     const ok = await as('secretary').post(`/api/meetings/${meetingId}/attendance/${ids.m6}/confirm`, { status: 'excused', reason: 'مأموریت خارج از کشور' });
     expect(ok.status).toBe(200);
     expect(ok.body.status).toBe('excused');
-    const audit = await as('admin').get(`/api/audit?entity=attendance&entityId=${meetingId}:${ids.m6}`);
+    const audit = await as('auditor').get(`/api/audit?entity=attendance&entityId=${meetingId}:${ids.m6}`);
     expect(audit.body.items[0].action).toBe('attendance.corrected');
     expect(audit.body.items[0].reason).toBe('مأموریت خارج از کشور');
   });
@@ -278,11 +279,11 @@ describe('meeting lifecycle', () => {
     expect(c.body.result.passed).toBe(false);
     const vs = await as('chair').get(`/api/vote-sessions/${s.body.id}`);
     expect(vs.body.voters).toBeNull();
-    // admin sees masked ballots in the audit log, super admin sees them
-    const a1 = await as('admin').get(`/api/audit?action=vote.cast&entityId=${s.body.id}`);
+    // the auditor sees secret ballots masked; administrators do not read the log at all
+    const a1 = await as('auditor').get(`/api/audit?action=vote.cast&entityId=${s.body.id}`);
     expect(a1.body.items[0].after.choice).toBe('***');
-    const a2 = await as('root').get(`/api/audit?action=vote.cast&entityId=${s.body.id}`);
-    expect(['no', 'abstain']).toContain(a2.body.items[0].after.choice);
+    expect((await as('root').get(`/api/audit?action=vote.cast&entityId=${s.body.id}`)).status).toBe(403);
+    expect((await as('admin').get(`/api/audit?action=vote.cast&entityId=${s.body.id}`)).status).toBe(403);
   });
 
   it('accepts comments from members but not observers/guests', async () => {
@@ -608,8 +609,13 @@ describe('multi-chamber isolation', () => {
 });
 
 describe('configurable roles and permissions', () => {
-  it('lets a chamber admin define roles and change permissions for its own chamber only', async () => {
+  it('lets a chamber IT administrator define roles and change permissions for its own chamber only', async () => {
     const isfChamber = (await as('isf').get('/api/auth/me')).body.adminChambers[0];
+    const isfId = (await as('isf').get('/api/auth/me')).body.id;
+    // The chamber admin runs processes; roles are the IT administrator's, given here by the system's IT administrator.
+    expect((await as('isf').post('/api/roles', { chamberId: isfChamber, title: 'زودهنگام', capabilities: [] })).status).toBe(403);
+    expect((await as('root').post('/api/staff-roles', { userId: isfId, role: 'it_admin', chamberId: isfChamber })).status).toBe(201);
+    await login('isf', 'admin.isf@kx.local');
     const r = await as('isf').get(`/api/roles?chamberId=${isfChamber}`);
     expect(r.status).toBe(200);
     expect(r.body.roles.find((x: any) => x.key === 'secretary').capabilities).toContain('meeting.manage');
@@ -655,7 +661,8 @@ describe('configurable roles and permissions', () => {
     // a role in use cannot be deleted; the change history is audited
     const del = await request(app).delete(`/api/roles/${key}?chamberId=${isfChamber}`).set('authorization', `Bearer ${tokens.isf}`);
     expect(del.status).toBe(409);
-    const log = await as('isf').get('/api/audit?action=role.');
+    expect((await as('isf').get('/api/audit?action=role.')).status).toBe(403);
+    const log = await as('auditor').get('/api/audit?action=role.');
     expect(log.body.items.map((x: any) => x.action)).toEqual(expect.arrayContaining(['role.created', 'role.permissions_changed', 'role.permissions_reset']));
   });
 });
@@ -731,7 +738,7 @@ describe('identity inquiry (national registry)', () => {
     expect(r.status).toBe(200);
     expect(r.body).toMatchObject({ nationalCode: '0012345679', birthDate: '1371/1/1', fullName: 'شخص آزمایشی 5679', existingPerson: null });
     expect((await as('m1').post('/api/identity/inquiry', { chamberId, nationalCode: '0012345679', birthDate: '1371/1/1' })).status).toBe(403);
-    const log = await as('admin').get('/api/audit?action=identity.inquiry');
+    const log = await as('auditor').get('/api/audit?action=identity.inquiry');
     expect(log.body.items[0].entity_id).toBe('0012345679');
   });
 
@@ -902,7 +909,7 @@ describe('presentation archive and periodic report', () => {
 
 describe('audit and scheduler', () => {
   it('keeps an intact, append-only audit chain', async () => {
-    const v = await as('admin').get(`/api/audit/verify?chamberId=${(await as('admin').get('/api/auth/me')).body.adminChambers[0]}`);
+    const v = await as('auditor').get(`/api/audit/verify?chamberId=${(await as('admin').get('/api/auth/me')).body.adminChambers[0]}`);
     expect(v.body.intact).toBe(true);
     await expect(pool.query('UPDATE audit_logs SET action = $1', ['tampered'])).rejects.toThrow(/append-only/);
     await expect(pool.query('DELETE FROM audit_logs')).rejects.toThrow(/append-only/);

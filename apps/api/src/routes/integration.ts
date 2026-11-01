@@ -14,7 +14,7 @@ import { audit } from '../lib/audit.js';
 import { badRequest, conflict, notFound } from '../lib/errors.js';
 import { encryptSecret } from '../lib/secrets.js';
 import { body, dateStr, paged, pageParams, param, parse, uuid } from '../lib/validate.js';
-import { requireChamberAdmin } from '../services/access.js';
+import { requireItAdmin } from '../services/access.js';
 import {
   authenticateIntegration,
   eventsAfter,
@@ -338,7 +338,7 @@ const PUBLIC_COLS = `id, chamber_id, name, description, key_prefix, scopes, even
 integrationsAdminRouter.get('/integrations', async (req, res) => {
   const u = currentUser(req);
   const chamberId = uuid.parse(req.query.chamberId);
-  requireChamberAdmin(u, chamberId);
+  requireItAdmin(u, chamberId);
   const rows = await query(
     `SELECT ${PUBLIC_COLS},
        (SELECT count(*) FROM integration_events e WHERE e.client_id = ic.id AND e.status = 'pending') AS pending_events,
@@ -352,7 +352,7 @@ integrationsAdminRouter.get('/integrations', async (req, res) => {
 integrationsAdminRouter.post('/integrations', async (req, res) => {
   const u = currentUser(req);
   const b = body(req, clientSchema.extend({ chamberId: uuid }));
-  requireChamberAdmin(u, b.chamberId);
+  requireItAdmin(u, b.chamberId);
   const key = generateApiKey();
   const webhookSecret = crypto.randomBytes(32).toString('base64url');
   const row = await tx(async (c) => {
@@ -376,7 +376,7 @@ async function adminClient(req: express.Request, id: string, db?: any) {
   const u = currentUser(req);
   const row = await one(`SELECT ${PUBLIC_COLS} FROM integration_clients WHERE id = $1`, [id], db);
   if (!row) throw notFound();
-  requireChamberAdmin(u, row.chamber_id);
+  requireItAdmin(u, row.chamber_id);
   return row;
 }
 

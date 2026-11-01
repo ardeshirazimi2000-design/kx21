@@ -80,7 +80,7 @@ export const BUILTIN_ROLES = ['chamber_admin', 'chair', 'vice_chair', 'secretary
 export type BuiltinRole = (typeof BUILTIN_ROLES)[number];
 
 /** Capabilities a chamber admin always has (cannot be removed, to avoid locking the chamber out). */
-export const LOCKED_ADMIN_CAPABILITIES: readonly Capability[] = ['commission.view', 'commission.manage', 'report.chamber', 'audit.view'];
+export const LOCKED_ADMIN_CAPABILITIES: readonly Capability[] = ['commission.view', 'commission.manage', 'report.chamber'];
 
 const VIEW: ConfigurableCapability[] = ['commission.browse', 'minutes.view', 'report.commission'];
 const PARTICIPATE: ConfigurableCapability[] = ['attendance.self', 'comment.create', 'vote.cast', 'vote.results.view'];
@@ -108,6 +108,8 @@ export function roleCapabilities(role: string, matrix?: RoleMatrix | null): read
 export interface AccessContext {
   isSuperAdmin: boolean;
   isChamberAdmin: boolean;
+  /** Iran Chamber's secretariat: reads every chamber's commissions (never acts in them). */
+  isNational?: boolean;
   /** Role (position) in the commission, if the user has an active membership. */
   position?: Position | string | null;
   /** Role in the meeting, if invited. */
@@ -126,6 +128,9 @@ export function isOfficer(role?: string | null): boolean {
   return !!role && OFFICERS.includes(role);
 }
 
+/** What the national secretariat sees in any commission: content and results, no action. */
+export const NATIONAL_CAPABILITIES: readonly Capability[] = ['commission.view', 'commission.browse', 'minutes.view', 'report.commission', 'vote.results.view'];
+
 export function resolveCapabilities(ctx: AccessContext): Set<Capability> {
   const caps = new Set<Capability>();
   const matrix = ctx.roleMatrix;
@@ -139,6 +144,8 @@ export function resolveCapabilities(ctx: AccessContext): Set<Capability> {
     if (ctx.isSuperAdmin) caps.add('chamber.manage');
     add(roleCapabilities('chamber_admin', matrix), false);
   }
+
+  if (ctx.isNational) for (const c of NATIONAL_CAPABILITIES) caps.add(c);
 
   const pos = ctx.position ?? null;
   const inv = ctx.inviteeRole ?? null;
@@ -161,7 +168,7 @@ export function resolveCapabilities(ctx: AccessContext): Set<Capability> {
   if (caps.has('commission.browse')) caps.add('meeting.view');
 
   // "Results only for officers": results stay with whoever runs the meeting (and admins).
-  if ((ctx.resultVisibility ?? 'invitees') === 'officers' && !caps.has('meeting.control') && !isAdmin) {
+  if ((ctx.resultVisibility ?? 'invitees') === 'officers' && !caps.has('meeting.control') && !isAdmin && !ctx.isNational) {
     caps.delete('vote.results.view');
   }
   return caps;

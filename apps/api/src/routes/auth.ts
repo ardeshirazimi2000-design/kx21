@@ -196,7 +196,16 @@ authRouter.get('/me', authenticate, async (req, res) => {
       WHERE m.user_id = $1 AND m.status = 'active' ORDER BY c.name`,
     [u.id],
   );
-  res.json({ ...profile, adminChambers: u.adminChambers, memberships, features: { webinar: webinarEnabled() } });
+  res.json({
+    ...profile,
+    adminChambers: u.adminChambers,
+    itChambers: u.itChambers,
+    auditAll: u.auditAll,
+    auditChambers: u.auditChambers,
+    isNational: u.isNational,
+    memberships,
+    features: { webinar: webinarEnabled() },
+  });
 });
 
 authRouter.post('/password', authenticate, limiter, async (req, res) => {

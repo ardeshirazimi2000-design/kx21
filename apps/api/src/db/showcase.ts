@@ -463,6 +463,15 @@ async function buildStructure(password: string, rootPassword: string) {
         )
       ).rows[0].id;
     }
+    // The system's IT administrator also acts as the national secretariat in the presentation; the security auditor is separate.
+    await c.query(`INSERT INTO staff_roles (user_id, role) VALUES ($1,'national') ON CONFLICT DO NOTHING`, [root]);
+    const auditor = (
+      await c.query(
+        `INSERT INTO users (full_name, email, mobile, organization, password_hash) VALUES ('ممیز امنیت', $1, '09100000001', 'حراست اتاق ایران', $2) RETURNING id`,
+        [`auditor@${DOMAIN}`, hash],
+      )
+    ).rows[0].id;
+    await c.query(`INSERT INTO staff_roles (user_id, role) VALUES ($1,'auditor')`, [auditor]);
     const chambers: Record<string, string> = {};
     let coordinator = '';
     for (const [pi, p] of PROVINCES.entries()) {
@@ -496,6 +505,8 @@ async function buildStructure(password: string, rootPassword: string) {
       const org = (n: number) => `${ORGS[n % ORGS.length]} ${ORG_NAMES[(n * 3 + pi) % ORG_NAMES.length]} ${p.city}`;
       const admin = await person(`مدیر اتاق ${p.city}`, `admin.${p.code}`, `دبیرخانهٔ اتاق ${p.city}`);
       await c.query('INSERT INTO chamber_admins (chamber_id, user_id) VALUES ($1,$2)', [ch, admin]);
+      // As after an upgrade, the chamber admin also manages the chamber's logins (separable later in «نقش‌های مدیریتی»).
+      await c.query(`INSERT INTO staff_roles (user_id, role, chamber_id) VALUES ($1,'it_admin',$2)`, [admin, ch]);
       if (p.code === 'thr') coordinator = await person('هماهنگ‌کنندهٔ شبکه‌های ملی', 'coordinator', 'معاونت امور استان‌ها و تشکل‌ها');
       const term = (
         await c.query(`INSERT INTO terms (chamber_id, number, title, start_date, status) VALUES ($1, 10, 'دوره دهم', $2, 'active') RETURNING id`, [ch, TERM_START])

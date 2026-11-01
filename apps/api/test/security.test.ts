@@ -167,18 +167,21 @@ describe('audit log (AFTA 2-1)', () => {
     expect((await get(`/api/reports/resolutions?chamberId=${chamberId}&format=csv`, admin)).status).toBe(200);
     expect(await audits('report.resolutions_exported')).toBe(1);
 
-    const byPerson = await get(`/api/audit?chamberId=${chamberId}&person=${encodeURIComponent('حسین کریمی')}&action=document`, admin);
+    // Only the security auditor reads the log; the chamber admin whose actions it records does not.
+    expect((await get(`/api/audit?chamberId=${chamberId}`, admin)).status).toBe(403);
+    const auditor = (await login('auditor@kx.local', SEED_PASSWORD)).body.accessToken;
+    const byPerson = await get(`/api/audit?chamberId=${chamberId}&person=${encodeURIComponent('حسین کریمی')}&action=document`, auditor);
     expect(byPerson.status).toBe(200);
     expect(byPerson.body.items.map((l: any) => l.action).sort()).toEqual(['document.downloaded', 'document.opened', 'document.uploaded']);
     expect(await audits('audit.viewed')).toBe(1);
-    // The chamber admin sees that the log was read; sign-ins name who signed in (nobody is signed in yet then).
-    expect((await get(`/api/audit?action=audit.viewed`, admin)).body.total).toBeGreaterThanOrEqual(1);
+    // Reading the log is itself in the log; sign-ins name who signed in (nobody is signed in yet then).
+    expect((await get(`/api/audit?action=audit.viewed`, auditor)).body.total).toBeGreaterThanOrEqual(1);
     const logins = await pool.query(`SELECT count(*) FILTER (WHERE user_id IS NULL) AS anonymous FROM audit_logs WHERE action IN ('auth.login', 'auth.account_locked')`);
     expect(Number(logins.rows[0].anonymous)).toBe(0);
-    expect((await get(`/api/audit/verify?chamberId=${chamberId}`, admin)).body.intact).toBe(true);
+    expect((await get(`/api/audit/verify?chamberId=${chamberId}`, auditor)).body.intact).toBe(true);
     const today = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Tehran' });
-    expect((await get(`/api/audit?chamberId=${chamberId}&from=${today}&to=${today}&action=document.opened`, admin)).body.total).toBe(1);
-    expect((await get(`/api/audit?chamberId=${chamberId}&from=2000-01-01&to=2000-01-02`, admin)).body.total).toBe(0);
-    expect((await get(`/api/audit?chamberId=${chamberId}&ip=10.99.99.99`, admin)).body.total).toBe(0);
+    expect((await get(`/api/audit?chamberId=${chamberId}&from=${today}&to=${today}&action=document.opened`, auditor)).body.total).toBe(1);
+    expect((await get(`/api/audit?chamberId=${chamberId}&from=2000-01-01&to=2000-01-02`, auditor)).body.total).toBe(0);
+    expect((await get(`/api/audit?chamberId=${chamberId}&ip=10.99.99.99`, auditor)).body.total).toBe(0);
   });
 });

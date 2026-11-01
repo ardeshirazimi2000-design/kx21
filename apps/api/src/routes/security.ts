@@ -1,6 +1,7 @@
 import { DEFAULT_SECURITY_POLICY, mergeSecurityPolicy, passwordRulesText, SECURITY_POLICY_LIMITS } from '@kx/shared';
 import { Router } from 'express';
 import { z } from 'zod';
+import { forbidden } from '../lib/errors.js';
 import { currentUser } from '../auth/middleware.js';
 import { one, tx } from '../db/pool.js';
 import { audit } from '../lib/audit.js';
@@ -18,7 +19,9 @@ securityRouter.get('/password-rules', async (_req, res) => {
 });
 
 securityRouter.get('/security-policy', async (req, res) => {
-  requireSuperAdmin(currentUser(req));
+  const u = currentUser(req);
+  // The auditor reviews the settings too (read only).
+  if (!u.isSuperAdmin && !u.auditAll) throw forbidden();
   res.json({ policy: await securityPolicy(), defaults: DEFAULT_SECURITY_POLICY, limits: SECURITY_POLICY_LIMITS });
 });
 

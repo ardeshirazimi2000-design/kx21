@@ -2,7 +2,7 @@ import { useEffect, useState, type ReactNode } from 'react';
 import { Link, Navigate, NavLink, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
 import { roleLabel } from '@kx/shared';
 import { Loading, fa } from './components/ui';
-import { useAuth } from './lib/auth';
+import { chamberSelectable, useAuth } from './lib/auth';
 import { post } from './lib/api';
 import { useApi, useSocket } from './lib/hooks';
 import { notificationLink, playChime, setTitleCount, showDesktop, soundEnabled, unlockAudioOnFirstGesture, type LiveNotification } from './lib/notifyAlert';
@@ -28,6 +28,7 @@ import { ResolutionsPage } from './pages/Resolutions';
 import { RolesPage } from './pages/Roles';
 import { HolidaysPage } from './pages/Holidays';
 import { SearchPage } from './pages/Search';
+import { StaffRolesPage } from './pages/StaffRoles';
 import { TermsPage } from './pages/Terms';
 
 export function App() {
@@ -53,6 +54,7 @@ export function App() {
         <Route path="/holidays" element={<HolidaysPage />} />
         <Route path="/notification-settings" element={<NotificationSettingsPage />} />
         <Route path="/security" element={<SecurityPolicyPage />} />
+        <Route path="/staff-roles" element={<StaffRolesPage />} />
         <Route path="/integrations" element={<IntegrationsPage />} />
         <Route path="/meetings" element={<MeetingsPage />} />
         <Route path="/meetings/:id" element={<MeetingRoomPage />} />
@@ -73,9 +75,9 @@ export function App() {
 }
 
 function Shell({ children }: { children: ReactNode }) {
-  const { me, logout, isAdmin, chamberId, setChamberId } = useAuth();
-  const chambers = useApi<any[]>(isAdmin ? '/chambers' : null);
-  const selectable = (chambers.data ?? []).filter((c) => me!.is_super_admin || me!.adminChambers.includes(c.id));
+  const { me, logout, isAdmin, isItAdmin, isAuditor, chamberId, setChamberId } = useAuth();
+  const chambers = useApi<any[]>(isAdmin || isItAdmin ? '/chambers' : null);
+  const selectable = (chambers.data ?? []).filter((c) => chamberSelectable(me!, c.id));
   // A super admin without a home chamber starts on the first chamber; a remembered chamber that no longer
   // exists (e.g. after the data was reset) is replaced the same way.
   const known = !chamberId || !chambers.data || chambers.data.some((c) => c.id === chamberId);
@@ -137,13 +139,19 @@ function Shell({ children }: { children: ReactNode }) {
     </NavLink>
   );
   const unreadCount = unread.data?.total ?? 0;
-  const roleText = me!.is_super_admin
-    ? 'مدیر سامانه'
-    : me!.adminChambers.length
-      ? 'مدیر اتاق'
-      : me!.memberships[0]
-        ? `${roleLabel(me!.memberships[0].position, me!.memberships[0].role_title)} کمیسیون`
-        : 'کاربر سامانه';
+  const staffRoles = [
+    me!.is_super_admin && 'مدیر فناوری اطلاعات',
+    me!.isNational && 'دبیرخانهٔ ملی',
+    me!.adminChambers.length > 0 && 'مدیر اتاق',
+    !me!.is_super_admin && me!.itChambers.length > 0 && 'مدیر فناوری اتاق',
+    isAuditor && 'ممیز امنیت',
+  ].filter(Boolean);
+  const roleText = staffRoles.length
+    ? staffRoles.join('، ')
+    : me!.memberships[0]
+      ? `${roleLabel(me!.memberships[0].position, me!.memberships[0].role_title)} کمیسیون`
+      : 'کاربر سامانه';
+  const runsAChamber = me!.adminChambers.length > 0;
 
   return (
     <div className={`app ${hidden ? 'nav-hidden' : ''}`}>
@@ -213,26 +221,27 @@ function Shell({ children }: { children: ReactNode }) {
               {(isExpert || isOfficer) && item('/referrals', 'ارجاعات کارشناسی', ICONS.inbox)}
               {item('/notifications', 'اعلان‌ها', ICONS.bell, unreadCount ? <span className="count">{fa(unreadCount)}</span> : null)}
             </NavGroup>
-            <NavGroup id="structure" title="کمیسیون‌های تخصصی" icon={ICONS.building} paths={['/commissions', '/terms', '/people', '/roles', '/holidays', '/notification-settings', '/integrations', '/chambers', '/security']}>
+            <NavGroup id="structure" title="کمیسیون‌های تخصصی" icon={ICONS.building} paths={['/commissions', '/terms', '/people', '/roles', '/holidays', '/notification-settings', '/integrations', '/chambers', '/staff-roles', '/security']}>
               {item('/commissions', 'کمیسیون‌ها', ICONS.people)}
-              {isAdmin && item('/terms', 'دوره‌ها', ICONS.layers)}
-              {(isAdmin || isOfficer) && item('/people', 'اشخاص و کاربران', ICONS.user)}
-              {isAdmin && item('/roles', 'نقش‌ها و دسترسی‌ها', ICONS.shield)}
-              {isAdmin && item('/holidays', 'تعطیلات', ICONS.sun)}
-              {isAdmin && item('/notification-settings', 'تنظیمات اطلاع‌رسانی', ICONS.megaphone)}
-              {isAdmin && item('/integrations', 'یکپارچه‌سازی', ICONS.plug)}
+              {runsAChamber && item('/terms', 'دوره‌ها', ICONS.layers)}
+              {(runsAChamber || isItAdmin || isOfficer) && item('/people', 'اشخاص و کاربران', ICONS.user)}
+              {(runsAChamber || isItAdmin) && item('/roles', 'نقش‌ها و دسترسی‌ها', ICONS.shield)}
+              {(runsAChamber || me!.is_super_admin) && item('/holidays', 'تعطیلات', ICONS.sun)}
+              {runsAChamber && item('/notification-settings', 'تنظیمات اطلاع‌رسانی', ICONS.megaphone)}
+              {isItAdmin && item('/integrations', 'یکپارچه‌سازی', ICONS.plug)}
               {me!.is_super_admin && item('/chambers', 'اتاق‌ها', ICONS.building)}
-              {me!.is_super_admin && item('/security', 'تنظیمات امنیتی', ICONS.lock)}
+              {me!.is_super_admin && item('/staff-roles', 'نقش‌های مدیریتی', ICONS.key)}
+              {(me!.is_super_admin || me!.auditAll) && item('/security', 'تنظیمات امنیتی', ICONS.lock)}
             </NavGroup>
-            {(me!.is_super_admin || !!networks.data?.length) && (
+            {(me!.isNational || !!networks.data?.length) && (
               <NavGroup id="networks" title="شبکه کمیسیون‌ها" icon={ICONS.network} paths={['/networks']}>
                 {item('/networks', 'شبکه‌های موضوعی', ICONS.network)}
               </NavGroup>
             )}
-            {(isAdmin || isOfficer) && (
+            {(isAdmin || isOfficer || isAuditor) && (
               <NavGroup id="reports" title="گزارش و کنترل" icon={ICONS.chart} paths={['/reports', '/audit']}>
-                {item('/reports', 'گزارش‌ها و آمار', ICONS.chart)}
-                {isAdmin && item('/audit', 'رویدادنگاری (Audit)', ICONS.list)}
+                {(isAdmin || isOfficer) && item('/reports', 'گزارش‌ها و آمار', ICONS.chart)}
+                {isAuditor && item('/audit', 'رویدادنگاری (Audit)', ICONS.list)}
               </NavGroup>
             )}
             <NavGroup id="account" title="حساب کاربری" icon={ICONS.user} paths={['/profile']}>
@@ -282,6 +291,7 @@ const ICONS = {
   user: 'M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM4 21a8 8 0 0 1 16 0',
   shield: 'M12 3l8 3v6c0 4.5-3.4 8.3-8 9-4.6-.7-8-4.5-8-9V6z',
   lock: 'M6 11h12v10H6zM8 11V7a4 4 0 0 1 8 0v4M12 15v2',
+  key: 'M15 7a4 4 0 1 1-3.9 5H3v3h3v3h3v-3h2.1A4 4 0 0 1 15 7zM16 10h.01',
   sun: 'M12 16a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4',
   megaphone: 'M3 11v2a1 1 0 0 0 1 1h3l6 4V6L7 10H4a1 1 0 0 0-1 1zM17 9a4 4 0 0 1 0 6',
   plug: 'M9 7V3M15 7V3M7 7h10v4a5 5 0 0 1-10 0zM12 16v5',

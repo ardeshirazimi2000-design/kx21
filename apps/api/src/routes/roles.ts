@@ -5,9 +5,9 @@ import { z } from 'zod';
 import { currentUser } from '../auth/middleware.js';
 import { one, tx } from '../db/pool.js';
 import { audit } from '../lib/audit.js';
-import { badRequest, conflict, notFound } from '../lib/errors.js';
+import { badRequest, conflict, forbidden, notFound } from '../lib/errors.js';
 import { body, uuid } from '../lib/validate.js';
-import { requireChamberAdmin, visibleChamberIds } from '../services/access.js';
+import { isAnyChamberAdmin, requireItAdmin, visibleChamberIds } from '../services/access.js';
 import { customRoles, describeRoles, loadRoleMatrix } from '../services/roles.js';
 
 /** Roles & permissions of a chamber (chamber admins of that chamber, or the super admin). */
@@ -22,7 +22,7 @@ async function snapshot(chamberId: string) {
 
 rolesRouter.get('/roles', async (req, res) => {
   const chamberId = uuid.parse(req.query.chamberId);
-  requireChamberAdmin(currentUser(req), chamberId);
+  if (!isAnyChamberAdmin(currentUser(req), chamberId)) throw forbidden();
   res.json({
     roles: await snapshot(chamberId),
     capabilities: CONFIGURABLE_CAPABILITIES.map((key) => ({ key, ...CAPABILITY_LABELS[key] })),
@@ -43,7 +43,7 @@ rolesRouter.get('/roles/options', async (req, res) => {
 rolesRouter.put('/roles/:key', async (req, res) => {
   const key = String(req.params.key);
   const b = body(req, z.object({ chamberId: uuid, capabilities: z.array(capability) }));
-  requireChamberAdmin(currentUser(req), b.chamberId);
+  requireItAdmin(currentUser(req), b.chamberId);
   const isBuiltin = (BUILTIN_ROLES as readonly string[]).includes(key);
   if (!isBuiltin && !(await one('SELECT 1 FROM custom_roles WHERE chamber_id = $1 AND key = $2', [b.chamberId, key]))) {
     throw notFound('نقش یافت نشد');
@@ -65,7 +65,7 @@ rolesRouter.put('/roles/:key', async (req, res) => {
 rolesRouter.post('/roles/:key/reset', async (req, res) => {
   const key = String(req.params.key);
   const b = body(req, z.object({ chamberId: uuid }));
-  requireChamberAdmin(currentUser(req), b.chamberId);
+  requireItAdmin(currentUser(req), b.chamberId);
   if (!(BUILTIN_ROLES as readonly string[]).includes(key)) throw badRequest('فقط نقش‌های پایه مقدار پیش‌فرض دارند');
   await tx(async (c) => {
     await c.query('DELETE FROM role_permissions WHERE chamber_id = $1 AND role_key = $2', [b.chamberId, key]);
@@ -86,7 +86,7 @@ rolesRouter.post('/roles', async (req, res) => {
       capabilities: z.array(capability).default([]),
     }),
   );
-  requireChamberAdmin(currentUser(req), b.chamberId);
+  requireItAdmin(currentUser(req), b.chamberId);
   const key = `c_${crypto.randomBytes(4).toString('hex')}`;
   await tx(async (c) => {
     await c.query(
@@ -107,7 +107,7 @@ rolesRouter.post('/roles', async (req, res) => {
 rolesRouter.patch('/roles/:key', async (req, res) => {
   const key = String(req.params.key);
   const b = body(req, z.object({ chamberId: uuid, title: z.string().trim().min(2).max(60).optional(), description: z.string().max(300).nullish(), hasVote: z.boolean().optional() }));
-  requireChamberAdmin(currentUser(req), b.chamberId);
+  requireItAdmin(currentUser(req), b.chamberId);
   await tx(async (c) => {
     const before = await one('SELECT * FROM custom_roles WHERE chamber_id = $1 AND key = $2 FOR UPDATE', [b.chamberId, key], c);
     if (!before) throw notFound('نقش یافت نشد');
@@ -128,7 +128,7 @@ rolesRouter.patch('/roles/:key', async (req, res) => {
 rolesRouter.delete('/roles/:key', async (req, res) => {
   const key = String(req.params.key);
   const chamberId = uuid.parse(req.query.chamberId);
-  requireChamberAdmin(currentUser(req), chamberId);
+  requireItAdmin(currentUser(req), chamberId);
   await tx(async (c) => {
     const role = await one('SELECT * FROM custom_roles WHERE chamber_id = $1 AND key = $2 FOR UPDATE', [chamberId, key], c);
     if (!role) throw notFound('نقش یافت نشد');

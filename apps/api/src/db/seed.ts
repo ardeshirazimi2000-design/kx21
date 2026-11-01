@@ -59,6 +59,12 @@ export async function seed() {
     const superAdmin = await person('مدیر سامانه', 'root@kx.local', '09120000000', 'واحد فناوری', { superAdmin: true });
     const admin = await person('مدیر اتاق', 'admin@kx.local', '09120000001', 'دبیرخانه اتاق');
     await c.query('INSERT INTO chamber_admins (chamber_id, user_id) VALUES ($1,$2)', [chamber.id, admin]);
+    // Separation of duties: the chamber admin also manages the chamber's logins here (as after an upgrade), the
+    // system's IT administrator is also the national secretariat, and a separate person audits the log.
+    await c.query(`INSERT INTO staff_roles (user_id, role, chamber_id) VALUES ($1,'it_admin',$2), ($3,'national',NULL)`, [admin, chamber.id, superAdmin]);
+    await c.query('INSERT INTO chamber_admins (chamber_id, user_id) VALUES ($1,$2)', [chamber.id, superAdmin]);
+    const auditor = await person('ممیز امنیت', 'auditor@kx.local', '09120000030', 'حراست اتاق');
+    await c.query(`INSERT INTO staff_roles (user_id, role) VALUES ($1,'auditor')`, [auditor]);
     const chair = await person('دکتر علی رضایی', 'chair@kx.local', '09120000002', 'شرکت صنایع غذایی آریا');
     const vice = await person('مهندس مریم احمدی', 'vice@kx.local', '09120000003', 'گروه صنعتی پارس');
     const secretary = await person('حسین کریمی', 'secretary@kx.local', '09120000004', 'دبیرخانه کمیسیون');

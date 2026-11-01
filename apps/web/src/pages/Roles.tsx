@@ -1,7 +1,7 @@
 import { Fragment, useEffect, useMemo, useState } from 'react';
 import { Badge, Button, Card, ErrorBox, Field, Loading, Modal, PageHeader } from '../components/ui';
 import { api, post } from '../lib/api';
-import { useAuth } from '../lib/auth';
+import { itOfChamber, runsChamber, useAuth } from '../lib/auth';
 import { useApi } from '../lib/hooks';
 
 interface Role {
@@ -18,9 +18,11 @@ interface Role {
 
 const KIND_LABEL: Record<Role['kind'], string> = { chamber: 'سطح اتاق', commission: 'کمیسیون', meeting: 'فقط جلسه' };
 
-/** Roles & permissions matrix of the chamber in focus (chamber admins and the super admin). */
+/** Roles & permissions matrix of the chamber in focus: changed by the IT administrator, seen by the chamber admin. */
 export function RolesPage() {
-  const { chamberId, isAdmin } = useAuth();
+  const { chamberId, me } = useAuth();
+  const canEdit = itOfChamber(me, chamberId);
+  const isAdmin = canEdit || runsChamber(me, chamberId);
   const { data, error, reload, setData } = useApi<{ roles: Role[]; capabilities: { key: string; title: string; group: string }[] }>(
     chamberId && isAdmin ? `/roles?chamberId=${chamberId}` : null,
   );
@@ -40,7 +42,7 @@ export function RolesPage() {
     return [...g.entries()];
   }, [data]);
 
-  if (!isAdmin) return <ErrorBox error={new Error('این بخش فقط برای مدیر اتاق است')} />;
+  if (!isAdmin) return <ErrorBox error={new Error('این بخش فقط برای مدیر اتاق و مدیر فناوری اطلاعات است')} />;
   if (error) return <ErrorBox error={error} />;
   if (!data) return <Loading />;
 
@@ -78,6 +80,7 @@ export function RolesPage() {
         title="نقش‌ها و دسترسی‌ها"
         subtitle="دسترسی هر نقش در این اتاق را تعیین کنید یا نقش جدید تعریف کنید. نقش‌های جدید در «اعضا و سمت‌ها» و دعوت جلسه قابل انتخاب‌اند."
         actions={
+          canEdit && (
           <>
             <Button variant="secondary" onClick={() => setAdding(true)}>
               نقش جدید
@@ -86,13 +89,14 @@ export function RolesPage() {
               ذخیره تغییرات{changed.length ? ` (${changed.length})` : ''}
             </Button>
           </>
+          )
         }
       />
       <ErrorBox error={err} />
       {msg && <div className="alert alert-success">{msg}</div>}
       <div className="alert alert-info small">
-        حق رأی، اعلام حضور و ثبت نظر فقط برای کسی اعمال می‌شود که به جلسه دعوت شده باشد. مدیر اتاق همیشه تعریف ساختار (دوره، کمیسیون، اعضا)، گزارش‌های کلان و
-        رویدادنگاری را دارد تا دسترسی مدیریت اتاق از دست نرود. همه تغییرات در رویدادنگاری ثبت می‌شود.
+        حق رأی، اعلام حضور و ثبت نظر فقط برای کسی اعمال می‌شود که به جلسه دعوت شده باشد. مدیر اتاق همیشه تعریف ساختار (دوره، کمیسیون، اعضا) و گزارش‌های کلان
+        را دارد تا دسترسی مدیریت اتاق از دست نرود. نقش‌ها و دسترسی‌ها را مدیر فناوری اطلاعات تغییر می‌دهد و همه تغییرات در رویدادنگاری ثبت می‌شود.
       </div>
       <Card>
         <div className="table-wrap">
@@ -106,12 +110,12 @@ export function RolesPage() {
                     <div className="row gap-sm" style={{ justifyContent: 'center', flexWrap: 'wrap' }}>
                       <Badge tone={r.builtin ? 'neutral' : 'accent'}>{r.builtin ? KIND_LABEL[r.kind] : 'نقش جدید'}</Badge>
                     </div>
-                    {r.builtin && r.customized && (
+                    {canEdit && r.builtin && r.customized && (
                       <button className="btn btn-ghost btn-sm" disabled={busy} onClick={() => run(() => post(`/roles/${r.key}/reset`, { chamberId }), `پیش‌فرض «${r.title}» بازگردانی شد`)}>
                         پیش‌فرض
                       </button>
                     )}
-                    {!r.builtin && (
+                    {canEdit && !r.builtin && (
                       <button
                         className="btn btn-ghost btn-sm"
                         disabled={busy}
@@ -149,7 +153,7 @@ export function RolesPage() {
                               type="checkbox"
                               aria-label={`${c.title} — ${r.title}`}
                               checked={on && !notApplicable}
-                              disabled={notApplicable}
+                              disabled={notApplicable || !canEdit}
                               onChange={() => toggle(r.key, c.key)}
                               title={r.builtin ? (isDefault ? 'در پیش‌فرض فعال است' : 'در پیش‌فرض غیرفعال است') : ''}
                             />

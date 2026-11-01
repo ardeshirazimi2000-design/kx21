@@ -13,7 +13,7 @@ import { notifySubmitted, recordProgress } from '../services/resolutionProgress.
 
 export const resolutionsRouter = Router();
 
-/** SQL fragment restricting resolutions to what the user may see. Uses params $1 = userId, $2 = isSuper, $3 = adminChambers. */
+/** SQL fragment restricting resolutions to what the user may see. Uses params $1 = userId, $2 = isNational, $3 = adminChambers. */
 /** $3 = chambers whose admin may browse, $11 = commissions browsable through the user's commission role. */
 const VISIBLE = `($2::boolean OR r.chamber_id = ANY($3::uuid[]) OR r.owner_id = $1 OR r.commission_id = ANY($11::uuid[]))`;
 
@@ -26,7 +26,7 @@ async function loadResolution(u: AuthUser, id: string, db?: any, lock = false) {
   const sc = await scope(u);
   const r = await one(
     `SELECT r.* FROM resolutions r WHERE r.id = $4 AND ${VISIBLE.replace('$11', '$5')}${lock ? ' FOR UPDATE OF r' : ''}`,
-    [u.id, u.isSuperAdmin, sc.adminBrowse, id, sc.browse],
+    [u.id, u.isNational, sc.adminBrowse, id, sc.browse],
     db,
   );
   if (!r) throw notFound('مصوبه یافت نشد');
@@ -132,7 +132,7 @@ resolutionsRouter.get('/resolutions', async (req, res) => {
     AND (NOT $9 OR (r.due_date < current_date AND r.status NOT IN ('done','cancelled')))
     AND ($10::text IS NULL OR r.text ILIKE '%' || $10 || '%' OR r.number ILIKE '%' || $10 || '%' OR r.addressee ILIKE '%' || $10 || '%')`;
   const sc = await scope(u);
-  const params = [u.id, u.isSuperAdmin, sc.adminBrowse, commissionId, chamberId, meetingId, status, mine, overdue, q, sc.browse];
+  const params = [u.id, u.isNational, sc.adminBrowse, commissionId, chamberId, meetingId, status, mine, overdue, q, sc.browse];
   const items = await query(
     `SELECT r.*, c.name AS commission_name, o.full_name AS owner_name, m.number AS meeting_number,
             (r.due_date < current_date AND r.status NOT IN ('done','cancelled')) AS is_overdue

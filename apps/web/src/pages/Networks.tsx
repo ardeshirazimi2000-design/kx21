@@ -23,7 +23,7 @@ export function NetworksPage() {
   const [open, setOpen] = useState(false);
   // Chambers the user administers open their commissions; other chambers just highlight their links.
   const openChamber = (id: string) => {
-    if (!me?.is_super_admin && !me?.adminChambers.includes(id)) return;
+    if (!me?.isNational && !me?.adminChambers.includes(id)) return;
     setChamberId(id);
     nav('/commissions');
   };
@@ -32,19 +32,19 @@ export function NetworksPage() {
       <PageHeader
         title="شبکه‌های موضوعی کمیسیون‌ها"
         subtitle="کمیسیون‌های هم‌موضوع اتاق‌های استان‌ها؛ اشتراک مصوبات، حمایت و پیشنهادهای ملی"
-        actions={me?.is_super_admin && <Button onClick={() => setOpen(true)}>شبکه جدید</Button>}
+        actions={me?.isNational && <Button onClick={() => setOpen(true)}>شبکه جدید</Button>}
       />
       {loading && <Loading />}
       {data && data.length === 0 && (
         <Card>
           <Empty>
-            {me?.is_super_admin ? 'هنوز شبکه‌ای تعریف نشده است.' : 'کمیسیون‌های شما هنوز عضو هیچ شبکه‌ای نیستند. مدیر اتاق می‌تواند کمیسیون را به شبکه مربوط اضافه کند.'}
+            {me?.isNational ? 'هنوز شبکه‌ای تعریف نشده است.' : 'کمیسیون‌های شما هنوز عضو هیچ شبکه‌ای نیستند. مدیر اتاق می‌تواند کمیسیون را به شبکه مربوط اضافه کند.'}
           </Empty>
         </Card>
       )}
       {map.data && map.data.networks.length > 0 && (
         <Card className="mb">
-          <NetworksMap data={map.data} onNetwork={(id) => nav(`/networks/${id}`)} onChamber={me?.is_super_admin || me?.adminChambers.length ? openChamber : undefined} />
+          <NetworksMap data={map.data} onNetwork={(id) => nav(`/networks/${id}`)} onChamber={me?.isNational || me?.adminChambers.length ? openChamber : undefined} />
           <div className="nm-legend">
             <span><i style={{ background: 'var(--primary)', borderColor: 'var(--primary)' }} />اتاق ایران</span>
             <span><i style={{ background: 'var(--accent-soft)', borderColor: 'var(--accent)' }} />شبکه موضوعی (عدد: تعداد اتاق‌ها) — با کلیک وارد شبکه شوید</span>

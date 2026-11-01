@@ -59,7 +59,7 @@ meetingsRouter.get('/meetings', async (req, res) => {
         $7::boolean OR m.chamber_id = ANY($8::uuid[]) OR m.commission_id = ANY($10::uuid[])))
     )`;
   const [browse, adminBrowse] = await Promise.all([browsableCommissionIds(u), adminBrowsableChambers(u)]);
-  const params = [commissionId, from, to, status, q, u.id, u.isSuperAdmin, adminBrowse, mine, browse];
+  const params = [commissionId, from, to, status, q, u.id, u.isNational, adminBrowse, mine, browse];
   const items = await query(
     `SELECT m.id, m.commission_id, c.name AS commission_name, m.number, m.title, m.scheduled_at, m.duration_minutes,
             m.location, m.online_link, m.type, m.status, ch.name AS chamber_name,

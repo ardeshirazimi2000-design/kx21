@@ -14,28 +14,58 @@ import { one, query, pool, type Db } from '../db/pool.js';
 import { forbidden, notFound } from '../lib/errors.js';
 import { loadRoleMatrix } from './roles.js';
 
+/** مدیر اتاق: runs the chamber's processes (commissions, terms, members, reopening minutes, reports). */
 export function isChamberAdmin(user: AuthUser, chamberId: string): boolean {
-  return user.isSuperAdmin || user.adminChambers.includes(chamberId);
+  return user.adminChambers.includes(chamberId);
 }
 
 export function requireChamberAdmin(user: AuthUser, chamberId: string) {
-  if (!isChamberAdmin(user, chamberId)) throw forbidden();
+  if (!isChamberAdmin(user, chamberId)) throw forbidden('این کار با مدیر اتاق است');
+}
+
+/** مدیر فناوری اطلاعات: logins, passwords and roles of the chamber's people (the system's, or the chamber's own). */
+export function isItAdmin(user: AuthUser, chamberId: string): boolean {
+  return user.isSuperAdmin || user.itChambers.includes(chamberId);
+}
+
+export function requireItAdmin(user: AuthUser, chamberId: string) {
+  if (!isItAdmin(user, chamberId)) throw forbidden('این کار با مدیر فناوری اطلاعات است');
+}
+
+/** Either administrator of the chamber (details of its people, the chamber's own profile). */
+export function isAnyChamberAdmin(user: AuthUser, chamberId: string): boolean {
+  return isChamberAdmin(user, chamberId) || isItAdmin(user, chamberId);
 }
 
 export function requireSuperAdmin(user: AuthUser) {
-  if (!user.isSuperAdmin) throw forbidden();
+  if (!user.isSuperAdmin) throw forbidden('این کار با مدیر فناوری اطلاعات سامانه است');
+}
+
+/** دبیرخانهٔ ملی: creates and runs the commission networks and their national proposals. */
+export function requireNational(user: AuthUser) {
+  if (!user.isNational) throw forbidden('این کار با دبیرخانهٔ ملی است');
+}
+
+/** ممیز امنیت: reads the audit log of a chamber (or, with null, of every chamber). */
+export function canAudit(user: AuthUser, chamberId: string | null): boolean {
+  return user.auditAll || (!!chamberId && user.auditChambers.includes(chamberId));
+}
+
+/** Chambers whose reports and commissions the user oversees: their own as chamber admin, or all (national). */
+export function canOverseeChamber(user: AuthUser, chamberId: string): boolean {
+  return user.isNational || isChamberAdmin(user, chamberId);
 }
 
 /** Chambers the user may see at all (null = all chambers). */
 export async function visibleChamberIds(user: AuthUser, db: Db = pool): Promise<string[] | null> {
-  if (user.isSuperAdmin) return null;
+  if (user.isSuperAdmin || user.isNational || user.auditAll) return null;
   const rows = await query<{ chamber_id: string }>(
     `SELECT DISTINCT chamber_id FROM commission_memberships WHERE user_id = $1 AND status = 'active'
      UNION SELECT DISTINCT m.chamber_id FROM meeting_invitees i JOIN meetings m ON m.id = i.meeting_id WHERE i.user_id = $1`,
     [user.id],
     db,
   );
-  const set = new Set([...user.adminChambers, ...rows.map((r) => r.chamber_id)]);
+  const set = new Set([...user.adminChambers, ...user.itChambers, ...user.auditChambers, ...rows.map((r) => r.chamber_id)]);
   if (user.chamberId) set.add(user.chamberId);
   return [...set];
 }
@@ -75,8 +105,9 @@ export async function commissionAccess(user: AuthUser, commissionId: string, db:
   const position = await activePosition(user.id, commissionId, db);
   const settings = mergeCommissionSettings(commission.settings);
   const ctx: AccessContext = {
-    isSuperAdmin: user.isSuperAdmin,
+    isSuperAdmin: false,
     isChamberAdmin: user.adminChambers.includes(commission.chamber_id),
+    isNational: user.isNational,
     position,
     resultVisibility: settings.resultVisibility,
     roleMatrix: await loadRoleMatrix(commission.chamber_id, db),
@@ -169,8 +200,9 @@ export async function meetingAccess(
         db,
       );
   const caps = resolveCapabilities({
-    isSuperAdmin: user.isSuperAdmin,
+    isSuperAdmin: false,
     isChamberAdmin: user.adminChambers.includes(meeting.chamber_id),
+    isNational: user.isNational,
     position,
     inviteeRole: inv?.role ?? (delegation ? 'guest' : null),
     hasVote: inv?.has_vote ?? false,
