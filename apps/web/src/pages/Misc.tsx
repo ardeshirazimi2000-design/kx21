@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
-import { Badge, Button, Card, dateFa, dateTimeFa, Empty, ErrorBox, Field, fa, Loading, PageHeader, Pager } from '../components/ui';
+import { Badge, Button, Card, dateFa, dateTimeFa, Empty, ErrorBox, Field, fa, JalaliDateInput, Loading, PageHeader, Pager } from '../components/ui';
 import { download, post } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { useApi, usePasswordRules } from '../lib/hooks';
@@ -203,21 +203,98 @@ export function ReportsPage() {
   );
 }
 
+/** Persian names of the security-relevant events; others show their code. */
+const AUDIT_LABELS: Record<string, string> = {
+  'auth.login': 'ورود',
+  'auth.login_failed': 'ورود ناموفق',
+  'auth.account_locked': 'قفل موقت حساب',
+  'auth.password_changed': 'تغییر رمز عبور',
+  'auth.mfa_enabled': 'فعال‌سازی ورود دومرحله‌ای',
+  'security.policy_changed': 'تغییر تنظیمات امنیتی',
+  'audit.viewed': 'مشاهدهٔ رویدادنگاری',
+  'document.downloaded': 'دریافت فایل',
+  'document.opened': 'مشاهدهٔ فایل',
+  'document.uploaded': 'بارگذاری فایل',
+  'document.deleted': 'حذف فایل',
+  'report.resolutions_exported': 'خروجی مصوبات (CSV)',
+  'report.activity_exported': 'خروجی گزارش دوره‌ای',
+};
+
+const NO_FILTER = { person: '', action: '', ip: '', from: '', to: '', order: 'desc' };
+
 export function AuditPage() {
   const { chamberId } = useAuth();
   const [page, setPage] = useState(1);
-  const [action, setAction] = useState('');
-  const { data } = useApi(`/audit?page=${page}&pageSize=50${action ? `&action=${encodeURIComponent(action)}` : ''}`);
+  // Filters apply on «نمایش», not on every keystroke: each query of the log is itself recorded.
+  const [form, setForm] = useState(NO_FILTER);
+  const [applied, setApplied] = useState(NO_FILTER);
+  const qs = Object.entries(applied)
+    .filter(([k, v]) => v && !(k === 'order' && v === 'desc'))
+    .map(([k, v]) => `&${k}=${encodeURIComponent(v)}`)
+    .join('');
+  const { data } = useApi(`/audit?page=${page}&pageSize=50${qs}`);
   const verify = useApi(chamberId ? `/audit/verify?chamberId=${chamberId}` : null);
+  const apply = (f = form) => {
+    setApplied(f);
+    setPage(1);
+  };
   return (
     <>
       <PageHeader
         title="رویدادنگاری (Audit Log)"
-        subtitle="ثبت غیرقابل‌تغییر تمام تغییرات حساس، به‌صورت زنجیره هش"
+        subtitle="ثبت غیرقابل‌تغییر تمام تغییرات حساس، به‌صورت زنجیره هش؛ مشاهدهٔ این صفحه هم ثبت می‌شود"
         actions={verify.data && <Badge tone={verify.data.intact ? 'success' : 'danger'}>{verify.data.intact ? 'زنجیره سالم است' : `دستکاری در رکورد ${verify.data.brokenAt}`}</Badge>}
       />
       <Card>
-        <input className="input mb" style={{ maxWidth: 320 }} placeholder="فیلتر عملیات (مثلاً attendance یا vote)" value={action} onChange={(e) => { setAction(e.target.value); setPage(1); }} />
+        <form
+          className="audit-filters mb"
+          onSubmit={(e) => {
+            e.preventDefault();
+            apply();
+          }}
+        >
+          <Field label="شخص">
+            <input className="input" placeholder="نام، ایمیل یا موبایل" value={form.person} onChange={(e) => setForm({ ...form, person: e.target.value })} />
+          </Field>
+          <Field label="نوع رویداد">
+            <input className="input ltr" placeholder="auth, document, vote…" value={form.action} onChange={(e) => setForm({ ...form, action: e.target.value })} list="audit-actions" />
+            <datalist id="audit-actions">
+              {Object.entries(AUDIT_LABELS).map(([k, v]) => (
+                <option key={k} value={k}>
+                  {v}
+                </option>
+              ))}
+            </datalist>
+          </Field>
+          <Field label="نشانی IP">
+            <input className="input ltr" value={form.ip} onChange={(e) => setForm({ ...form, ip: e.target.value })} />
+          </Field>
+          <Field label="از تاریخ">
+            <JalaliDateInput value={form.from} onChange={(v) => setForm({ ...form, from: v })} />
+          </Field>
+          <Field label="تا تاریخ">
+            <JalaliDateInput value={form.to} onChange={(v) => setForm({ ...form, to: v })} />
+          </Field>
+          <Field label="ترتیب">
+            <select className="input" value={form.order} onChange={(e) => setForm({ ...form, order: e.target.value })}>
+              <option value="desc">جدیدترین اول</option>
+              <option value="asc">قدیمی‌ترین اول</option>
+            </select>
+          </Field>
+          <div className="row gap-sm" style={{ alignSelf: 'end' }}>
+            <Button type="submit">نمایش</Button>
+            <Button
+              type="button"
+              variant="ghost"
+              onClick={() => {
+                setForm(NO_FILTER);
+                apply(NO_FILTER);
+              }}
+            >
+              پاک کردن
+            </Button>
+          </div>
+        </form>
         <div className="table-wrap">
           <table className="table small">
             <thead>
@@ -235,13 +312,13 @@ export function AuditPage() {
                 <tr key={l.id} title={JSON.stringify({ before: l.before, after: l.after }, null, 1)}>
                   <td>{dateTimeFa(l.created_at)}</td>
                   <td>{l.user_name ?? 'سامانه'}</td>
-                  <td className="ltr">{l.action}</td>
+                  <td>{AUDIT_LABELS[l.action] ?? <span className="ltr">{l.action}</span>}</td>
                   <td className="ltr">
                     {l.entity}
                     {l.entity_id ? `:${String(l.entity_id).slice(0, 8)}` : ''}
                   </td>
                   <td>{l.reason ?? ''}</td>
-                  <td className="ltr">{l.ip}</td>
+                  <td className="ltr">{l.ip?.replace(/^::ffff:/, '')}</td>
                 </tr>
               ))}
             </tbody>

@@ -1,7 +1,7 @@
 import { formatJalaliDate, RESOLUTION_STATUS_LABELS, toGregorian, toJalali, type ResolutionStatus } from '@kx/shared';
 import { Router } from 'express';
 import { currentUser } from '../auth/middleware.js';
-import { one, query } from '../db/pool.js';
+import { one, query, tx } from '../db/pool.js';
 import { verifyAuditChain } from '../lib/audit.js';
 import { badRequest, forbidden } from '../lib/errors.js';
 import { audit } from '../lib/audit.js';
@@ -250,6 +250,7 @@ reportsRouter.get('/reports/resolutions', async (req, res) => {
       is_overdue: r.is_overdue ? 'بله' : 'خیر',
       created_at: formatJalaliDate(r.created_at, false),
     }));
+    await tx((c) => audit(c, req, { chamberId: chamberId ?? null, action: 'report.resolutions_exported', entity: 'commission', entityId: commissionId ?? null, after: { format: 'csv', rows: rows.length, status } }));
     res.setHeader('content-type', 'text/csv; charset=utf-8');
     res.setHeader('content-disposition', 'attachment; filename="resolutions.csv"');
     res.send(
@@ -305,13 +306,13 @@ reportsRouter.get('/reports/commission-activity', async (req, res) => {
     return;
   }
   const buf = format === 'docx' ? await buildActivityDocx(data) : await buildActivityPptx(data);
-  await audit(pool, req, {
+  await tx((c) => audit(c, req, {
     chamberId: ca.commission.chamber_id,
     action: 'report.activity_exported',
     entity: 'commission',
     entityId: ca.commission.id,
     after: { from, to, format },
-  });
+  }));
   const name = `activity-${ca.commission.code}-${from}-${to}.${format}`;
   // Browsers replace the zero-width non-joiner in file names with '_'; use a plain space instead.
   const fileName = `گزارش دوره ای ${data.commission.name} ${jalaliFileDate(from)} تا ${jalaliFileDate(to)}.${format}`.replace(/\u200c/g, ' ');
@@ -364,15 +365,38 @@ reportsRouter.get('/audit', async (req, res) => {
   // Without an explicit chamber, chamber admins see the logs of all chambers they administer.
   const scope = chamberId ? [chamberId] : u.isSuperAdmin ? null : u.adminChambers;
   const { page, pageSize, offset } = pageParams(req);
-  const entity = typeof req.query.entity === 'string' ? req.query.entity : null;
-  const entityId = typeof req.query.entityId === 'string' ? req.query.entityId : null;
-  const action = typeof req.query.action === 'string' ? req.query.action : null;
+  const text = (k: string) => (typeof req.query[k] === 'string' && req.query[k] ? String(req.query[k]).slice(0, 200) : null);
+  const entity = text('entity');
+  const entityId = text('entityId');
+  const action = text('action');
+  // AFTA 2-1: select and sort the records by person, time, address and kind of event.
+  const userId = text('userId') ? uuid.parse(text('userId')) : null;
+  const person = text('person');
+  const ip = text('ip');
+  const from = text('from') ? dateStr.parse(text('from')) : null;
+  const to = text('to') ? dateStr.parse(text('to')) : null;
+  const order = req.query.order === 'asc' ? 'ASC' : 'DESC';
   const where = `($1::uuid[] IS NULL OR l.chamber_id = ANY($1)) AND ($2::text IS NULL OR l.entity = $2) AND ($3::text IS NULL OR l.entity_id = $3)
-    AND ($4::text IS NULL OR l.action LIKE $4 || '%')`;
-  const params = [scope, entity, entityId, action];
+    AND ($4::text IS NULL OR l.action LIKE $4 || '%') AND ($5::uuid IS NULL OR l.user_id = $5)
+    AND ($6::text IS NULL OR l.user_id IN (SELECT id FROM users WHERE full_name ILIKE '%' || $6 || '%' OR email ILIKE '%' || $6 || '%' OR mobile = $6))
+    AND ($7::text IS NULL OR l.ip LIKE '%' || $7 || '%')
+    AND ($8::date IS NULL OR l.created_at >= ($8::date::timestamp AT TIME ZONE 'Asia/Tehran'))
+    AND ($9::date IS NULL OR l.created_at < (($9::date + 1)::timestamp AT TIME ZONE 'Asia/Tehran'))`;
+  const params = [scope, entity, entityId, action, userId, person, ip, from, to];
+  // Reading the audit log is itself recorded (AFTA 2-1), with the filters used.
+  if (page === 1) {
+    await tx((c) => audit(c, req, {
+      // Under the chamber whose log was read, so its own administrators see it too.
+      chamberId: chamberId ?? (scope?.length === 1 ? scope[0] : null),
+      action: 'audit.viewed',
+      entity: 'audit_log',
+      entityId: null,
+      after: Object.fromEntries(Object.entries({ entity, entityId, action, userId, person, ip, from, to }).filter(([, v]) => v !== null)),
+    }));
+  }
   const items = await query(
     `SELECT l.*, u.full_name AS user_name FROM audit_logs l LEFT JOIN users u ON u.id = l.user_id WHERE ${where}
-      ORDER BY l.id DESC LIMIT ${pageSize} OFFSET ${offset}`,
+      ORDER BY l.id ${order} LIMIT ${pageSize} OFFSET ${offset}`,
     params,
   );
   // Secret ballots: only super admins may see the recorded choice.

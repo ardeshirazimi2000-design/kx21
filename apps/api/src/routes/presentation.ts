@@ -4,7 +4,7 @@ import jwt from 'jsonwebtoken';
 import { z } from 'zod';
 import { currentUser, type AuthUser } from '../auth/middleware.js';
 import { config } from '../config.js';
-import { one, pool, query } from '../db/pool.js';
+import { one, pool, query, tx } from '../db/pool.js';
 import { audit } from '../lib/audit.js';
 import { badRequest, conflict, forbidden, notFound } from '../lib/errors.js';
 import { body, param, uuid } from '../lib/validate.js';
@@ -109,7 +109,7 @@ presentationRouter.put('/meetings/:id/presentation', async (req, res) => {
   };
   await query('UPDATE meetings SET presentation = $2 WHERE id = $1', [a.meeting.id, JSON.stringify(state)]);
   if (!same) {
-    await audit(pool, req, { chamberId: a.meeting.chamber_id, action: 'presentation.started', entity: 'meeting', entityId: a.meeting.id, after: { documentId: d.id, fileName: d.file_name } });
+    await tx((c) => audit(c, req, { chamberId: a.meeting.chamber_id, action: 'presentation.started', entity: 'meeting', entityId: a.meeting.id, after: { documentId: d.id, fileName: d.file_name } }));
   }
   const full = await stateOf(a.meeting.id);
   emitToMeeting(a.meeting.id, SOCKET_EVENTS.presentationUpdated, { meetingId: a.meeting.id, presentation: full });

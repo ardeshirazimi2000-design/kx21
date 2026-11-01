@@ -8,7 +8,7 @@ import multer from 'multer';
 import { z } from 'zod';
 import { currentUser, loadAuthUser, type AuthUser } from '../auth/middleware.js';
 import { config } from '../config.js';
-import { one, query, tx } from '../db/pool.js';
+import { one, pool, query, tx } from '../db/pool.js';
 import { emitToMeeting } from '../realtime.js';
 import { audit } from '../lib/audit.js';
 import { badRequest, conflict, forbidden, notFound } from '../lib/errors.js';
@@ -260,7 +260,12 @@ export async function sendDocument(res: Response, d: any, inline = false) {
 }
 
 documentsRouter.get('/documents/:id/download', async (req, res) => {
-  await sendDocument(res, await authorizedDocument(currentUser(req), param(req, 'id')));
+  const d = await authorizedDocument(currentUser(req), param(req, 'id'));
+  // Every download is recorded (AFTA: data leaving the system); a player's follow-up byte ranges are not new ones.
+  if (!/^bytes=(?!0-)/.test(String(req.headers.range ?? ''))) {
+    await tx((c) => audit(c, req, { chamberId: d.chamber_id, action: 'document.downloaded', entity: 'document', entityId: d.id, after: { fileName: d.file_name } }));
+  }
+  await sendDocument(res, d);
 });
 
 /**
@@ -347,6 +352,8 @@ documentsRouter.delete('/documents/:id', async (req, res) => {
 documentsRouter.post('/documents/:id/link', async (req, res) => {
   const u = currentUser(req);
   const d = await authorizedDocument(u, param(req, 'id'));
+  // The link is the grant to read the file: recorded once here, not for each request the viewer makes with it.
+  await tx((c) => audit(c, req, { chamberId: d.chamber_id, action: req.query.inline === '1' ? 'document.opened' : 'document.downloaded', entity: 'document', entityId: d.id, after: { fileName: d.file_name } }));
   // A video player keeps requesting byte ranges while it plays, so its link lives for the length of a meeting.
   const token = jwt.sign({ sub: u.id, doc: d.id, typ: 'file' }, config.jwtSecret, { expiresIn: isVideo(d.mime_type) ? '4h' : '2m', issuer: 'kx-api' });
   const base = `${req.protocol}://${req.get('host')}`;

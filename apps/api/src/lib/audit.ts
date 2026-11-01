@@ -26,6 +26,8 @@ export interface AuditEntry {
   before?: unknown;
   after?: unknown;
   reason?: string | null;
+  /** who caused the event when nobody is signed in on the request yet (sign-in, failed sign-in) */
+  actorId?: string | null;
 }
 
 /**
@@ -34,6 +36,7 @@ export interface AuditEntry {
  * Call inside the same transaction as the change being audited.
  */
 export async function audit(db: Db, req: Request | null, e: AuditEntry): Promise<void> {
+  const userId = req?.user?.id ?? e.actorId ?? null;
   const chainKey = e.chamberId ?? 'global';
   await db.query('SELECT pg_advisory_xact_lock(hashtext($1))', [`audit:${chainKey}`]);
   const prev = await one<{ hash: string }>(
@@ -46,7 +49,7 @@ export async function audit(db: Db, req: Request | null, e: AuditEntry): Promise
   const after = normalize(e.after);
   const payload = canonical({
     chamberId: e.chamberId,
-    userId: req?.user?.id ?? null,
+    userId,
     action: e.action,
     entity: e.entity,
     entityId: e.entityId ?? null,
@@ -61,7 +64,7 @@ export async function audit(db: Db, req: Request | null, e: AuditEntry): Promise
      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
     [
       e.chamberId,
-      req?.user?.id ?? null,
+      userId,
       e.action,
       e.entity,
       e.entityId ?? null,

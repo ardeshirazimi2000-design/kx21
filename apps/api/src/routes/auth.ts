@@ -66,9 +66,9 @@ async function registerFailure(req: Request, user: LoginUser | null, identifier:
     if (r?.locked_now) lockedUntil = r.locked_until;
   }
   await tx(async (c) => {
-    await audit(c, req, { chamberId: user?.chamber_id ?? null, action: 'auth.login_failed', entity: 'user', entityId: user?.id ?? null, after: { identifier, step } });
+    await audit(c, req, { chamberId: user?.chamber_id ?? null, action: 'auth.login_failed', entity: 'user', entityId: user?.id ?? null, actorId: user?.id ?? null, after: { identifier, step } });
     if (lockedUntil) {
-      await audit(c, req, { chamberId: user!.chamber_id, action: 'auth.account_locked', entity: 'user', entityId: user!.id, after: { until: lockedUntil, minutes: policy.lockout.lockMinutes } });
+      await audit(c, req, { chamberId: user!.chamber_id, action: 'auth.account_locked', entity: 'user', entityId: user!.id, actorId: user!.id, after: { until: lockedUntil, minutes: policy.lockout.lockMinutes } });
     }
   });
   if (lockedUntil) {
@@ -91,7 +91,7 @@ async function signIn(req: Request, userId: string, chamberId: string | null, de
     [userId, req.ip ?? null],
   );
   await tx((c) =>
-    audit(c, req, { chamberId, action: 'auth.login', entity: 'user', entityId: userId, after: { client, ...(mfa ? { mfa: true } : {}), ...(s.evicted ? { endedSessions: s.evicted } : {}) } }),
+    audit(c, req, { chamberId, action: 'auth.login', entity: 'user', entityId: userId, actorId: userId, after: { client, ...(mfa ? { mfa: true } : {}), ...(s.evicted ? { endedSessions: s.evicted } : {}) } }),
   );
   return {
     accessToken: s.accessToken,
@@ -134,7 +134,7 @@ authRouter.post('/login', limiter, async (req, res) => {
   // Constant-ish time: always run bcrypt.
   const ok = await bcrypt.compare(b.password, user?.password_hash ?? DUMMY_HASH);
   if (user?.locked_until && user.locked_until > new Date()) {
-    await tx((c) => audit(c, req, { chamberId: user.chamber_id, action: 'auth.login_failed', entity: 'user', entityId: user.id, after: { identifier: id, step: 'locked' } }));
+    await tx((c) => audit(c, req, { chamberId: user.chamber_id, action: 'auth.login_failed', entity: 'user', entityId: user.id, actorId: user.id, after: { identifier: id, step: 'locked' } }));
     throw new HttpError(423, 'account_locked', `حساب به‌دلیل تلاش‌های ناموفق تا ساعت ${timeFa(user.locked_until)} موقتاً قفل است`, { lockedUntil: user.locked_until });
   }
   if (!user || !user.is_active || !user.password_hash || !ok) {

@@ -783,7 +783,7 @@ networksRouter.get('/networks/:id/proposals/:rid/letter.docx', async (req, res) 
   const letter = saved?.letter_body ? { addressee: saved.letter_addressee ?? '', subject: saved.letter_subject, body: saved.letter_body } : draftLetter(d);
   const me = await one('SELECT full_name FROM users WHERE id = $1', [u.id]);
   const buf = await buildLetterDocx(letter, d, a.isCoordinator ? me?.full_name : (d.coordinators[0] ?? me?.full_name));
-  await audit(pool, req, { chamberId: null, action: 'network.letter_exported', entity: 'resolution', entityId: rid, after: { networkId: a.network.id } });
+  await tx((c) => audit(c, req, { chamberId: null, action: 'network.letter_exported', entity: 'resolution', entityId: rid, after: { networkId: a.network.id } }));
   const fileName = `نامه پیشنهاد ملی ${d.resolution.number}.docx`;
   res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
   res.setHeader('Content-Disposition', `attachment; filename="proposal-${d.resolution.number}.docx"; filename*=UTF-8''${encodeURIComponent(fileName)}`);

@@ -602,3 +602,5 @@ table.table { width: 100%; border-collapse: collapse; }
 .arch-done .arch-mark { background: var(--success-soft); color: var(--success); border-color: transparent; }
 .link-btn { background: none; border: 0; padding: 0; font: inherit; color: var(--primary); cursor: pointer; text-align: start; }
 .link-btn:hover { text-decoration: underline; }
+
+.audit-filters { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 0 12px; }

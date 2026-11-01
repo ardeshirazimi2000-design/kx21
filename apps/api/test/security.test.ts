@@ -146,3 +146,39 @@ describe('sessions', () => {
     expect((await get('/api/auth/me', s.accessToken)).body.error.code).toBe('session_ended');
   });
 });
+
+describe('audit log (AFTA 2-1)', () => {
+  it('records downloads, exports and reading the audit log itself, and filters by person, address and date', async () => {
+    const admin = (await login('admin@kx.local', SEED_PASSWORD)).body.accessToken;
+    const chamberId = (await pool.query(`SELECT chamber_id FROM users WHERE email = 'admin@kx.local'`)).rows[0].chamber_id;
+    const commissionId = (await pool.query(`SELECT id FROM commissions WHERE chamber_id = $1 AND code = 'EXP'`, [chamberId])).rows[0].id;
+    // A document of the commission's secretary, downloaded once and opened by link once.
+    const secretary = (await login('secretary@kx.local', SEED_PASSWORD)).body.accessToken;
+    const up = await request(app)
+      .post('/api/documents')
+      .set('authorization', `Bearer ${secretary}`)
+      .field('commissionId', commissionId)
+      .attach('file', Buffer.from('%PDF-1.4\n%%EOF\n'), { filename: 'note.pdf', contentType: 'application/pdf' });
+    expect(up.status).toBe(201);
+    expect((await get(`/api/documents/${up.body.id}/download`, secretary)).status).toBe(200);
+    expect((await request(app).post(`/api/documents/${up.body.id}/link?inline=1`).set('authorization', `Bearer ${secretary}`)).status).toBe(200);
+    expect(await audits('document.downloaded')).toBe(1);
+    expect(await audits('document.opened')).toBe(1);
+    expect((await get(`/api/reports/resolutions?chamberId=${chamberId}&format=csv`, admin)).status).toBe(200);
+    expect(await audits('report.resolutions_exported')).toBe(1);
+
+    const byPerson = await get(`/api/audit?chamberId=${chamberId}&person=${encodeURIComponent('حسین کریمی')}&action=document`, admin);
+    expect(byPerson.status).toBe(200);
+    expect(byPerson.body.items.map((l: any) => l.action).sort()).toEqual(['document.downloaded', 'document.opened', 'document.uploaded']);
+    expect(await audits('audit.viewed')).toBe(1);
+    // The chamber admin sees that the log was read; sign-ins name who signed in (nobody is signed in yet then).
+    expect((await get(`/api/audit?action=audit.viewed`, admin)).body.total).toBeGreaterThanOrEqual(1);
+    const logins = await pool.query(`SELECT count(*) FILTER (WHERE user_id IS NULL) AS anonymous FROM audit_logs WHERE action IN ('auth.login', 'auth.account_locked')`);
+    expect(Number(logins.rows[0].anonymous)).toBe(0);
+    expect((await get(`/api/audit/verify?chamberId=${chamberId}`, admin)).body.intact).toBe(true);
+    const today = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Tehran' });
+    expect((await get(`/api/audit?chamberId=${chamberId}&from=${today}&to=${today}&action=document.opened`, admin)).body.total).toBe(1);
+    expect((await get(`/api/audit?chamberId=${chamberId}&from=2000-01-01&to=2000-01-02`, admin)).body.total).toBe(0);
+    expect((await get(`/api/audit?chamberId=${chamberId}&ip=10.99.99.99`, admin)).body.total).toBe(0);
+  });
+});
