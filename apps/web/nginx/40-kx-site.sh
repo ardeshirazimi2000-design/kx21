@@ -103,17 +103,17 @@ location = /api/documents {
   proxy_request_buffering off;
   proxy_read_timeout 1h;
   proxy_send_timeout 1h;
-  proxy_pass http://$UPSTREAM;
+  proxy_pass http://kx_api;
   include /etc/nginx/kx/proxy.conf;
 }
 
 location /api/ {
-  proxy_pass http://$UPSTREAM;
+  proxy_pass http://kx_api;
   include /etc/nginx/kx/proxy.conf;
 }
 
 location /socket.io/ {
-  proxy_pass http://$UPSTREAM;
+  proxy_pass http://kx_api;
   proxy_http_version 1.1;
   proxy_set_header Upgrade \$http_upgrade;
   proxy_set_header Connection "upgrade";
@@ -121,7 +121,7 @@ location /socket.io/ {
   include /etc/nginx/kx/proxy.conf;
 }
 
-location = /health { proxy_pass http://$UPSTREAM; }
+location = /health { proxy_pass http://kx_api; }
 
 # PDF.js worker (ES module): older nginx builds do not map .mjs to JavaScript.
 location ~* \.mjs\$ {
@@ -157,6 +157,13 @@ EOF
   echo "  default \$scheme;"
   echo "  \"~^1:(?<proto>https?)\$\" \$proto;"
   echo "}"
+  # The api's address is looked up again while running (Docker's DNS), so a recreated api container is found
+  # without restarting this one.
+  echo "resolver 127.0.0.11 valid=10s ipv6=off;"
+  echo "upstream kx_api {"
+  echo "  zone kx_api 64k;"
+  echo "  server $UPSTREAM resolve;"
+  echo "}"
   echo "map \$kx_forwarded_proto \$kx_hsts {"
   echo "  default \"\";"
   if [ -n "$HSTS" ]; then echo "  https \"$HSTS\";"; fi
@@ -167,7 +174,7 @@ EOF
 server {
   listen 80;
   server_name _;
-  location = /health { proxy_pass http://$UPSTREAM; }
+  location = /health { proxy_pass http://kx_api; }
   location / { return 301 https://\$host$REDIRECT_PORT\$request_uri; }
 }
 
