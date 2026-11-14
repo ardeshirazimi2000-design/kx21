@@ -5,7 +5,7 @@ import { badRequest, notFound } from '../lib/errors.js';
 /**
  * Letter visibility (RBAC + ABAC), appended to `params`:
  *  - direct participants: creator, routing sender/receiver (user or position), workflow assignees,
- *    internal recipients (user/position/unit) once the letter left draft;
+ *    internal recipients and copies (user/position/unit) once the letter was handed to them (numbered, or sent);
  *  - organisational access: `letter.read_all` in the letter's unit scope or head of that unit.
  * Every path is limited by confidentiality ≤ the user's clearance: being a participant never overrides it.
  */
@@ -27,8 +27,8 @@ export function letterVisibleSql(u: AuthUser, params: unknown[], alias = 'l'): s
                AND (r.from_user_id = ${me} OR r.to_user_id = ${me} OR r.to_position_id = ANY(${positions}::uuid[])))
     OR EXISTS (SELECT 1 FROM workflow_steps ws JOIN workflow_instances wi ON wi.id = ws.instance_id WHERE wi.letter_id = ${alias}.id
                AND (ws.assignee_user_id = ${me} OR ws.assignee_position_id = ANY(${positions}::uuid[])))
-    OR (${alias}.status <> 'draft' AND EXISTS (SELECT 1 FROM letter_recipients lr WHERE lr.letter_id = ${alias}.id
-               AND (lr.user_id = ${me} OR lr.position_id = ANY(${positions}::uuid[]) OR lr.unit_id = ANY(${units}::uuid[]))))
+    OR EXISTS (SELECT 1 FROM letter_recipients lr WHERE lr.letter_id = ${alias}.id AND lr.delivered_at IS NOT NULL
+               AND (lr.user_id = ${me} OR lr.position_id = ANY(${positions}::uuid[]) OR lr.unit_id = ANY(${units}::uuid[])))
     OR ${all}::boolean OR ${alias}.owner_unit_id = ANY(${orgUnits}::uuid[])
   ))`;
 }

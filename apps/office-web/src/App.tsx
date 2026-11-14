@@ -16,6 +16,7 @@ import { LoginPage } from './pages/Login';
 import { MeetingDetailPage, MeetingsPage } from './pages/Meetings';
 import { NotificationsPage, TemplatesPage } from './pages/Notifications';
 import { OrgPage } from './pages/Org';
+import { OrgChartPage } from './pages/OrgChart';
 import { ProfilePage } from './pages/Profile';
 import { ReportsPage } from './pages/Reports';
 import { ResolutionDetailPage, ResolutionsPage } from './pages/Resolutions';
@@ -78,6 +79,7 @@ export function App() {
         <Route path="/notification-templates" element={<TemplatesPage />} />
         <Route path="/reports" element={<ReportsPage />} />
         <Route path="/org" element={<OrgPage />} />
+        <Route path="/org-chart" element={<OrgChartPage />} />
         <Route path="/users" element={<UsersPage />} />
         <Route path="/roles" element={<RolesPage />} />
         <Route path="/integrations" element={<IntegrationsPage />} />

@@ -195,7 +195,11 @@ export function paperLetter(l: any, opts: { qrSvg?: string | null; draftSigner?:
     l.kind === 'internal'
       ? (l.recipients ?? []).filter((r: any) => r.kind === 'to').map((r: any) => recipientLabel(r))
       : [l.external_party, l.external_org].filter(Boolean);
-  const cc = l.kind === 'internal' ? (l.recipients ?? []).filter((r: any) => r.kind === 'cc').map((r: any) => recipientLabel(r)) : [];
+  const withNote = (label: string, note?: string | null) => (note ? `${label} ${note}` : label);
+  const cc = [
+    ...(l.recipients ?? []).filter((r: any) => r.kind === 'cc').map((r: any) => withNote(recipientLabel(r), r.note)),
+    ...(l.kind === 'outgoing' ? (l.externalCopies ?? []).map((x: any) => withNote(x.label, x.note)) : []),
+  ];
   const final = !!l.number && signed.length > 0;
   return {
     kind: l.kind,
