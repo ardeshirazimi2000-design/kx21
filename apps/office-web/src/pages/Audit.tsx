@@ -1,3 +1,4 @@
+import { officeAuditAction, officeAuditEntity } from '@kx/shared';
 import { Fragment, useState } from 'react';
 import { Badge, Button, Card, Empty, Loading, PageHeader, Pager, dateTimeFa, fa } from '../components/ui';
 import { get } from '../lib/api';
@@ -14,7 +15,7 @@ export function AuditPage() {
   return (
     <>
       <PageHeader
-        title="رویدادنگاری (Audit Log)"
+        title="رویدادنگاری"
         subtitle="همه تغییرات با زنجیره هش ثبت می‌شوند و قابل ویرایش یا حذف نیستند"
         actions={
           <Button variant="secondary" busy={act.busy} onClick={() => act.run(async () => setVerify(await get('/audit/verify')))}>
@@ -43,7 +44,7 @@ export function AuditPage() {
                   <th>کاربر</th>
                   <th>عملیات</th>
                   <th>موجودیت</th>
-                  <th>IP</th>
+                  <th>نشانی IP</th>
                 </tr>
               </thead>
               <tbody>
@@ -53,15 +54,18 @@ export function AuditPage() {
                       <td>{fa(a.id)}</td>
                       <td className="small">{dateTimeFa(a.created_at)}</td>
                       <td>{a.user_name ?? 'سامانه'}</td>
-                      <td className="mono">{a.action}</td>
+                      <td title={a.action}>{officeAuditAction(a.action)}</td>
                       <td className="small">
-                        <Badge>{a.entity}</Badge> <span className="mono">{a.entity_id?.slice(0, 8)}</span>
+                        <Badge>{officeAuditEntity(a.entity)}</Badge> <span className="mono">{a.entity_id?.slice(0, 8)}</span>
                       </td>
                       <td className="mono small">{a.ip ?? '—'}</td>
                     </tr>
                     {open === a.id && (
                       <tr>
                         <td colSpan={6}>
+                          <div className="small muted">
+                            کد عملیات: <span className="mono">{a.action}</span>
+                          </div>
                           {a.reason && <div>علت: {a.reason}</div>}
                           <pre className="pre ltr small" style={{ whiteSpace: 'pre-wrap' }}>
                             {JSON.stringify({ before: a.before, after: a.after }, null, 2)}

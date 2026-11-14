@@ -11,3 +11,4 @@ export * from './secrets.js';
 export * from './securityPolicy.js';
 export * from './council.js';
 export * from './pdf.js';
+export * from './officeAudit.js';

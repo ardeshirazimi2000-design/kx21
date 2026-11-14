@@ -60,8 +60,8 @@ if [ "$HSTS_MAX_AGE" != off ]; then
   HSTS="max-age=$HSTS_MAX_AGE"
   if [ "$HSTS_SUB" = 1 ]; then HSTS="$HSTS; includeSubDomains"; fi
 fi
-# Report-only first: the TipTap editor, printing and the Vazirmatn web font must be checked before enforcing.
-CSP="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' data: blob:; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'; report-uri /api/csp-report"
+# Report-only first: the TipTap editor and printing must be checked before enforcing.
+CSP="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self' data:; img-src 'self' data: blob:; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'; report-uri /api/csp-report"
 case "$CSP_MODE" in
   report-only) CSP_HEADER="add_header Content-Security-Policy-Report-Only \"$CSP\" always;" ;;
   enforce) CSP_HEADER="add_header Content-Security-Policy \"$CSP\" always;" ;;
