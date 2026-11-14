@@ -38,7 +38,7 @@ export async function connectMeetings(opts: { meetingsUrl: string; email: string
   if (existing) await call(base, 'PATCH', `/integrations/${existing.id}`, login.accessToken, { webhookUrl: opts.webhookUrl, isActive: true });
   await pool.query(
     `INSERT INTO integrations (kind, name, base_url, client_id, client_secret_enc, webhook_secret_enc, settings, is_active)
-     VALUES ('meetings', 'سامانه جلسات کمیسیون‌ها', $1, $2, $3, $4, '{}'::jsonb, true)
+     VALUES ('meetings', 'سامانه جلسات', $1, $2, $3, $4, '{}'::jsonb, true)
      ON CONFLICT (kind) DO UPDATE SET base_url = EXCLUDED.base_url, client_id = EXCLUDED.client_id, client_secret_enc = EXCLUDED.client_secret_enc,
        webhook_secret_enc = EXCLUDED.webhook_secret_enc, is_active = true, last_error = NULL, updated_at = now()`,
     [base, client.clientId, encryptText(client.apiKey), encryptText(client.webhookSecret)],

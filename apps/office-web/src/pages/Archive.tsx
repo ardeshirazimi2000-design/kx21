@@ -421,7 +421,7 @@ function DocumentModal({ id, onClose }: { id: string; onClose: () => void }) {
           {dispose && (
             <ReasonModal
               title="امحای سند"
-              label="علت و مستند امحا (صورتجلسه کمیسیون امحا)"
+              label="علت و مستند امحا (صورتجلسه کمیته امحا)"
               danger
               onClose={() => setDispose(false)}
               onSubmit={async (reason) => {

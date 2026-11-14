@@ -2,9 +2,11 @@ import { useState } from 'react';
 import { Icon } from '../components/icons';
 import { Button, ErrorBox, Field } from '../components/ui';
 import { useAuth } from '../lib/auth';
+import { useOrgProfile } from '../lib/org';
 
 export function LoginPage() {
   const { login, verifyMfa } = useAuth();
+  const org = useOrgProfile();
   const [identifier, setIdentifier] = useState('');
   const [password, setPassword] = useState('');
   const [mfaToken, setMfaToken] = useState<string | null>(null);
@@ -51,14 +53,14 @@ export function LoginPage() {
               <Icon name="signature" /> امضای الکترونیک و چاپ روی سربرگ رسمی
             </li>
             <li>
-              <Icon name="resolution" /> پیگیری اجرای مصوبات کمیسیون‌های تخصصی
+              <Icon name="resolution" /> پیگیری اجرای مصوبات جلسات
             </li>
             <li>
               <Icon name="shield" /> ورود امن با تأیید دومرحله‌ای
             </li>
           </ul>
         </div>
-        <small>© اتاق بازرگانی، صنایع، معادن و کشاورزی ایران</small>
+        <small>{org?.name ? `© ${org.name}` : 'رسا — سامانه هوشمند اتوماسیون و مدیریت سازمانی'}</small>
       </aside>
       <main className="login-main">
         <form className="login-form" onSubmit={submit}>

@@ -9,7 +9,7 @@ import { tx, type Db } from './pool.js';
 export const DEFAULT_WORKFLOWS: { key: string; name: string; description: string; appliesTo: string[]; definition: WorkflowDefinition }[] = [
   {
     key: 'resolution-followup',
-    name: 'پیگیری اجرای مصوبه کمیسیون',
+    name: 'پیگیری اجرای مصوبه جلسه',
     description: 'برای هر مصوبه دریافتی از سامانه جلسات: اقدام مسئول اجرا، تأیید مدیر واحد، بازخورد خودکار به سامانه جلسات',
     appliesTo: ['internal'],
     definition: {

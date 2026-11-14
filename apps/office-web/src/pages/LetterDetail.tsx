@@ -13,6 +13,7 @@ import { Badge, Button, Card, Empty, ErrorBox, Field, JalaliDateTimeInput, Loadi
 import { download, fetchText, openFile, patch, post, upload } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { useAction, useApi } from '../lib/hooks';
+import { useOrgProfile } from '../lib/org';
 
 const size = (n: number) => (n > 1048576 ? `${fa((n / 1048576).toFixed(1))} مگابایت` : `${fa(Math.ceil(n / 1024))} کیلوبایت`);
 
@@ -20,6 +21,7 @@ export function LetterDetailPage() {
   const { id } = useParams();
   const nav = useNavigate();
   const r = useApi<any>(`/letters/${id}`, [id]);
+  const org = useOrgProfile();
   const [modal, setModal] = useState<null | 'refer' | 'copy' | 'workflow' | 'meeting' | 'cancel' | 'send' | 'archive'>(null);
   const act = useAction();
   const [codes, setCodes] = useState<{ barcode: string; qr: string } | null>(null);
@@ -77,7 +79,7 @@ export function LetterDetailPage() {
             {l.my.canStartWorkflow && <Button variant="secondary" onClick={() => setModal('workflow')}>شروع گردش کار</Button>}
             {l.my.canSign && <Button variant="success" busy={act.busy} onClick={() => confirm('نامه با امضای دیجیتال شما امضا شود؟ تصویر نمونه امضای شما زیر نامه قرار می‌گیرد و پس از آن متن نامه قابل ویرایش نیست.') && doAct(() => post(`/letters/${l.id}/sign`))}>امضا</Button>}
             {l.my.canSend && <Button onClick={() => setModal('send')}>ارسال</Button>}
-            {l.my.canReferToMeeting && <Button variant="secondary" onClick={() => setModal('meeting')}>ارجاع به کمیسیون</Button>}
+            {l.my.canReferToMeeting && <Button variant="secondary" onClick={() => setModal('meeting')}>ارجاع به جلسه</Button>}
             {l.my.canArchive && <Button variant="secondary" onClick={() => setModal('archive')}>بایگانی</Button>}
             {l.kind === 'incoming' && l.number && <Link className="btn btn-ghost" to={`/letters/new?replyTo=${l.id}`}>پاسخ</Link>}
             {l.kind !== 'incoming' ? (
@@ -94,7 +96,7 @@ export function LetterDetailPage() {
       <div className="print-only">
         <div className="letterhead">
           <div>
-            <strong>اتاق بازرگانی، صنایع، معادن و کشاورزی ایران</strong>
+            {org?.name && <strong>{org.name}</strong>}
             <div>{l.owner_unit}</div>
           </div>
           <dl className="kv">
@@ -300,11 +302,11 @@ export function LetterDetailPage() {
       </Card>
 
       {l.meetingRefs.length > 0 && (
-        <Card title="ارجاع به کمیسیون‌ها" className="mt">
+        <Card title="ارجاع به جلسات" className="mt">
           <table className="table">
             <thead>
               <tr>
-                <th>کمیسیون</th>
+                <th>برگزارکننده</th>
                 <th>وضعیت در سامانه جلسات</th>
                 <th>دستور جلسه</th>
                 <th>تاریخ</th>
@@ -712,7 +714,7 @@ function MeetingReferralModal({ letter, onClose, onDone }: { letter: any; onClos
   const upcoming = (meetings.data?.items ?? []).filter((m) => m.commission_id === commissionId);
   return (
     <Modal
-      title="ارجاع مکاتبه به کمیسیون (سامانه جلسات)"
+      title="ارجاع مکاتبه به جلسه (سامانه جلسات)"
       onClose={onClose}
       footer={
         <Button
@@ -730,8 +732,8 @@ function MeetingReferralModal({ letter, onClose, onDone }: { letter: any; onClos
       }
     >
       <ErrorBox error={act.error ?? commissions.error} />
-      <p className="small muted">نامه به‌عنوان موضوع پیشنهادی دستور جلسه در کمیسیون ثبت می‌شود و تغییر وضعیت آن به شما اطلاع داده می‌شود.</p>
-      <Field label="کمیسیون">
+      <p className="small muted">نامه به‌عنوان موضوع پیشنهادی دستور جلسه نزد برگزارکننده ثبت می‌شود و تغییر وضعیت آن به شما اطلاع داده می‌شود.</p>
+      <Field label="برگزارکننده جلسه">
         <select className="input" value={commissionId} onChange={(e) => (setCommissionId(e.target.value), setMeetingId(''))}>
           <option value="">انتخاب کنید…</option>
           {(commissions.data ?? []).map((c) => (
@@ -744,7 +746,7 @@ function MeetingReferralModal({ letter, onClose, onDone }: { letter: any; onClos
       {upcoming.length > 0 && (
         <Field label="جلسه پیشنهادی (اختیاری)">
           <select className="input" value={meetingId} onChange={(e) => setMeetingId(e.target.value)}>
-            <option value="">به تشخیص دبیر کمیسیون</option>
+            <option value="">به تشخیص دبیر جلسه</option>
             {upcoming.map((m) => (
               <option key={m.id} value={m.id}>
                 {m.title} — {dateTimeFa(m.scheduled_at)}
@@ -753,7 +755,7 @@ function MeetingReferralModal({ letter, onClose, onDone }: { letter: any; onClos
           </select>
         </Field>
       )}
-      <Field label="توضیح برای دبیرخانه کمیسیون">
+      <Field label="توضیح برای دبیرخانه جلسات">
         <textarea className="input" rows={3} value={note} onChange={(e) => setNote(e.target.value)} />
       </Field>
       <label className="check">

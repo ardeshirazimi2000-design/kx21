@@ -1,5 +1,5 @@
 /**
- * Integration with the commission meetings system (سامانه جلسات کمیسیون‌ها), see docs/office/04-integration.md.
+ * Integration with the commission meetings system (سامانه جلسات), see docs/office/04-integration.md.
  *  - Sync (REST): commissions, meetings, resolutions, referral of a letter, attachments.
  *  - Async (events): signed webhooks from the meetings outbox, or polling /events when inbound calls are not possible.
  * Inbound events land in integration_inbox (deduplicated) and are processed by the job queue.
@@ -17,6 +17,9 @@ import { enqueue, registerHandler } from '../services/jobs.js';
 import { newTrackingCode, nextLetterNumber, primaryUnitOf } from '../services/letters.js';
 import { notify } from '../services/notifications.js';
 import { cancelWorkflow, onWorkflowFinished, startWorkflow } from '../services/workflow.js';
+
+/** « <name>» of the body that held a meeting (e.g. a commission or a committee), or nothing when unknown. */
+const of = (name: string | null | undefined) => (name?.trim() ? ` ${name.trim()}` : '');
 
 export const SYSTEM = 'meetings';
 
@@ -268,7 +271,7 @@ async function createResolutionLetter(db: Db, i: Integration, r: any, ownerUserI
   const num = await nextLetterNumber(db, 'internal');
   const due = r.due_date ? formatJalaliDate(`${r.due_date}T12:00:00`) : 'تعیین نشده';
   const body = [
-    `مصوبه شماره ${r.number} کمیسیون ${r.commission_name}${r.meeting_number ? ` (جلسه ${r.meeting_number})` : ''}:`,
+    `مصوبه شماره ${r.number}${of(r.commission_name)}${r.meeting_number ? ` (جلسه ${r.meeting_number})` : ''}:`,
     '',
     r.text,
     '',
@@ -279,7 +282,7 @@ async function createResolutionLetter(db: Db, i: Integration, r: any, ownerUserI
     `INSERT INTO letters (kind, number, year, seq, tracking_code, subject, body, source, priority, status, owner_unit_id, due_date,
         registered_at, registered_by, created_by)
      VALUES ('internal',$1,$2,$3,$4,$5,$6,'meeting',$7,'registered',$8,$9, now(), $10, $10) RETURNING *`,
-    [num.number, num.year, num.seq, await newTrackingCode(db), `ابلاغ مصوبه ${r.number} کمیسیون ${r.commission_name}`, body, r.priority ?? 'normal', unitId, r.due_date, creator],
+    [num.number, num.year, num.seq, await newTrackingCode(db), `ابلاغ مصوبه ${r.number}${of(r.commission_name)}`, body, r.priority ?? 'normal', unitId, r.due_date, creator],
     db,
   );
   if (ownerUserId) await query(`INSERT INTO letter_recipients (letter_id, user_id, kind, delivered_at) VALUES ($1,$2,'to', now())`, [letter.id, ownerUserId], db);
@@ -314,13 +317,13 @@ function invitationBody(m: any, p: any, note?: string | null) {
     p.organization ? p.organization : null,
     '',
     'با سلام و احترام،',
-    `به استحضار می‌رساند جلسه${m.number ? ` شماره ${m.number}` : ''} کمیسیون ${m.commission_name} با موضوع «${m.title}» ${when}${where ? ` ${where}` : ''} برگزار می‌شود.`,
+    `به استحضار می‌رساند جلسه${m.number ? ` شماره ${m.number}` : ''}${of(m.commission_name)} با موضوع «${m.title}» ${when}${where ? ` ${where}` : ''} برگزار می‌شود.`,
     agenda.length ? '\nدستور جلسه:' : null,
     ...agenda,
     m.online_link && m.type !== 'in_person' ? `\nنشانی حضور برخط: ${m.online_link}` : null,
     note ? `\n${note}` : null,
     '',
-    'از جنابعالی دعوت می‌شود در این جلسه حضور یابید. خواهشمند است در صورت عدم امکان حضور، مراتب یا نماینده خود را به دبیرخانه کمیسیون اعلام فرمایید.',
+    'از جنابعالی دعوت می‌شود در این جلسه حضور یابید. خواهشمند است در صورت عدم امکان حضور، مراتب یا نماینده خود را به دبیرخانه جلسه اعلام فرمایید.',
   ]
     .filter((x) => x !== null)
     .join('\n');
@@ -353,7 +356,7 @@ export async function createInvitationLetters(input: { meetingId: string; invite
                  (SELECT id FROM letter_templates WHERE is_default AND is_active AND 'outgoing' = ANY(kinds))) RETURNING id`,
         [
           await newTrackingCode(db),
-          `دعوت به جلسه کمیسیون ${m.commission_name}${m.number ? ` (جلسه ${m.number})` : ''}`,
+          `دعوت به جلسه${of(m.commission_name)}${m.number ? ` (جلسه ${m.number})` : ''}`,
           invitationBody(m, p, input.note),
           p.full_name,
           p.organization ?? null,

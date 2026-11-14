@@ -2,17 +2,19 @@ import { useParams } from 'react-router-dom';
 import { KIND } from '../components/labels';
 import { Badge, Card, ErrorBox, Loading, dateFa, dateTimeFa, fa } from '../components/ui';
 import { useApi } from '../lib/hooks';
+import { useOrgProfile } from '../lib/org';
 
 /** Public page behind the QR code printed on letters. */
 export function VerifyPage() {
   const { code } = useParams();
   const r = useApi<any>(`/verify/${code}`, [code]);
+  const org = useOrgProfile();
   return (
     <div className="verify">
       <div className="login-brand" style={{ color: 'inherit' }}>
-        <img src="/iran-chamber-logo.png" width={72} height={72} alt="لوگوی اتاق ایران" />
+        {org?.logoUrl && <img src={org.logoUrl} className={org.hasLogo ? undefined : 'org-logo-builtin'} height={72} alt={org.name ? `لوگوی ${org.name}` : ''} />}
         <h1>صحت‌سنجی نامه</h1>
-        <p className="muted">اتاق بازرگانی، صنایع، معادن و کشاورزی ایران</p>
+        {org?.name && <p className="muted">{org.name}</p>}
       </div>
       {r.loading ? (
         <Loading />

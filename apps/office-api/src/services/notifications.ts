@@ -11,8 +11,8 @@ export const NOTIFICATION_EVENTS = {
   'workflow.escalated': 'ارجاع خودکار به‌دلیل تأخیر (Escalation)',
   'workflow.completed': 'پایان گردش کار',
   'workflow.rejected': 'رد در گردش کار',
-  'resolution.assigned': 'ابلاغ مصوبه کمیسیون',
-  'meeting.referral_updated': 'وضعیت ارجاع به کمیسیون',
+  'resolution.assigned': 'ابلاغ مصوبه جلسه',
+  'meeting.referral_updated': 'وضعیت ارجاع به جلسه',
   'meeting.invitation_letters': 'پیش‌نویس نامه‌های دعوت جلسه',
   'archive.retention_due': 'سررسید نگهداری اسناد',
 } as const;
@@ -46,14 +46,14 @@ export const DEFAULT_TEMPLATES: Record<NotificationEvent, Partial<Record<Channel
   'workflow.completed': { in_app: { subject: 'پایان گردش: {{subject}}', body: 'گردش «{{workflow}}» نامه {{number}} با موفقیت به پایان رسید.' } },
   'workflow.rejected': { in_app: { subject: 'رد شد: {{subject}}', body: 'نامه {{number}} در گام «{{step}}» رد شد. {{comment}}' } },
   'resolution.assigned': {
-    in_app: { subject: 'مصوبه {{resolution}}', body: 'اجرای مصوبه {{resolution}} کمیسیون {{commission}} به شما ابلاغ شد. مهلت: {{due}}' },
-    email: { subject: 'ابلاغ مصوبه {{resolution}}', body: '{{name}} گرامی،\nمصوبه {{resolution}} کمیسیون {{commission}}:\n«{{text}}»\nمهلت اجرا: {{due}}\n{{link}}' },
-    sms: { body: 'ابلاغ مصوبه {{resolution}} کمیسیون {{commission}} — مهلت {{due}}' },
+    in_app: { subject: 'مصوبه {{resolution}}', body: 'اجرای مصوبه {{resolution}} {{commission}} به شما ابلاغ شد. مهلت: {{due}}' },
+    email: { subject: 'ابلاغ مصوبه {{resolution}}', body: '{{name}} گرامی،\nمصوبه {{resolution}} {{commission}}:\n«{{text}}»\nمهلت اجرا: {{due}}\n{{link}}' },
+    sms: { body: 'ابلاغ مصوبه {{resolution}} {{commission}} — مهلت {{due}}' },
   },
-  'meeting.referral_updated': { in_app: { subject: 'ارجاع به کمیسیون: {{subject}}', body: 'وضعیت ارجاع نامه {{number}} به کمیسیون {{commission}}: {{status}}' } },
+  'meeting.referral_updated': { in_app: { subject: 'ارجاع به جلسه: {{subject}}', body: 'وضعیت ارجاع نامه {{number}} به {{commission}}: {{status}}' } },
   'meeting.invitation_letters': {
-    in_app: { subject: 'نامه‌های دعوت: {{meeting}}', body: '{{count}} پیش‌نویس نامه دعوت برای جلسه «{{meeting}}» کمیسیون {{commission}} ({{date}}) آماده ثبت و امضاست.' },
-    email: { subject: 'نامه‌های دعوت جلسه {{meeting}}', body: '{{name}} گرامی،\n{{count}} پیش‌نویس نامه دعوت برای جلسه «{{meeting}}» کمیسیون {{commission}} ({{date}}) آماده ثبت و امضاست.\n{{link}}' },
+    in_app: { subject: 'نامه‌های دعوت: {{meeting}}', body: '{{count}} پیش‌نویس نامه دعوت برای جلسه «{{meeting}}» {{commission}} ({{date}}) آماده ثبت و امضاست.' },
+    email: { subject: 'نامه‌های دعوت جلسه {{meeting}}', body: '{{name}} گرامی،\n{{count}} پیش‌نویس نامه دعوت برای جلسه «{{meeting}}» {{commission}} ({{date}}) آماده ثبت و امضاست.\n{{link}}' },
   },
   'archive.retention_due': { in_app: { subject: 'سررسید نگهداری', body: '{{count}} سند به پایان دوره نگهداری رسیده و منتظر تصمیم (امحا/بازبینی) است.' } },
 };

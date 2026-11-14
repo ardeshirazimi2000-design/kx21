@@ -122,7 +122,7 @@ const QUICK: { to: string; label: string; icon: IconName; perm?: string }[] = [
   { to: '/cartable', label: 'کارتابل', icon: 'inbox' },
   { to: '/letters', label: 'مکاتبات', icon: 'mail' },
   { to: '/smart-search', label: 'جستجوی هوشمند', icon: 'sparkle' },
-  { to: '/meetings', label: 'جلسات کمیسیون‌ها', icon: 'calendar', perm: 'meetings.view' },
+  { to: '/meetings', label: 'جلسات', icon: 'calendar', perm: 'meetings.view' },
   { to: '/reports', label: 'گزارش‌ها', icon: 'chart', perm: 'reports.view' },
 ];
 

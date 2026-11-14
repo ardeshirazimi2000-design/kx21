@@ -1,5 +1,5 @@
 /**
- * Demo data: organisation chart of a chamber, users for every stakeholder, archive folders.
+ * Demo data: organisation chart of a sample organisation, users for every stakeholder, archive folders.
  * Password of all accounts: Passw0rd!  (emails match the meetings demo accounts, so participants map automatically)
  */
 import bcrypt from 'bcryptjs';
@@ -44,21 +44,22 @@ export async function seed() {
       return u.id as string;
     };
 
-    // ساختار سازمانی
-    const presidency = await unit('ریاست اتاق', 'PRS', 'presidency');
-    const deputy = await unit('معاونت امور اعضا و تشکل‌ها', 'DEP-M', 'deputy', presidency);
+    // مشخصات و ساختار سازمانی
+    await c.query(`UPDATE org_profile SET name = 'سازمان نمونه', short_name = 'سازمان نمونه', updated_at = now() WHERE name = ''`);
+    const presidency = await unit('ریاست سازمان', 'PRS', 'presidency');
+    const deputy = await unit('معاونت برنامه‌ریزی و توسعه', 'DEP-M', 'deputy', presidency);
     const secretariat = await unit('دبیرخانه مرکزی', 'SEC', 'secretariat', presidency);
-    const commissions = await unit('اداره امور کمیسیون‌ها', 'CMS', 'department', deputy);
-    const research = await unit('مرکز پژوهش‌ها و بررسی‌های اقتصادی', 'RES', 'department', presidency);
+    const commissions = await unit('اداره امور جلسات', 'CMS', 'department', deputy);
+    const research = await unit('مرکز پژوهش و برنامه‌ریزی', 'RES', 'department', presidency);
     const it = await unit('واحد فناوری اطلاعات', 'IT', 'office', presidency);
 
-    const pPresident = await position(presidency, 'رئیس اتاق', true);
-    const pDeputy = await position(deputy, 'معاون امور اعضا', true, pPresident);
+    const pPresident = await position(presidency, 'رئیس سازمان', true);
+    const pDeputy = await position(deputy, 'معاون برنامه‌ریزی و توسعه', true, pPresident);
     const pSecHead = await position(secretariat, 'رئیس دبیرخانه', true, pPresident);
     const pSecClerk = await position(secretariat, 'کارشناس دبیرخانه', false, pSecHead);
-    const pCmsHead = await position(commissions, 'مدیر امور کمیسیون‌ها', true, pDeputy);
-    const pCmsExpert = await position(commissions, 'کارشناس امور کمیسیون‌ها', false, pCmsHead);
-    const pResHead = await position(research, 'رئیس مرکز پژوهش‌ها', true, pPresident);
+    const pCmsHead = await position(commissions, 'مدیر امور جلسات', true, pDeputy);
+    const pCmsExpert = await position(commissions, 'کارشناس امور جلسات', false, pCmsHead);
+    const pResHead = await position(research, 'رئیس مرکز پژوهش', true, pPresident);
     const pResExpert = await position(research, 'کارشناس اقتصادی', false, pResHead);
     const pIt = await position(it, 'مسئول فناوری اطلاعات', true, pPresident);
 
@@ -77,7 +78,7 @@ export async function seed() {
     // بایگانی
     const root = (await one(`INSERT INTO archive_folders (name, code) VALUES ('مکاتبات', 'LTR') RETURNING id`, [])).id;
     const policy = (await one(`SELECT id FROM retention_policies WHERE retain_years = 5`, [])).id;
-    for (const [u, name, code] of [[secretariat, 'دبیرخانه مرکزی', 'SEC'], [commissions, 'اداره امور کمیسیون‌ها', 'CMS'], [research, 'مرکز پژوهش‌ها و بررسی‌های اقتصادی', 'RES']] as const) {
+    for (const [u, name, code] of [[secretariat, 'دبیرخانه مرکزی', 'SEC'], [commissions, 'اداره امور جلسات', 'CMS'], [research, 'مرکز پژوهش و برنامه‌ریزی', 'RES']] as const) {
       await c.query(`INSERT INTO archive_folders (parent_id, name, code, unit_id, retention_policy_id) VALUES ($1,$2,$3,$4,$5)`, [root, name, code, u, policy]);
     }
     const contracts = (await one(`INSERT INTO archive_folders (name, code) VALUES ('قراردادها', 'CTR') RETURNING id`, [])).id;
@@ -97,13 +98,13 @@ export async function seed() {
     const chamber = await contact('organization', 'اتاق بازرگانی، صنایع، معادن و کشاورزی تهران');
     await contact('position', 'دبیرکل', chamber);
 
-    await c.query(`INSERT INTO integrations (kind, name, settings, is_active) VALUES ('meetings', 'سامانه جلسات کمیسیون‌ها', $1, false)`, [
+    await c.query(`INSERT INTO integrations (kind, name, settings, is_active) VALUES ('meetings', 'سامانه جلسات', $1, false)`, [
       JSON.stringify({ resolutionWorkflowKey: 'resolution-followup', defaultUnitId: commissions, autoFeedback: true, auth: 'apikey' }),
     ]);
     await c.query('COMMIT');
     console.table([
-      ['admin', 'مدیر سیستم'], ['president', 'رئیس اتاق'], ['deputy', 'معاون'], ['sechead / clerk', 'دبیرخانه'],
-      ['cmshead / cmsexpert', 'امور کمیسیون‌ها'], ['reshead / expert', 'مرکز پژوهش‌ها'], ['it', 'فناوری اطلاعات'],
+      ['admin', 'مدیر سیستم'], ['president', 'رئیس سازمان'], ['deputy', 'معاون'], ['sechead / clerk', 'دبیرخانه'],
+      ['cmshead / cmsexpert', 'امور جلسات'], ['reshead / expert', 'مرکز پژوهش'], ['it', 'فناوری اطلاعات'],
     ]);
     console.log(`password for all accounts: ${SEED_PASSWORD}`);
   } catch (e) {

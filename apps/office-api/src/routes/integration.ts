@@ -135,7 +135,7 @@ integrationRouter.put('/integrations/meetings', async (req, res) => {
   const b = body(
     req,
     z.object({
-      name: z.string().min(2).max(100).default('سامانه جلسات کمیسیون‌ها'),
+      name: z.string().min(2).max(100).default('سامانه جلسات'),
       baseUrl: z.string().url().transform((s) => s.replace(/\/+$/, '')),
       clientId: z.string().max(100).nullish(),
       apiKey: z.string().min(10).max(300).optional(),

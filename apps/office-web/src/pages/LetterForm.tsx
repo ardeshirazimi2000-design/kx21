@@ -510,7 +510,7 @@ export function LetterFormPage() {
                 <ContactPicker value={xContact} onChange={(v) => (setXContact(v), setXLabel(''))} />
               </div>
               <Field label="یا نام سازمان">
-                <input className="input" value={xLabel} disabled={!!xContact} onChange={(e) => setXLabel(e.target.value)} placeholder="مثلاً: اتاق بازرگانی استان" maxLength={300} />
+                <input className="input" value={xLabel} disabled={!!xContact} onChange={(e) => setXLabel(e.target.value)} placeholder="مثلاً: سازمان برنامه و بودجه استان" maxLength={300} />
               </Field>
               <Field label="شرح رونوشت">
                 <input className="input" list="cc-notes" value={xNote} onChange={(e) => setXNote(e.target.value)} placeholder="جهت اطلاع" maxLength={200} />

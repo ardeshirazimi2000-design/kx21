@@ -30,12 +30,12 @@ export const MENU: MenuGroup[] = [
     ],
   },
   {
-    id: 'commissions',
-    title: 'کمیسیون‌ها',
+    id: 'meetings',
+    title: 'جلسات',
     icon: 'users',
     items: [
-      { to: '/resolutions', label: 'مصوبات کمیسیون‌ها', icon: 'resolution' },
-      { to: '/meetings', label: 'جلسات کمیسیون‌ها', icon: 'calendar', perm: 'meetings.view' },
+      { to: '/meetings', label: 'فهرست جلسات', icon: 'calendar', perm: 'meetings.view' },
+      { to: '/resolutions', label: 'پیگیری مصوبات', icon: 'resolution' },
     ],
   },
   {
@@ -53,6 +53,7 @@ export const MENU: MenuGroup[] = [
     icon: 'shield',
     items: [
       { to: '/workflows', label: 'گردش‌های کار', icon: 'workflow', perm: 'workflow.manage' },
+      { to: '/org-profile', label: 'مشخصات سازمان', icon: 'building', perm: 'org.manage' },
       { to: '/org', label: 'ساختار سازمانی', icon: 'org', perm: 'org.manage' },
       { to: '/users', label: 'کاربران', icon: 'user', perm: 'users.manage' },
       { to: '/roles', label: 'نقش‌ها و مجوزها', icon: 'shield', perm: 'roles.manage' },
@@ -67,8 +68,8 @@ const EXTRA_TITLES: [RegExp, string, string?][] = [
   [/^\/$/, 'داشبورد'],
   [/^\/letters\/[^/]+\/edit$/, 'ویرایش نامه', 'مکاتبات'],
   [/^\/letters\/(?!new$)[^/]+$/, 'جزئیات نامه', 'مکاتبات'],
-  [/^\/meetings\/[^/]+$/, 'جزئیات جلسه', 'کمیسیون‌ها'],
-  [/^\/resolutions\/[^/]+$/, 'جزئیات مصوبه', 'کمیسیون‌ها'],
+  [/^\/meetings\/[^/]+$/, 'جزئیات جلسه', 'جلسات'],
+  [/^\/resolutions\/[^/]+$/, 'جزئیات مصوبه', 'جلسات'],
   [/^\/profile$/, 'حساب کاربری'],
 ];
 

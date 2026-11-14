@@ -53,13 +53,13 @@ export function IntegrationsPage() {
     });
   return (
     <>
-      <PageHeader title="یکپارچه‌سازی" subtitle="اتصال دوطرفه با سامانه جلسات کمیسیون‌ها و درگاه دریافت نامه (ایمیل، اسکن، سامانه‌های دیگر)" />
+      <PageHeader title="یکپارچه‌سازی" subtitle="اتصال دوطرفه با سامانه جلسات و درگاه دریافت نامه (ایمیل، اسکن، سامانه‌های دیگر)" />
       <ErrorBox error={act.error} />
       {result && <div className="alert alert-success">{result}</div>}
       <Card
         title={
           <span className="row gap-sm">
-            سامانه جلسات کمیسیون‌ها {meetings?.is_active ? <Badge tone="success">فعال</Badge> : <Badge>غیرفعال</Badge>}
+            سامانه جلسات {meetings?.is_active ? <Badge tone="success">فعال</Badge> : <Badge>غیرفعال</Badge>}
           </span>
         }
         actions={
@@ -88,7 +88,7 @@ export function IntegrationsPage() {
         </Field>
         <div className="grid grid-2">
           <Field label="آدرس سامانه جلسات">
-            <input className="input ltr" placeholder="https://commissions.example.ir" value={f.baseUrl} onChange={(e) => setF({ ...f, baseUrl: e.target.value })} />
+            <input className="input ltr" placeholder="https://meetings.example.ir" value={f.baseUrl} onChange={(e) => setF({ ...f, baseUrl: e.target.value })} />
           </Field>
           <Field label="روش احراز هویت">
             <select className="input" value={f.auth} onChange={(e) => setF({ ...f, auth: e.target.value })}>

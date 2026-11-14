@@ -66,7 +66,7 @@ export const config = {
   kavenegarSender: process.env.KAVENEGAR_SENDER,
   emailProvider: env('EMAIL_PROVIDER', 'log') as 'log' | 'smtp',
   smtpUrl: process.env.SMTP_URL,
-  emailFrom: process.env.EMAIL_FROM ?? 'اتوماسیون اداری <no-reply@chamber.local>',
+  emailFrom: process.env.EMAIL_FROM ?? 'اتوماسیون اداری <no-reply@office.local>',
   workerEnabled: process.env.WORKER_ENABLED !== 'false',
   workerIntervalSeconds: Number(env('WORKER_INTERVAL_SECONDS', '5')),
   schedulerIntervalSeconds: Number(env('SCHEDULER_INTERVAL_SECONDS', '300')),
