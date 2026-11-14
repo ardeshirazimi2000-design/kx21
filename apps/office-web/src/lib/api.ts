@@ -155,3 +155,17 @@ export async function fetchText(path: string): Promise<string> {
   if (!res.ok) throw new ApiError(res.status, 'error', 'دریافت ممکن نشد');
   return res.text();
 }
+
+/** POST that answers with a file (a scan from a network scanner); errors come back as the usual JSON. */
+export async function postForBlob(path: string, json: unknown): Promise<{ blob: Blob; headers: Headers }> {
+  const s = getSession();
+  const headers: Record<string, string> = { 'content-type': 'application/json' };
+  if (s) headers.authorization = `Bearer ${s.accessToken}`;
+  const res = await fetch(`/api${path}`, { method: 'POST', headers, body: JSON.stringify(json) });
+  if (res.status === 401 && (await refresh())) return postForBlob(path, json);
+  if (!res.ok) {
+    const data = (res.headers.get('content-type') ?? '').includes('application/json') ? await res.json() : null;
+    throw new ApiError(res.status, data?.error?.code ?? 'error', data?.error?.message ?? 'خطا در ارتباط با سرور');
+  }
+  return { blob: await res.blob(), headers: res.headers };
+}

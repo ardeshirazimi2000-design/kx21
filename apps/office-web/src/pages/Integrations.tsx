@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { UnitSelect } from '../components/pickers';
 import { Badge, Button, Card, ErrorBox, Field, Loading, PageHeader, Pager, dateTimeFa, fa } from '../components/ui';
-import { post, put } from '../lib/api';
+import { del, get, patch, post, put } from '../lib/api';
 import { useAction, useApi } from '../lib/hooks';
 
 const INBOX: Record<string, [string, 'neutral' | 'success' | 'danger' | 'warning']> = {
@@ -147,6 +147,7 @@ export function IntegrationsPage() {
       </Card>
 
       <AiSettings />
+      <ScannerSettings />
 
       <Card title="رویدادهای دریافتی از سامانه جلسات" className="mt">
         <table className="table">
@@ -291,6 +292,92 @@ function AiSettings() {
           نمایه می‌شوند.
         </p>
       )}
+    </Card>
+  );
+}
+
+/** Network scanners (eSCL / AirScan) that staff can scan from straight into a letter's attachments. */
+function ScannerSettings() {
+  const r = useApi<any[]>('/scanners');
+  const [f, setF] = useState({ name: '', url: '', location: '' });
+  const [tested, setTested] = useState<Record<string, string>>({});
+  const act = useAction();
+  const add = () =>
+    act.run(async () => {
+      await post('/scanners', { name: f.name, url: f.url, location: f.location || null });
+      setF({ name: '', url: '', location: '' });
+      await r.reload();
+    });
+  const test = (id: string) =>
+    act.run(async () => {
+      try {
+        const c = await get(`/scanners/${id}/capabilities`);
+        setTested((t) => ({ ...t, [id]: `${c.makeAndModel ?? 'اسکنر'} — ${fa(c.sources.length)} منبع، ${c.state === 'Idle' ? 'آماده' : c.state ?? ''}` }));
+      } finally {
+        await r.reload();
+      }
+    });
+  return (
+    <Card title="اسکنرهای شبکه" className="mt">
+      <p className="small muted mb">
+        اسکنرها و دستگاه‌های چندکاره‌ای که از پروتکل eSCL (AirScan) پشتیبانی می‌کنند — بیشتر مدل‌های HP، Canon، Epson، Brother، Kyocera و Ricoh — مستقیماً از سرور اسکن می‌شوند و
+        کاربران در بخش پیوست نامه دکمه «اسکنر» را می‌بینند. اسکنر USB را می‌توان با یک رایانه کوچک و نرم‌افزار AirSane در شبکه به اشتراک گذاشت. سرور باید به نشانی اسکنر دسترسی شبکه
+        داشته باشد.
+      </p>
+      <ErrorBox error={act.error} />
+      {(r.data ?? []).length > 0 && (
+        <table className="table mb">
+          <thead>
+            <tr>
+              <th>نام</th>
+              <th>نشانی</th>
+              <th>آخرین وضعیت</th>
+              <th />
+            </tr>
+          </thead>
+          <tbody>
+            {(r.data ?? []).map((s) => (
+              <tr key={s.id}>
+                <td>
+                  {s.name} {!s.is_active && <Badge>غیرفعال</Badge>}
+                  {s.location && <div className="small muted">{s.location}</div>}
+                </td>
+                <td className="mono small" dir="ltr">
+                  {s.url}
+                </td>
+                <td className="small">
+                  {tested[s.id] ?? (s.last_error ? <span className="text-danger">{s.last_error}</span> : s.last_used_at ? `آخرین استفاده ${dateTimeFa(s.last_used_at)}` : '—')}
+                </td>
+                <td className="row gap-sm">
+                  <Button size="sm" variant="ghost" onClick={() => test(s.id)} disabled={!s.is_active}>
+                    آزمون اتصال
+                  </Button>
+                  <Button size="sm" variant="ghost" onClick={() => act.run(async () => (await patch(`/scanners/${s.id}`, { isActive: !s.is_active }), await r.reload()))}>
+                    {s.is_active ? 'غیرفعال' : 'فعال'}
+                  </Button>
+                  <Button size="sm" variant="ghost" onClick={() => confirm(`اسکنر «${s.name}» حذف شود؟`) && act.run(async () => (await del(`/scanners/${s.id}`), await r.reload()))}>
+                    حذف
+                  </Button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+      <div className="grid grid-4" style={{ alignItems: 'end' }}>
+        <Field label="نام اسکنر">
+          <input className="input" value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} placeholder="اسکنر دبیرخانه" />
+        </Field>
+        <Field label="نشانی eSCL" hint="مثلاً http://192.168.1.40/eSCL">
+          <input className="input" dir="ltr" value={f.url} onChange={(e) => setF({ ...f, url: e.target.value })} placeholder="http://192.168.1.40" />
+        </Field>
+        <Field label="محل (اختیاری)">
+          <input className="input" value={f.location} onChange={(e) => setF({ ...f, location: e.target.value })} placeholder="طبقه دوم" />
+        </Field>
+        <Button onClick={add} busy={act.busy} disabled={f.name.trim().length < 2 || f.url.trim().length < 8}>
+          افزودن اسکنر
+        </Button>
+      </div>
     </Card>
   );
 }

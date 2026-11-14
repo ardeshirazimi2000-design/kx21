@@ -13,7 +13,7 @@ import { body, dateStr, listParam, paged, pageParams, param, parse, uuid } from 
 import { letterVisibleSql, loadVisibleLetter, requireCleared } from '../services/access.js';
 import { archiveLetter } from '../services/archive.js';
 import { contactText } from '../services/contacts.js';
-import { LETTER_HASH_VERSION, letterContentHash, letterHashes, newTrackingCode, nextLetterNumber, primaryUnitOf } from '../services/letters.js';
+import { LETTER_HASH_VERSION, letterContentHash, letterHashes, managerPositionOf, newTrackingCode, nextLetterNumber, primaryUnitOf } from '../services/letters.js';
 import { notify, positionHolders } from '../services/notifications.js';
 import { signaturesOf, signContent, verifySignature } from '../services/signatures.js';
 import { actOnStep, canActOnStep, cancelWorkflow, startWorkflow } from '../services/workflow.js';
@@ -21,8 +21,20 @@ import { actOnStep, canActOnStep, cancelWorkflow, startWorkflow } from '../servi
 export const lettersRouter = Router();
 
 const recipientSchema = z
-  .object({ userId: uuid.nullish(), positionId: uuid.nullish(), unitId: uuid.nullish(), kind: z.enum(['to', 'cc']).default('to') })
+  .object({
+    userId: uuid.nullish(),
+    positionId: uuid.nullish(),
+    unitId: uuid.nullish(),
+    kind: z.enum(['to', 'cc']).default('to'),
+    /** Printed after the name and given as the instruction in the cartable, e.g. «جهت اطلاع». */
+    note: z.string().trim().max(200).nullish(),
+  })
   .refine((r) => [r.userId, r.positionId, r.unitId].filter(Boolean).length === 1, 'هر گیرنده باید دقیقاً یک کاربر، سمت یا واحد باشد');
+
+/** A copy of an outgoing letter to another organisation: a contact from the directory, or a typed name. */
+const externalCopySchema = z
+  .object({ contactId: uuid.nullish(), label: z.string().trim().max(300).nullish(), note: z.string().trim().max(200).nullish() })
+  .refine((r) => !!r.contactId || !!r.label, 'گیرنده رونوشت بیرونی را از مخاطبین انتخاب یا نام آن را وارد کنید');
 
 const letterSchema = z.object({
   kind: z.enum(['incoming', 'outgoing', 'internal']),
@@ -43,6 +55,7 @@ const letterSchema = z.object({
   replyToId: uuid.nullish(),
   dueDate: dateStr.nullish(),
   recipients: z.array(recipientSchema).max(100).optional(),
+  externalCopies: z.array(externalCopySchema).max(50).optional(),
   templateId: uuid.nullish(),
   bodyFormat: z.enum(['text', 'html']).optional(),
   signatoryId: uuid.nullish(),
@@ -97,29 +110,79 @@ async function lockReason(c: Db, l: any): Promise<string | null> {
   return null;
 }
 
-async function setRecipients(c: Db, letterId: string, recipients: Recipient[] | undefined) {
+const recipientKey = (r: { userId?: string | null; positionId?: string | null; unitId?: string | null; kind: string }) =>
+  `${r.kind}:${r.userId ?? ''}:${r.positionId ?? ''}:${r.unitId ?? ''}`;
+
+/**
+ * Internal recipients. Only an internal letter has «گیرنده»; incoming and outgoing letters take internal copies (رونوشت).
+ * Rows that stay keep their delivery mark, so editing a registered letter hands over only the recipients added.
+ */
+async function setRecipients(c: Db, letterId: string, kind: string, recipients: Recipient[] | undefined) {
   if (!recipients) return;
-  await c.query('DELETE FROM letter_recipients WHERE letter_id = $1', [letterId]);
+  const seen = new Set<string>();
   for (const r of recipients) {
-    await c.query('INSERT INTO letter_recipients (letter_id, user_id, position_id, unit_id, kind) VALUES ($1,$2,$3,$4,$5)', [
-      letterId, r.userId ?? null, r.positionId ?? null, r.unitId ?? null, r.kind,
-    ]);
+    if (kind !== 'internal' && r.kind === 'to') throw badRequest('برای نامه وارده و صادره فقط رونوشت داخلی تعیین می‌شود');
+    if (r.unitId && !(await managerPositionOf(r.unitId, c))) throw badRequest('واحد انتخاب‌شده سمت مدیر ندارد؛ گیرنده را به‌صورت سمت یا شخص انتخاب کنید');
+    const k = recipientKey(r);
+    if (seen.has(k)) throw badRequest('یک گیرنده دو بار انتخاب شده است');
+    seen.add(k);
+  }
+  const existing = await query('SELECT * FROM letter_recipients WHERE letter_id = $1', [letterId], c);
+  const byKey = new Map(existing.map((r) => [recipientKey({ kind: r.kind, userId: r.user_id, positionId: r.position_id, unitId: r.unit_id }), r]));
+  const keep = new Set<string>();
+  for (const [i, r] of recipients.entries()) {
+    const old = byKey.get(recipientKey(r));
+    if (old) {
+      keep.add(old.id);
+      await c.query('UPDATE letter_recipients SET note = $2, sort = $3 WHERE id = $1', [old.id, r.note || null, i]);
+    } else {
+      await c.query('INSERT INTO letter_recipients (letter_id, user_id, position_id, unit_id, kind, note, sort) VALUES ($1,$2,$3,$4,$5,$6,$7)', [
+        letterId, r.userId ?? null, r.positionId ?? null, r.unitId ?? null, r.kind, r.note || null, i,
+      ]);
+    }
+  }
+  const drop = existing.filter((r) => !keep.has(r.id)).map((r) => r.id);
+  if (drop.length) await c.query('DELETE FROM letter_recipients WHERE id = ANY($1::uuid[])', [drop]);
+}
+
+/** Copies to other organisations; only an outgoing letter has them. The label is composed from the contact, as on letters. */
+async function setExternalCopies(c: Db, letterId: string, kind: string, copies: z.infer<typeof externalCopySchema>[] | undefined) {
+  if (!copies) return;
+  if (kind !== 'outgoing' && copies.length) throw badRequest('رونوشت بیرونی فقط برای نامه صادره است');
+  await c.query('DELETE FROM letter_external_copies WHERE letter_id = $1', [letterId]);
+  for (const [i, x] of copies.entries()) {
+    let label = x.label ?? '';
+    if (x.contactId) {
+      const t = await contactText(c, x.contactId);
+      label = [t.externalParty, t.externalOrg].filter(Boolean).join(' — ');
+    }
+    await c.query('INSERT INTO letter_external_copies (letter_id, contact_id, label, note, sort) VALUES ($1,$2,$3,$4,$5)', [letterId, x.contactId ?? null, label, x.note || null, i]);
   }
 }
 
-/** Users behind the internal recipients (unit = its manager position holders). */
-async function recipientUsers(c: Db, letterId: string): Promise<string[]> {
-  const rows = await query('SELECT * FROM letter_recipients WHERE letter_id = $1', [letterId], c);
-  const ids: string[] = [];
+/** A letter reaches its internal recipients once it is final: internal and incoming letters when numbered, outgoing ones when sent. */
+const deliverable = (l: { kind: string; number: string | null; status: string }) =>
+  l.status !== 'cancelled' && (l.kind === 'outgoing' ? l.status === 'sent' : !!l.number);
+
+/**
+ * Hands the letter to its recipients not yet delivered, through the cartable: «گیرنده» for action, «رونوشت» for information.
+ * A unit goes to its manager position (or the nearest manager above it).
+ */
+async function deliverRecipients(c: Db, u: AuthUser, l: any) {
+  const rows = await query('SELECT * FROM letter_recipients WHERE letter_id = $1 AND delivered_at IS NULL ORDER BY sort', [l.id], c);
   for (const r of rows) {
-    if (r.user_id) ids.push(r.user_id);
-    else if (r.position_id) ids.push(...(await positionHolders(r.position_id, c)));
-    else if (r.unit_id) {
-      const m = await one('SELECT id FROM positions WHERE unit_id = $1 AND is_manager', [r.unit_id], c);
-      if (m) ids.push(...(await positionHolders(m.id, c)));
-    }
+    const positionId = r.position_id ?? (r.unit_id ? await managerPositionOf(r.unit_id, c) : null);
+    if (!r.user_id && !positionId) continue;
+    const action = r.kind === 'cc' ? 'info' : 'refer';
+    const instruction = r.note || (r.kind === 'cc' ? 'رونوشت جهت اطلاع' : null);
+    await c.query(`INSERT INTO letter_routing (letter_id, from_user_id, to_user_id, to_position_id, action, instruction) VALUES ($1,$2,$3,$4,$5,$6)`, [
+      l.id, u.id, r.user_id ?? null, r.user_id ? null : positionId, action, instruction,
+    ]);
+    await c.query('UPDATE letter_recipients SET delivered_at = now() WHERE id = $1', [r.id]);
+    const users = r.user_id ? [r.user_id] : await positionHolders(positionId!, c);
+    await notify({ userIds: users, event: 'letter.received', vars: { subject: l.subject, number: l.number ?? '' }, data: { letterId: l.id } }, c);
   }
-  return ids;
+  if (rows.length) await audit(c, null, { userId: u.id, action: 'letter.delivered', entity: 'letter', entityId: l.id, after: { recipients: rows.map((r) => r.id) } });
 }
 
 async function register(c: Db, req: any, u: AuthUser, letter: any) {
@@ -134,9 +197,7 @@ async function register(c: Db, req: any, u: AuthUser, letter: any) {
     c,
   );
   await audit(c, req, { action: 'letter.registered', entity: 'letter', entityId: letter.id, after: { number: n.number } });
-  if (r.kind === 'internal') {
-    await notify({ userIds: await recipientUsers(c, r.id), event: 'letter.received', vars: { subject: r.subject, number: r.number }, data: { letterId: r.id } }, c);
-  }
+  if (deliverable(r)) await deliverRecipients(c, u, r);
   return r;
 }
 
@@ -165,7 +226,8 @@ lettersRouter.post('/letters', async (req, res) => {
       ],
       c,
     );
-    await setRecipients(c, l.id, b.recipients);
+    await setRecipients(c, l.id, b.kind, b.recipients);
+    await setExternalCopies(c, l.id, b.kind, b.externalCopies);
     await audit(c, req, { action: 'letter.created', entity: 'letter', entityId: l.id, after: l });
     if (b.register) l = await register(c, req, u, l);
     if (b.workflow) {
@@ -248,7 +310,7 @@ lettersRouter.get('/letters', async (req, res) => {
 lettersRouter.get('/letters/:id', async (req, res) => {
   const u = currentUser(req);
   const l = await loadVisibleLetter(u, param(req, 'id'));
-  const [extra, recipients, attachments, routing, instances, steps, refs, resolution, document] = await Promise.all([
+  const [extra, recipients, externalCopies, attachments, routing, instances, steps, refs, resolution, document] = await Promise.all([
     one(
       `SELECT ou.name AS owner_unit, cu.full_name AS created_by_name, ru.full_name AS registered_by_name, su.full_name AS signer_name,
               rt.number AS reply_to_number, rt.subject AS reply_to_subject, sg.full_name AS signatory_name,
@@ -263,9 +325,10 @@ lettersRouter.get('/letters/:id', async (req, res) => {
     query(
       `SELECT lr.*, us.full_name AS user_name, p.title AS position_title, pu.name AS position_unit, ou.name AS unit_name
          FROM letter_recipients lr LEFT JOIN users us ON us.id = lr.user_id LEFT JOIN positions p ON p.id = lr.position_id
-         LEFT JOIN org_units pu ON pu.id = p.unit_id LEFT JOIN org_units ou ON ou.id = lr.unit_id WHERE lr.letter_id = $1`,
+         LEFT JOIN org_units pu ON pu.id = p.unit_id LEFT JOIN org_units ou ON ou.id = lr.unit_id WHERE lr.letter_id = $1 ORDER BY lr.kind DESC, lr.sort`,
       [l.id],
     ),
+    query('SELECT id, contact_id, label, note FROM letter_external_copies WHERE letter_id = $1 ORDER BY sort', [l.id]),
     query(
       `SELECT a.id, a.group_id, a.version, a.title, a.file_name, a.mime_type, a.size_bytes, a.sha256, a.source, a.created_at, us.full_name AS uploaded_by_name
          FROM letter_attachments a LEFT JOIN users us ON us.id = a.uploaded_by WHERE a.letter_id = $1 ORDER BY a.created_at, a.version`,
@@ -305,6 +368,7 @@ lettersRouter.get('/letters/:id', async (req, res) => {
     ...l,
     ...extra,
     recipients,
+    externalCopies,
     attachments,
     routing,
     workflows: instances.map((i) => ({ ...i, steps: steps.filter((s) => s.instance_id === i.id) })),
@@ -368,7 +432,10 @@ lettersRouter.patch('/letters/:id', async (req, res) => {
       ],
       c,
     );
-    await setRecipients(c, l.id, b.recipients);
+    await setRecipients(c, l.id, l.kind, b.recipients);
+    await setExternalCopies(c, l.id, l.kind, b.externalCopies);
+    // A registered incoming letter may still gain copies; they are handed over at once.
+    if (deliverable(r)) await deliverRecipients(c, u, r);
     await audit(c, req, { action: 'letter.updated', entity: 'letter', entityId: l.id, before: l, after: r });
     return r;
   });
@@ -618,6 +685,7 @@ lettersRouter.post('/letters/:id/send', async (req, res) => {
       c,
     );
     await audit(c, req, { action: 'letter.sent', entity: 'letter', entityId: l.id, after: { deliveryMethod: r.delivery_method } });
+    await deliverRecipients(c, u, r);
     return r;
   });
   res.json(row);

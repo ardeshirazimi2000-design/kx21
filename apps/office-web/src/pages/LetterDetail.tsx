@@ -4,6 +4,7 @@ import {
   ACTION, CONFIDENTIALITY, ConfBadge, KIND, KindBadge, MEETING_STATUS, PRIORITY, Pill, REFERRAL_STATUS, RESOLUTION_STATUS, ROUTE_STATUS, SOURCE, STATUS,
   STEP_STATUS, STEP_TYPE, WF_STATUS,
 } from '../components/labels';
+import { AttachmentPicker, type PickedFile } from '../components/capture';
 import { PositionSelect, UserSelect } from '../components/pickers';
 import { LetterBody } from '../components/letterPaper';
 import { RelatedLetters } from './SmartSearch';
@@ -19,7 +20,7 @@ export function LetterDetailPage() {
   const { id } = useParams();
   const nav = useNavigate();
   const r = useApi<any>(`/letters/${id}`, [id]);
-  const [modal, setModal] = useState<null | 'refer' | 'workflow' | 'meeting' | 'cancel' | 'send' | 'archive'>(null);
+  const [modal, setModal] = useState<null | 'refer' | 'copy' | 'workflow' | 'meeting' | 'cancel' | 'send' | 'archive'>(null);
   const act = useAction();
   const [codes, setCodes] = useState<{ barcode: string; qr: string } | null>(null);
   useEffect(() => {
@@ -72,6 +73,7 @@ export function LetterDetailPage() {
             {l.my.canEdit && <Link className="btn btn-secondary" to={`/letters/${l.id}/edit`}>ویرایش</Link>}
             {l.my.canRegister && <Button busy={act.busy} onClick={() => doAct(() => post(`/letters/${l.id}/register`))}>ثبت و شماره‌گذاری</Button>}
             {l.status !== 'draft' && l.status !== 'cancelled' && <Button variant="secondary" onClick={() => setModal('refer')}>ارجاع</Button>}
+            {l.status !== 'draft' && l.status !== 'cancelled' && <Button variant="secondary" onClick={() => setModal('copy')}>ارسال رونوشت</Button>}
             {l.my.canStartWorkflow && <Button variant="secondary" onClick={() => setModal('workflow')}>شروع گردش کار</Button>}
             {l.my.canSign && <Button variant="success" busy={act.busy} onClick={() => confirm('نامه با امضای دیجیتال شما امضا شود؟ تصویر نمونه امضای شما زیر نامه قرار می‌گیرد و پس از آن متن نامه قابل ویرایش نیست.') && doAct(() => post(`/letters/${l.id}/sign`))}>امضا</Button>}
             {l.my.canSend && <Button onClick={() => setModal('send')}>ارسال</Button>}
@@ -142,10 +144,34 @@ export function LetterDetailPage() {
                 </dd>
               </>
             )}
-            {l.recipients.length > 0 && (
+            {l.recipients.some((x: any) => x.kind === 'to') && (
               <>
                 <dt>گیرندگان</dt>
-                <dd>{l.recipients.map((x: any) => `${x.kind === 'cc' ? 'رونوشت: ' : ''}${x.user_name ?? x.position_title ?? x.unit_name}`).join('، ')}</dd>
+                <dd>{l.recipients.filter((x: any) => x.kind === 'to').map((x: any) => x.user_name ?? x.position_title ?? x.unit_name).join('، ')}</dd>
+              </>
+            )}
+            {(l.recipients.some((x: any) => x.kind === 'cc') || l.externalCopies?.length > 0) && (
+              <>
+                <dt>رونوشت</dt>
+                <dd>
+                  <ul className="plain">
+                    {l.recipients
+                      .filter((x: any) => x.kind === 'cc')
+                      .map((x: any) => (
+                        <li key={x.id}>
+                          {x.user_name ?? x.position_title ?? x.unit_name}
+                          {x.note && <span className="muted"> {x.note}</span>}
+                          {!x.delivered_at && <span className="small muted"> (پس از {l.kind === 'outgoing' ? 'ارسال' : 'ثبت'} تحویل می‌شود)</span>}
+                        </li>
+                      ))}
+                    {(l.externalCopies ?? []).map((x: any) => (
+                      <li key={x.id}>
+                        {x.label}
+                        {x.note && <span className="muted"> {x.note}</span>} <Badge>بیرونی</Badge>
+                      </li>
+                    ))}
+                  </ul>
+                </dd>
               </>
             )}
             <dt>طبقه‌بندی</dt>
@@ -310,6 +336,7 @@ export function LetterDetailPage() {
       )}
 
       {modal === 'refer' && <ReferModal letter={l} onClose={close} onDone={done} />}
+      {modal === 'copy' && <ReferModal letter={l} copy onClose={close} onDone={done} />}
       {modal === 'workflow' && <StartWorkflowModal letter={l} onClose={close} onDone={done} />}
       {modal === 'meeting' && <MeetingReferralModal letter={l} onClose={close} onDone={done} />}
       {modal === 'cancel' && (
@@ -397,20 +424,20 @@ function Attachments({ letter: l, onChange }: { letter: any; onChange: () => Pro
   const editable = !['cancelled', 'archived', 'sent'].includes(l.status);
   const add = (file: File | undefined, groupId?: string) =>
     file && act.run(async () => (await upload(`/letters/${l.id}/attachments`, { groupId }, file), await onChange()));
+  const addMany = (files: PickedFile[]) =>
+    act.run(async () => {
+      for (const x of files) await upload(`/letters/${l.id}/attachments`, { source: x.source }, x.file);
+      await onChange();
+    });
   return (
-    <Card
-      title="پیوست‌ها"
-      className="mt no-print"
-      actions={
-        editable && (
-          <label className="btn btn-secondary btn-sm">
-            افزودن پیوست
-            <input type="file" hidden onChange={(e) => void add(e.target.files?.[0])} />
-          </label>
-        )
-      }
-    >
+    <Card title="پیوست‌ها" className="mt no-print">
       <ErrorBox error={act.error} />
+      {editable && (
+        <div className="mb">
+          <AttachmentPicker onAdd={addMany} disabled={act.busy} />
+          {act.busy && <p className="small muted">در حال بارگذاری…</p>}
+        </div>
+      )}
       {!groups.size ? (
         <Empty>پیوستی ندارد.</Empty>
       ) : (
@@ -430,7 +457,7 @@ function Attachments({ letter: l, onChange }: { letter: any; onChange: () => Pro
               return (
                 <tr key={last.group_id}>
                   <td>
-                    {last.title ?? last.file_name}
+                    {last.source === 'scan' && <Badge tone="info">اسکن</Badge>} {last.title ?? last.file_name}
                     {versions.length > 1 && (
                       <details className="small">
                         <summary>نسخه‌های قبلی</summary>
@@ -533,13 +560,14 @@ function Workflows({ letter: l, onChange }: { letter: any; onChange: () => Promi
 
 type Target = { userId?: string; positionId?: string; label: string; action: string; instruction: string; dueAt: string };
 
-function ReferModal({ letter, onClose, onDone, completeMine }: { letter: any; onClose: () => void; onDone: () => Promise<void>; completeMine?: boolean }) {
+/** Referral; with `copy` it is «ارسال رونوشت»: the same hand-over, for information, with the usual copy line. */
+function ReferModal({ letter, onClose, onDone, completeMine, copy }: { letter: any; onClose: () => void; onDone: () => Promise<void>; completeMine?: boolean; copy?: boolean }) {
   const [targets, setTargets] = useState<Target[]>([]);
   const [type, setType] = useState<'user' | 'position'>('user');
   const [value, setValue] = useState('');
   const [label, setLabel] = useState('');
-  const [action, setAction] = useState('refer');
-  const [instruction, setInstruction] = useState('');
+  const [action, setAction] = useState(copy ? 'info' : 'refer');
+  const [instruction, setInstruction] = useState(copy ? 'رونوشت جهت اطلاع' : '');
   const [dueAt, setDueAt] = useState('');
   const [closeMine, setCloseMine] = useState(!!completeMine);
   const act = useAction();
@@ -547,11 +575,11 @@ function ReferModal({ letter, onClose, onDone, completeMine }: { letter: any; on
     if (!value) return;
     setTargets([...targets, { [`${type}Id`]: value, label: label || 'سمت انتخاب‌شده', action, instruction, dueAt } as Target]);
     setValue('');
-    setInstruction('');
+    if (!copy) setInstruction('');
   };
   return (
     <Modal
-      title={`ارجاع نامه ${letter.number ?? ''}`}
+      title={`${copy ? 'ارسال رونوشت نامه' : 'ارجاع نامه'} ${letter.number ? fa(letter.number) : ''}`}
       onClose={onClose}
       wide
       footer={
@@ -569,7 +597,7 @@ function ReferModal({ letter, onClose, onDone, completeMine }: { letter: any; on
               })
             }
           >
-            ارجاع ({fa(targets.length)})
+            {copy ? 'ارسال رونوشت' : 'ارجاع'} ({fa(targets.length)})
           </Button>
           <Button variant="ghost" onClick={onClose}>
             انصراف

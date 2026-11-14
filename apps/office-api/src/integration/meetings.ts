@@ -282,7 +282,7 @@ async function createResolutionLetter(db: Db, i: Integration, r: any, ownerUserI
     [num.number, num.year, num.seq, await newTrackingCode(db), `ابلاغ مصوبه ${r.number} کمیسیون ${r.commission_name}`, body, r.priority ?? 'normal', unitId, r.due_date, creator],
     db,
   );
-  if (ownerUserId) await query(`INSERT INTO letter_recipients (letter_id, user_id, kind) VALUES ($1,$2,'to')`, [letter.id, ownerUserId], db);
+  if (ownerUserId) await query(`INSERT INTO letter_recipients (letter_id, user_id, kind, delivered_at) VALUES ($1,$2,'to', now())`, [letter.id, ownerUserId], db);
   await audit(db, null, { action: 'letter.created_from_resolution', entity: 'letter', entityId: letter.id, after: { resolution: r.id, number: letter.number }, userId: creator });
   const key = i.settings.resolutionWorkflowKey ?? 'resolution-followup';
   const def = await one('SELECT 1 FROM workflow_definitions WHERE key = $1 AND is_active', [key], db);

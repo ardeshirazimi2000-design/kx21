@@ -1,16 +1,26 @@
 import { useEffect, useState } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { LetterEditor } from '../components/editor';
+import { AttachmentPicker, PickedList, type PickedFile } from '../components/capture';
 import { ContactPicker, useContacts } from '../components/contacts';
 import { CONFIDENTIALITY, KIND, PRIORITY } from '../components/labels';
 import { LetterPaper, type LetterTemplate } from '../components/letterPaper';
 import { PositionSelect, UnitSelect, UserSelect, useOrg } from '../components/pickers';
-import { Button, Card, ErrorBox, Field, JalaliDateInput, Loading, PageHeader } from '../components/ui';
+import { Button, Card, ErrorBox, Field, JalaliDateInput, Loading, PageHeader, Tabs } from '../components/ui';
 import { get, patch, post, upload } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { useAction, useApi } from '../lib/hooks';
 
-type Recipient = { userId?: string; positionId?: string; unitId?: string; kind: 'to' | 'cc'; label: string };
+type Recipient = { userId?: string; positionId?: string; unitId?: string; kind: 'to' | 'cc'; label: string; note?: string };
+type ExternalCopy = { contactId?: string; label: string; note?: string };
+
+/** Usual lines after a name in a copy list. */
+const NOTES = ['جهت اطلاع', 'جهت استحضار', 'جهت اقدام', 'جهت بررسی و اعلام نظر', 'جهت پیگیری', 'جهت درج در پرونده'];
+const NEW_KINDS = [
+  { id: 'internal', label: 'نامه داخلی' },
+  { id: 'outgoing', label: 'نامه صادره' },
+  { id: 'incoming', label: 'ثبت نامه وارده' },
+] as const;
 
 const empty = {
   kind: 'internal' as 'incoming' | 'outgoing' | 'internal',
@@ -43,9 +53,15 @@ export function LetterFormPage() {
   const contacts = useContacts();
   const [loadedContact, setLoadedContact] = useState('');
   const workflows = useApi<any[]>(can('workflow.start') ? '/workflows' : null);
-  const [f, setF] = useState({ ...empty, kind: (sp.get('kind') as typeof empty.kind) ?? (can('letter.register_incoming') ? 'incoming' : 'internal') });
-  const [recipients, setRecipients] = useState<Recipient[]>([]);
-  const [files, setFiles] = useState<File[]>([]);
+  const [f, setF] = useState({ ...empty, kind: (sp.get('kind') as typeof empty.kind) ?? (sp.get('to') || !can('letter.register_incoming') ? 'internal' : 'incoming') });
+  const [recipients, setRecipients] = useState<Recipient[]>(() => {
+    // From the org chart: «نامه به این شخص / واحد».
+    const [type, value] = (sp.get('to') ?? '').split(':');
+    if (!value || !['user', 'position', 'unit'].includes(type)) return [];
+    return [{ [`${type}Id`]: value, kind: 'to', label: sp.get('toLabel') ?? '' } as Recipient];
+  });
+  const [copies, setCopies] = useState<ExternalCopy[]>([]);
+  const [files, setFiles] = useState<PickedFile[]>([]);
   const [register, setRegister] = useState(false);
   const [workflow, setWorkflow] = useState('');
   const [replyTo, setReplyTo] = useState<any>(null);
@@ -58,6 +74,11 @@ export function LetterFormPage() {
   const [registeredNumber, setRegisteredNumber] = useState<{ number: string | null; date: string | null }>({ number: null, date: null });
   const act = useAction();
   const set = (k: keyof typeof empty, v: any) => setF((x) => ({ ...x, [k]: v }));
+  // Only an internal letter has «گیرنده» inside the organisation; on other kinds they become copies.
+  const setKind = (k: typeof empty.kind) => {
+    set('kind', k);
+    if (k !== 'internal') setRecipients((rs) => rs.map((r) => ({ ...r, kind: 'cc' })));
+  };
 
   useEffect(() => {
     if (!id) return;
@@ -70,10 +91,11 @@ export function LetterFormPage() {
       });
       setRecipients(
         l.recipients.map((r: any) => ({
-          userId: r.user_id ?? undefined, positionId: r.position_id ?? undefined, unitId: r.unit_id ?? undefined, kind: r.kind,
+          userId: r.user_id ?? undefined, positionId: r.position_id ?? undefined, unitId: r.unit_id ?? undefined, kind: r.kind, note: r.note ?? '',
           label: r.user_name ?? (r.position_title ? `${r.position_title} — ${r.position_unit}` : r.unit_name),
         })),
       );
+      setCopies((l.externalCopies ?? []).map((x: any) => ({ contactId: x.contact_id ?? undefined, label: x.label, note: x.note ?? '' })));
       setLoadedContact(l.contact_id ?? '');
       setTemplateId(l.template_id ?? '');
       setRegisteredNumber({ number: l.number, date: l.registered_at });
@@ -120,6 +142,10 @@ export function LetterFormPage() {
   const [rValue, setRValue] = useState('');
   const [rLabel, setRLabel] = useState('');
   const [rKind, setRKind] = useState<'to' | 'cc'>('to');
+  const [rNote, setRNote] = useState('');
+  const [xContact, setXContact] = useState('');
+  const [xLabel, setXLabel] = useState('');
+  const [xNote, setXNote] = useState('');
 
   if (!loaded) return <Loading />;
   const external = f.kind !== 'internal';
@@ -154,8 +180,17 @@ export function LetterFormPage() {
               return p ? `${p.title} — ${org.unitName(p.unit_id)}` : '';
             })()
           : org.unitName(rValue);
-    setRecipients([...recipients, { [`${rType}Id`]: rValue, kind: rKind, label } as Recipient]);
+    const kind = f.kind === 'internal' ? rKind : 'cc';
+    if (recipients.some((r) => r.kind === kind && (r.userId ?? r.positionId ?? r.unitId) === rValue)) return setRValue('');
+    setRecipients([...recipients, { [`${rType}Id`]: rValue, kind, label, note: rNote } as Recipient]);
     setRValue('');
+  };
+  const addCopy = () => {
+    const label = xContact ? contacts.pathLabel(xContact) : xLabel.trim();
+    if (!label) return;
+    setCopies([...copies, { contactId: xContact || undefined, label, note: xNote }]);
+    setXContact('');
+    setXLabel('');
   };
 
   const submit = (e: React.FormEvent) => {
@@ -185,7 +220,8 @@ export function LetterFormPage() {
         confidentiality: Number(f.confidentiality),
         ownerUnitId: f.ownerUnitId || null,
         dueDate: f.dueDate || null,
-        recipients: recipients.map(({ label: _l, ...r }) => r),
+        recipients: recipients.map(({ label: _l, note, ...r }) => ({ ...r, kind: f.kind === 'internal' ? r.kind : 'cc', note: note || null })),
+        ...(f.kind === 'outgoing' ? { externalCopies: copies.map((x) => ({ contactId: x.contactId ?? null, label: x.contactId ? null : x.label, note: x.note || null })) } : {}),
       };
       let letterId = id;
       if (id) await patch(`/letters/${id}`, payload);
@@ -193,7 +229,7 @@ export function LetterFormPage() {
         const l = await post('/letters', { ...payload, kind: f.kind, source: f.source, replyToId: replyTo?.id ?? null, register, workflow: workflow || null });
         letterId = l.id;
       }
-      for (const file of files) await upload(`/letters/${letterId}/attachments`, { source: f.source === 'scan' ? 'scan' : 'upload' }, file);
+      for (const x of files) await upload(`/letters/${letterId}/attachments`, { source: x.source === 'scan' || f.source === 'scan' ? 'scan' : 'upload' }, x.file);
       nav(`/letters/${letterId}`);
     });
   };
@@ -202,20 +238,25 @@ export function LetterFormPage() {
     <>
       <PageHeader title={id ? 'ویرایش نامه' : 'نامه جدید'} subtitle={replyTo ? `در پاسخ به نامه ${replyTo.number ?? ''} — ${replyTo.subject}` : undefined} />
       <form onSubmit={submit}>
+        {!id && (
+          <div className="kind-tabs">
+            <Tabs value={f.kind} onChange={setKind} tabs={NEW_KINDS.filter((k) => k.id !== 'incoming' || can('letter.register_incoming')).map((k) => ({ ...k }))} />
+          </div>
+        )}
         <Card>
           <ErrorBox error={act.error} />
           <div className="grid grid-4">
-            <Field label="نوع نامه">
-              <select className="input" value={f.kind} disabled={!!id} onChange={(e) => set('kind', e.target.value)}>
-                {Object.entries(KIND)
-                  .filter(([k]) => k !== 'incoming' || can('letter.register_incoming'))
-                  .map(([k, l]) => (
+            {id && (
+              <Field label="نوع نامه">
+                <select className="input" value={f.kind} disabled>
+                  {Object.entries(KIND).map(([k, l]) => (
                     <option key={k} value={k}>
                       {l}
                     </option>
                   ))}
-              </select>
-            </Field>
+                </select>
+              </Field>
+            )}
             <Field label="اولویت">
               <select className="input" value={f.priority} onChange={(e) => set('priority', e.target.value)}>
                 {Object.entries(PRIORITY).map(([k, [l]]) => (
@@ -360,7 +401,10 @@ export function LetterFormPage() {
                             ? [`به: ${recipients.filter((r) => r.kind === 'to').map((r) => r.label).join('، ')}`]
                             : []
                           : [party.person, party.org].filter(Boolean),
-                      cc: f.kind === 'internal' ? recipients.filter((r) => r.kind === 'cc').map((r) => r.label) : [],
+                      cc: [
+                        ...recipients.filter((r) => r.kind === 'cc').map((r) => (r.note ? `${r.label} ${r.note}` : r.label)),
+                        ...(f.kind === 'outgoing' ? copies.map((x) => (x.note ? `${x.label} ${x.note}` : x.label)) : []),
+                      ],
                       signatures: signer.name ? [{ key: 'signer', name: signer.name, position: signer.position }] : [],
                       watermark: 'پیش‌نویس',
                     }}
@@ -376,43 +420,102 @@ export function LetterFormPage() {
           </Card>
         )}
 
-        {f.kind === 'internal' && (
-          <Card title="گیرندگان داخلی" className="mt">
-            {recipients.length > 0 && (
-              <ul className="list mb">
-                {recipients.map((r, i) => (
-                  <li key={i} className="row between">
-                    <span>
-                      {r.kind === 'cc' ? 'رونوشت: ' : 'گیرنده: '}
-                      {r.label}
+        <Card
+          title={f.kind === 'internal' ? 'گیرندگان و رونوشت‌ها' : 'رونوشت داخلی'}
+          className="mt"
+        >
+          {f.kind !== 'internal' && (
+            <p className="small muted mb">
+              {f.kind === 'outgoing'
+                ? 'واحدها یا افرادی که رونوشت نامه را می‌گیرند؛ پس از ارسال نامه، رونوشت «جهت اطلاع» در کارتابل آن‌ها قرار می‌گیرد.'
+                : 'واحدها یا افرادی که از نامه رسیده باخبر می‌شوند؛ پس از ثبت، رونوشت «جهت اطلاع» در کارتابل آن‌ها قرار می‌گیرد. برای اقدام از «ارجاع» استفاده کنید.'}
+            </p>
+          )}
+          {recipients.length > 0 && (
+            <ul className="recipients mb">
+              {recipients.map((r, i) => (
+                <li key={i}>
+                  <span className={`rcpt-kind ${r.kind}`}>{r.kind === 'cc' ? 'رونوشت' : 'گیرنده'}</span>
+                  <span className="grow">
+                    <strong>{r.label || '—'}</strong>
+                    {r.note && <span className="muted"> {r.note}</span>}
+                  </span>
+                  <Button type="button" variant="ghost" size="sm" onClick={() => setRecipients(recipients.filter((_, j) => j !== i))}>
+                    حذف
+                  </Button>
+                </li>
+              ))}
+            </ul>
+          )}
+          <div className="rcpt-add">
+            <Field label="از">
+              <select className="input" value={rType} onChange={(e) => (setRType(e.target.value as typeof rType), setRValue(''))}>
+                <option value="user">شخص</option>
+                <option value="position">سمت</option>
+                <option value="unit">واحد (مدیر واحد)</option>
+              </select>
+            </Field>
+            <div className="rcpt-target">
+              <span className="field-label">{rType === 'user' ? 'نام شخص' : rType === 'position' ? 'سمت' : 'واحد'}</span>
+              {rType === 'user' && <UserSelect value={rValue} onChange={(v, u) => (setRValue(v), setRLabel(u?.full_name ?? ''))} />}
+              {rType === 'position' && <PositionSelect value={rValue} onChange={setRValue} />}
+              {rType === 'unit' && <UnitSelect value={rValue} onChange={setRValue} emptyLabel="انتخاب واحد…" />}
+            </div>
+            {f.kind === 'internal' && (
+              <Field label="به‌عنوان">
+                <select className="input" value={rKind} onChange={(e) => setRKind(e.target.value as 'to' | 'cc')}>
+                  <option value="to">گیرنده</option>
+                  <option value="cc">رونوشت</option>
+                </select>
+              </Field>
+            )}
+            {(f.kind !== 'internal' || rKind === 'cc') && (
+              <Field label="شرح رونوشت">
+                <input className="input" list="cc-notes" value={rNote} onChange={(e) => setRNote(e.target.value)} placeholder="جهت اطلاع" maxLength={200} />
+              </Field>
+            )}
+            <Button type="button" variant="secondary" onClick={addRecipient} disabled={!rValue}>
+              افزودن
+            </Button>
+          </div>
+          <datalist id="cc-notes">
+            {NOTES.map((n) => (
+              <option key={n} value={n} />
+            ))}
+          </datalist>
+        </Card>
+
+        {f.kind === 'outgoing' && (
+          <Card title="رونوشت بیرونی" className="mt">
+            <p className="small muted mb">سازمان‌های دیگری که رونوشت این نامه را می‌گیرند؛ زیر نامه در بخش «رونوشت» چاپ می‌شوند.</p>
+            {copies.length > 0 && (
+              <ul className="recipients mb">
+                {copies.map((x, i) => (
+                  <li key={i}>
+                    <span className="rcpt-kind cc">رونوشت</span>
+                    <span className="grow">
+                      <strong>{x.label}</strong>
+                      {x.note && <span className="muted"> {x.note}</span>}
                     </span>
-                    <Button type="button" variant="ghost" size="sm" onClick={() => setRecipients(recipients.filter((_, j) => j !== i))}>
+                    <Button type="button" variant="ghost" size="sm" onClick={() => setCopies(copies.filter((_, j) => j !== i))}>
                       حذف
                     </Button>
                   </li>
                 ))}
               </ul>
             )}
-            <div className="row gap wrap" style={{ alignItems: 'flex-end' }}>
-              <Field label="نوع">
-                <select className="input" value={rType} onChange={(e) => (setRType(e.target.value as typeof rType), setRValue(''))}>
-                  <option value="user">کاربر</option>
-                  <option value="position">سمت</option>
-                  <option value="unit">واحد (مدیر واحد)</option>
-                </select>
-              </Field>
-              <div className="grow">
-                {rType === 'user' && <UserSelect value={rValue} onChange={(v, u) => (setRValue(v), setRLabel(u?.full_name ?? ''))} />}
-                {rType === 'position' && <PositionSelect value={rValue} onChange={setRValue} />}
-                {rType === 'unit' && <UnitSelect value={rValue} onChange={setRValue} emptyLabel="انتخاب واحد…" />}
+            <div className="rcpt-add">
+              <div className="rcpt-target">
+                <span className="field-label">از مخاطبین بیرونی</span>
+                <ContactPicker value={xContact} onChange={(v) => (setXContact(v), setXLabel(''))} />
               </div>
-              <Field label="گیرنده/رونوشت">
-                <select className="input" value={rKind} onChange={(e) => setRKind(e.target.value as 'to' | 'cc')}>
-                  <option value="to">گیرنده</option>
-                  <option value="cc">رونوشت</option>
-                </select>
+              <Field label="یا نام سازمان">
+                <input className="input" value={xLabel} disabled={!!xContact} onChange={(e) => setXLabel(e.target.value)} placeholder="مثلاً: اتاق بازرگانی استان" maxLength={300} />
               </Field>
-              <Button type="button" variant="secondary" onClick={addRecipient} disabled={!rValue}>
+              <Field label="شرح رونوشت">
+                <input className="input" list="cc-notes" value={xNote} onChange={(e) => setXNote(e.target.value)} placeholder="جهت اطلاع" maxLength={200} />
+              </Field>
+              <Button type="button" variant="secondary" onClick={addCopy} disabled={!xContact && !xLabel.trim()}>
                 افزودن
               </Button>
             </div>
@@ -420,7 +523,8 @@ export function LetterFormPage() {
         )}
 
         <Card title="پیوست‌ها" className="mt">
-          <input type="file" multiple accept=".pdf,.doc,.docx,.xls,.xlsx,.png,.jpg,.jpeg,.tif,.tiff,.zip,.txt" onChange={(e) => setFiles([...(e.target.files ?? [])])} />
+          <AttachmentPicker onAdd={(more) => setFiles((x) => [...x, ...more])} />
+          <PickedList files={files} onRemove={(i) => setFiles(files.filter((_, j) => j !== i))} />
           <p className="small muted">پیوست‌ها رمزنگاری‌شده ذخیره می‌شوند؛ نسخه‌های بعدی را در صفحه نامه بارگذاری کنید.</p>
         </Card>
 
