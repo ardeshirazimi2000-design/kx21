@@ -1,6 +1,8 @@
 import { createServer, type Server } from 'node:http';
 import { readFile, readdir } from 'node:fs/promises';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { OFFICE_AUDIT_ACTIONS, OFFICE_AUDIT_ENTITIES } from '@kx/shared';
 import request from 'supertest';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createApp } from '../src/app.js';
@@ -762,6 +764,35 @@ describe('reports & audit', () => {
     expect(v.body.count).toBeGreaterThan(20);
     await expect(pool.query(`UPDATE audit_logs SET action = 'x' WHERE id = 1`)).rejects.toThrow(/append-only/);
     expect((await as('clerk').get('/api/audit')).status).toBe(403);
+  });
+
+  it('names every audit action and entity in Persian and finds them by the Persian name', async () => {
+    // Every literal action code in the sources, plus the ones built from a template string.
+    const src = fileURLToPath(new URL('../src', import.meta.url));
+    const files = (await readdir(src, { recursive: true })).filter((f) => f.endsWith('.ts'));
+    const codes = new Set<string>(['workflow.completed', 'workflow.rejected', 'workflow.cancelled', 'workflow.step.approve', 'workflow.step.reject', 'routing.done', 'routing.returned']);
+    for (const k of ['logo', 'background']) codes.add(`letter_template.${k}_set`).add(`letter_template.${k}_removed`);
+    const entities = new Set<string>();
+    for (const f of files) {
+      const text = await readFile(path.join(src, f), 'utf8');
+      for (const call of text.matchAll(/audit\((?:[^()]|\([^()]*\))*?\}\)/gs)) {
+        for (const m of call[0].matchAll(/'([a-z_]+(?:\.[a-z_]+)+)'/g)) codes.add(m[1]);
+        for (const m of call[0].matchAll(/entity: '([a-z_]+)'/g)) entities.add(m[1]);
+      }
+    }
+    const stored = await pool.query<{ action: string; entity: string }>('SELECT DISTINCT action, entity FROM audit_logs');
+    for (const r of stored.rows) codes.add(r.action), entities.add(r.entity);
+    expect(codes.size).toBeGreaterThan(60);
+    expect([...codes].filter((c) => !OFFICE_AUDIT_ACTIONS[c])).toEqual([]);
+    expect([...entities].filter((e) => !OFFICE_AUDIT_ENTITIES[e])).toEqual([]);
+
+    const r = await as('admin').get('/api/audit?q=' + encodeURIComponent('ورود به سامانه'));
+    expect(r.body.items.length).toBeGreaterThan(0);
+    expect(new Set(r.body.items.map((i: any) => i.action))).toEqual(new Set(['auth.login']));
+    // Arabic ي/ك and a half-space instead of a space still match.
+    const fa = await as('admin').get('/api/audit?q=' + encodeURIComponent('ثبت\u200cو شماره گذاري'));
+    expect(fa.body.items.length).toBeGreaterThan(0);
+    expect(fa.body.items.every((i: any) => i.action === 'letter.registered')).toBe(true);
   });
 
   it('exposes health and Prometheus metrics', async () => {
