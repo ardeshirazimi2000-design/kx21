@@ -204,7 +204,7 @@ export async function meetingDetail(a: MeetingAccess, userId: string) {
   return {
     ...m,
     delegates,
-    commission: { id: a.commission.id, name: a.commission.name, code: a.commission.code },
+    commission: { id: a.commission.id, name: a.commission.name, code: a.commission.code, body_type: a.commission.body_type },
     settings: a.settings,
     capabilities: [...a.caps],
     availableActions: a.can('meeting.manage') || a.can('meeting.control') ? availableActions(m.status) : [],

@@ -21,6 +21,15 @@ describe('council case transitions', () => {
     void s;
   });
 
+  it('an expert meeting refers the case to the council, whose meeting is chosen later', () => {
+    const n = caseTransition('refer_to_council', { level: 'provincial', status: 'expert_review' })!;
+    expect(n.needsResolution).toBe('expert');
+    expect(n.next).toEqual({ level: 'provincial', status: 'council_pending' });
+    expect(caseTransition('schedule', n.next)!.next.status).toBe('on_agenda');
+    expect(caseTransition('return', n.next)!.next.status).toBe('expert_review');
+    expect(caseTransition('refer_to_council', { level: 'provincial', status: 'on_agenda' })).toBeNull();
+  });
+
   it('returns a provincial case under review to its origin, but a national one only a step back', () => {
     expect(caseTransition('return', { level: 'provincial', status: 'expert_review' })!.next).toEqual({ level: 'provincial', status: 'returned' });
     expect(caseTransition('return', { level: 'provincial', status: 'on_agenda' })!.next.status).toBe('expert_review');

@@ -58,6 +58,7 @@ export const ROLE_LABELS: Record<InviteeRole, string> = {
   expert: 'کارشناس',
   observer: 'ناظر',
   guest: 'مدعو',
+  council_secretary: 'دبیر شورا',
 };
 
 export const MINUTES_STATUS_LABELS: Record<MinutesStatus, string> = {

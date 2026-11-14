@@ -1144,9 +1144,13 @@ function NewResolutionModal({ m, vote, initial, onClose, onSaved }: { m: any; vo
     return [...list.values()];
   }, [members.data, m.invitees]);
   const [err, setErr] = useState<Error | null>(null);
+  // An expert meeting's resolution on a council case can also move the case: to the council, or settled here.
+  const caseId = m.commission.body_type === 'expert_group' ? m.agenda.find((a: any) => a.id === form.agendaItemId)?.council_case_id : null;
+  const [caseEffect, setCaseEffect] = useState('');
   const save = async () => {
     try {
-      await post('/resolutions', {
+      if (caseId && caseEffect === 'refer_to_council' && !form.dueDate) throw new Error('برای ارجاع به جلسهٔ شورا، مهلت را تعیین کنید؛ مهلت مرحلهٔ شورا از همین مصوبه است');
+      const created = await post<{ id: string }>('/resolutions', {
         commissionId: m.commission.id,
         meetingId: m.id,
         agendaItemId: form.agendaItemId || null,
@@ -1159,6 +1163,7 @@ function NewResolutionModal({ m, vote, initial, onClose, onSaved }: { m: any; vo
         kpi: form.kpi || null,
         ...(m.archival && form.number.trim() ? { number: form.number.trim() } : {}),
       });
+      if (caseId && caseEffect) await post(`/council-cases/${caseId}/actions`, { action: caseEffect, resolutionId: created.id });
       onSaved();
     } catch (e) {
       setErr(e as Error);
@@ -1187,6 +1192,15 @@ function NewResolutionModal({ m, vote, initial, onClose, onSaved }: { m: any; vo
           ))}
         </select>
       </Field>
+      {caseId && (
+        <Field label="اثر مصوبه بر پروندهٔ شورا">
+          <select className="input" value={caseEffect} onChange={(e) => setCaseEffect(e.target.value)}>
+            <option value="">بدون تغییر در وضعیت پرونده</option>
+            <option value="refer_to_council">ارجاع به جلسهٔ شورا</option>
+            <option value="resolve">حل پرونده در سطح کارشناسی</option>
+          </select>
+        </Field>
+      )}
       <Field label="متن مصوبه">
         <textarea className="input" value={form.text} onChange={(e) => setForm({ ...form, text: e.target.value })} />
       </Field>

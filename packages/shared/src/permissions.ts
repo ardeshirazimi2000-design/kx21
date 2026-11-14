@@ -76,7 +76,7 @@ export const CAPABILITY_LABELS: Record<ConfigurableCapability, { title: string; 
 };
 
 /** Built-in roles. `chamber_admin` is a chamber-level role; the others are commission/meeting roles. */
-export const BUILTIN_ROLES = ['chamber_admin', 'chair', 'vice_chair', 'secretary', 'member', 'expert', 'observer', 'guest'] as const;
+export const BUILTIN_ROLES = ['chamber_admin', 'chair', 'vice_chair', 'secretary', 'member', 'expert', 'observer', 'guest', 'council_secretary'] as const;
 export type BuiltinRole = (typeof BUILTIN_ROLES)[number];
 
 /** Capabilities a chamber admin always has (cannot be removed, to avoid locking the chamber out). */
@@ -96,6 +96,8 @@ export const DEFAULT_ROLE_CAPABILITIES: Record<BuiltinRole, ConfigurableCapabili
   expert: ['minutes.view', 'attendance.self', 'comment.create', 'vote.results.view'],
   observer: [...VIEW, 'attendance.self', 'vote.results.view'],
   guest: ['minutes.view', 'attendance.self', 'vote.results.view'],
+  // دبیر شورا (the chamber president): approves referral to the national council and reopens cases (council rules).
+  council_secretary: [...VIEW, ...PARTICIPATE, 'minutes.approve'],
 };
 
 /** role key → capabilities. Missing roles fall back to the defaults (custom roles to nothing). */
@@ -173,5 +175,5 @@ export function can(ctx: AccessContext, cap: Capability): boolean {
 
 /** Default voting right for a built-in position when inviting commission members. */
 export function positionHasVote(pos: string): boolean {
-  return pos === 'chair' || pos === 'vice_chair' || pos === 'member';
+  return pos === 'chair' || pos === 'vice_chair' || pos === 'member' || pos === 'council_secretary';
 }

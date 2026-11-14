@@ -4,6 +4,7 @@ import type { Tone } from '../components/ui';
 /** Colour of each council case status. */
 export const CASE_TONE: Record<CaseStatus, Tone> = {
   expert_review: 'info',
+  council_pending: 'accent',
   on_agenda: 'accent',
   pending_approval: 'warning',
   resolved: 'success',

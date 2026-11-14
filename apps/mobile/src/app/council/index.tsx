@@ -9,7 +9,7 @@ import { useApi } from '../../lib/useApi';
 
 
 const FILTERS: { key: string; label: string }[] = [
-  { key: 'expert_review,on_agenda,pending_approval,returned', label: 'در جریان' },
+  { key: 'expert_review,council_pending,on_agenda,pending_approval,returned', label: 'در جریان' },
   { key: 'pending_approval', label: 'منتظر تأیید' },
   { key: '', label: 'همه' },
 ];

@@ -20,7 +20,7 @@ export interface CustomRole {
 }
 
 /** Built-in commission positions (chamber_admin and guest are not commission positions). */
-const BUILTIN_POSITIONS = ['chair', 'vice_chair', 'secretary', 'member', 'expert', 'observer'];
+const BUILTIN_POSITIONS = ['chair', 'vice_chair', 'secretary', 'member', 'expert', 'observer', 'council_secretary'];
 const BUILTIN_MEETING_ROLES = [...BUILTIN_POSITIONS, 'guest'];
 
 export async function loadRoleMatrix(chamberId: string, db: Db = pool): Promise<RoleMatrix> {

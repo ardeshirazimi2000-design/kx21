@@ -8,11 +8,12 @@ export const SYSTEM_ROLES = ['super_admin', 'chamber_admin'] as const;
 export type SystemRole = (typeof SYSTEM_ROLES)[number];
 
 /** Position of a person inside a commission (CommissionMembership.position). */
-export const POSITIONS = ['chair', 'vice_chair', 'secretary', 'member', 'expert', 'observer'] as const;
+/** council_secretary: دبیر شورای گفت‌وگو (the chamber president), only in a council. */
+export const POSITIONS = ['chair', 'vice_chair', 'secretary', 'member', 'expert', 'observer', 'council_secretary'] as const;
 export type Position = (typeof POSITIONS)[number];
 
 /** Role of a person inside a single meeting (MeetingInvitee.role). */
-export const INVITEE_ROLES = ['chair', 'vice_chair', 'secretary', 'member', 'expert', 'observer', 'guest'] as const;
+export const INVITEE_ROLES = ['chair', 'vice_chair', 'secretary', 'member', 'expert', 'observer', 'guest', 'council_secretary'] as const;
 export type InviteeRole = (typeof INVITEE_ROLES)[number];
 
 export const TERM_STATUSES = ['planned', 'active', 'closed'] as const;

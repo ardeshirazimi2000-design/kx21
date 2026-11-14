@@ -1,3 +1,5 @@
+import { roleLabel } from './labels.js';
+
 /**
  * شورای گفت‌وگو: cases (پرونده) referred from a chamber's commissions or secretariat, reviewed by an expert meeting
  * (جلسهٔ کارشناسی) and decided in a council meeting, provincially and then, when needed, nationally.
@@ -21,10 +23,11 @@ export const CASE_LEVELS = ['provincial', 'national'] as const;
 export type CaseLevel = (typeof CASE_LEVELS)[number];
 export const CASE_LEVEL_LABELS: Record<CaseLevel, string> = { provincial: 'استانی', national: 'ملی' };
 
-export const CASE_STATUSES = ['expert_review', 'on_agenda', 'pending_approval', 'resolved', 'returned', 'closed'] as const;
+export const CASE_STATUSES = ['expert_review', 'council_pending', 'on_agenda', 'pending_approval', 'resolved', 'returned', 'closed'] as const;
 export type CaseStatus = (typeof CASE_STATUSES)[number];
 export const CASE_STATUS_LABELS: Record<CaseStatus, string> = {
   expert_review: 'بررسی کارشناسی',
+  council_pending: 'ارجاع‌شده به شورا (در انتظار جلسه)',
   on_agenda: 'در دستور جلسهٔ شورا',
   pending_approval: 'در انتظار تأیید دبیر شورا',
   resolved: 'حل‌شده',
@@ -32,7 +35,7 @@ export const CASE_STATUS_LABELS: Record<CaseStatus, string> = {
   closed: 'مختومه',
 };
 /** Statuses in which the case still waits on someone (deadlines apply). */
-export const OPEN_CASE_STATUSES: readonly CaseStatus[] = ['expert_review', 'on_agenda', 'pending_approval', 'returned'];
+export const OPEN_CASE_STATUSES: readonly CaseStatus[] = ['expert_review', 'council_pending', 'on_agenda', 'pending_approval', 'returned'];
 
 export const CASE_PRIORITIES = ['normal', 'high', 'urgent'] as const;
 export type CasePriority = (typeof CASE_PRIORITIES)[number];
@@ -47,6 +50,7 @@ export const CASE_PRIORITY_LABELS: Record<CasePriority, string> = { normal: 'ع�
 export type CaseActor = 'secretariat' | 'president' | 'origin';
 
 export const CASE_ACTIONS = [
+  'refer_to_council',
   'schedule',
   'resolve',
   'propose_escalation',
@@ -68,7 +72,7 @@ export interface CaseTransition {
   to: { status: CaseStatus; level?: CaseLevel };
   actor: CaseActor;
   /** The decision is a resolution of a meeting where the case was on the agenda. */
-  needsResolution: 'council' | 'expert_or_council' | null;
+  needsResolution: 'council' | 'expert' | 'expert_or_council' | null;
   /** A council meeting to put the case on. */
   needsMeeting: boolean;
   needsReason: boolean;
@@ -78,9 +82,21 @@ export interface CaseTransition {
 
 export const CASE_TRANSITIONS: readonly CaseTransition[] = [
   {
+    // The expert meeting's resolution sends the case to the council; its meeting is chosen later (schedule).
+    action: 'refer_to_council',
+    label: 'ارجاع به جلسهٔ شورا با مصوبهٔ جلسهٔ کارشناسی',
+    from: ['expert_review'],
+    levels: ['provincial', 'national'],
+    to: { status: 'council_pending' },
+    actor: 'secretariat',
+    needsResolution: 'expert',
+    needsMeeting: false,
+    needsReason: false,
+  },
+  {
     action: 'schedule',
     label: 'قرار دادن در دستور جلسهٔ شورا',
-    from: ['expert_review'],
+    from: ['expert_review', 'council_pending'],
     levels: ['provincial', 'national'],
     to: { status: 'on_agenda' },
     actor: 'secretariat',
@@ -146,7 +162,7 @@ export const CASE_TRANSITIONS: readonly CaseTransition[] = [
   {
     action: 'return',
     label: 'بازگشت برای تکمیل',
-    from: ['expert_review', 'on_agenda'],
+    from: ['expert_review', 'council_pending', 'on_agenda'],
     levels: ['provincial', 'national'],
     // from on_agenda → expert_review; from provincial expert_review → returned (see caseTransition)
     to: { status: 'expert_review' },
@@ -216,6 +232,7 @@ export function availableCaseActions(state: CaseState, actors: readonly CaseActo
 
 export const CASE_EVENT_LABELS: Record<string, string> = {
   opened: 'ثبت پرونده',
+  refer_to_council: 'ارجاع به جلسهٔ شورا',
   expert_meeting: 'طرح در جلسهٔ کارشناسی',
   schedule: 'قرار گرفتن در دستور جلسهٔ شورا',
   resolve: 'حل پرونده',
@@ -228,3 +245,14 @@ export const CASE_EVENT_LABELS: Record<string, string> = {
   close: 'مختومه',
   reopen: 'بازگشایی',
 };
+
+const BODY_ROLE_LABELS: Partial<Record<BodyType, Record<string, string>>> = {
+  council: { chair: 'رئیس شورا', vice_chair: 'نایب‌رئیس شورا', member: 'عضو شورا', secretary: 'دبیرخانهٔ شورا' },
+  expert_group: { chair: 'رئیس کارگروه', member: 'عضو کارگروه', secretary: 'دبیرخانهٔ کارگروه' },
+};
+
+/** A position's title in its body: in a council the chair is «رئیس شورا», a member «عضو شورا», and so on. */
+export function bodyRoleLabel(key: string | null | undefined, bodyType?: string | null, customTitle?: string | null): string {
+  if (customTitle) return customTitle;
+  return (key && BODY_ROLE_LABELS[bodyType as BodyType]?.[key]) || roleLabel(key);
+}

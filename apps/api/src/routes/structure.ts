@@ -299,6 +299,25 @@ structureRouter.get('/commissions', async (req, res) => {
   res.json(paged(items, count, page, pageSize));
 });
 
+/**
+ * «دبیر شورا» is a council position; the council's council_secretary_id follows its active holder, so the rules that
+ * name the approver (referral to the national council, reopening a case) see the same person.
+ */
+async function syncCouncilSecretary(c: Db, commissionId: string) {
+  await c.query(
+    `UPDATE commissions SET council_secretary_id = (SELECT user_id FROM commission_memberships
+        WHERE commission_id = $1 AND status = 'active' AND position = 'council_secretary' LIMIT 1)
+      WHERE id = $1 AND body_type = 'council'`,
+    [commissionId],
+  );
+}
+
+async function assertPositionFits(c: Db, commissionId: string, position: string) {
+  if (position !== 'council_secretary') return;
+  const k = await one<{ body_type: string }>('SELECT body_type FROM commissions WHERE id = $1', [commissionId], c);
+  if (k?.body_type !== 'council') throw badRequest('سمت «دبیر شورا» فقط در شورای گفت‌وگو تعریف می‌شود');
+}
+
 /** دبیر شورا: only for a council, a person of the same chamber who can sign in (they approve in the system themselves). */
 async function assertCouncilSecretary(c: Db, chamberId: string, bodyType: string, userId: string | null | undefined) {
   if (!userId) return;
@@ -396,7 +415,7 @@ const MEMBER_HISTORY = (commission: string, user: string) => `(
              AND mt.status NOT IN ('draft','scheduled','invitation_sent','checkin_open','cancelled'))
 )`;
 
-const OFFICER_POSITIONS = ['chair', 'vice_chair', 'secretary'];
+const OFFICER_POSITIONS = ['chair', 'vice_chair', 'secretary', 'council_secretary'];
 /** Capabilities that make a position an officer's (custom roles included). */
 const OFFICER_CAPABILITIES: readonly Capability[] = ['meeting.manage', 'meeting.control', 'minutes.approve', 'resolution.manage', 'issue.manage', 'members.manage'];
 
@@ -565,13 +584,14 @@ structureRouter.post('/commissions/:id/members', async (req, res) => {
       if (!person || person.chamber_id !== commission.chamber_id) throw badRequest('این شخص متعلق به این اتاق نیست');
     }
     const custom = await assertRole(commission.chamber_id, b.position, 'position', c);
+    await assertPositionFits(c, commissionId, b.position);
     const existing = await one(
       `SELECT * FROM commission_memberships WHERE commission_id = $1 AND user_id = $2 AND status = 'active'`,
       [commissionId, userId],
       c,
     );
     if (existing) throw conflict('این فرد در حال حاضر عضو فعال کمیسیون است؛ برای تغییر سمت از ویرایش عضویت استفاده کنید');
-    if (['chair', 'vice_chair', 'secretary'].includes(b.position)) {
+    if (OFFICER_POSITIONS.includes(b.position)) {
       const holder = await one(
         `SELECT * FROM commission_memberships WHERE commission_id = $1 AND position = $2 AND status = 'active'`,
         [commissionId, b.position],
@@ -590,6 +610,7 @@ structureRouter.post('/commissions/:id/members', async (req, res) => {
       c,
     );
     await audit(c, req, { chamberId: commission.chamber_id, action: 'membership.created', entity: 'membership', entityId: r.id, after: r });
+    if (b.position === 'council_secretary') await syncCouncilSecretary(c, commissionId);
     return r;
   });
   res.status(201).json(row);
@@ -606,6 +627,7 @@ structureRouter.patch('/memberships/:id', async (req, res) => {
     if (before.status !== 'active') throw conflict('عضویت پایان‌یافته قابل ویرایش نیست');
     const position: string = b.position ?? before.position;
     const custom = await assertRole(before.chamber_id, position, 'position', c);
+    await assertPositionFits(c, before.commission_id, position);
     if (position === before.position && b.hasVote === undefined) {
       const r = await one('UPDATE commission_memberships SET end_date = $2 WHERE id = $1 RETURNING *', [id, b.endDate ?? null], c);
       await audit(c, req, { chamberId: before.chamber_id, action: 'membership.updated', entity: 'membership', entityId: id, before, after: r });
@@ -622,6 +644,7 @@ structureRouter.patch('/memberships/:id', async (req, res) => {
       throw e;
     });
     await audit(c, req, { chamberId: before.chamber_id, action: 'membership.changed', entity: 'membership', entityId: r.id, before, after: r });
+    if ([position, before.position].includes('council_secretary')) await syncCouncilSecretary(c, before.commission_id);
     return r;
   });
   res.json(row);
@@ -640,6 +663,7 @@ structureRouter.post('/memberships/:id/end', async (req, res) => {
       c,
     );
     await audit(c, req, { chamberId: before.chamber_id, action: 'membership.ended', entity: 'membership', entityId: id, before, after: r, reason: b.reason });
+    if (before.position === 'council_secretary') await syncCouncilSecretary(c, before.commission_id);
     return r;
   });
   res.json(row);
@@ -678,6 +702,7 @@ structureRouter.delete('/memberships/:id', async (req, res) => {
       withdrawn = r.rowCount ?? 0;
     }
     await c.query('DELETE FROM commission_memberships WHERE id = $1', [id]);
+    if (before.position === 'council_secretary') await syncCouncilSecretary(c, before.commission_id);
     await audit(c, req, {
       chamberId: before.chamber_id,
       action: 'membership.deleted',

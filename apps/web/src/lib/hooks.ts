@@ -1,4 +1,4 @@
-import { roleLabel } from '@kx/shared';
+import { bodyRoleLabel, roleLabel } from '@kx/shared';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { io, type Socket } from 'socket.io-client';
 import { ApiError, get, getSession, onSessionChange } from './api';
@@ -86,12 +86,13 @@ export function useSocket(handlers: Record<string, (payload: any) => void>, meet
  * Built-in + chamber-defined roles, for pickers and labels.
  * positions = commission positions; meetingRoles = positions + guest.
  */
-export function useRoles(chamberId: string | null | undefined) {
+export function useRoles(chamberId: string | null | undefined, bodyType?: string | null) {
   const { data } = useApi<{ key: string; title: string; has_vote: boolean }[]>(chamberId ? `/roles/options?chamberId=${chamberId}` : null);
   const custom = data ?? [];
-  const builtinPositions = ['chair', 'vice_chair', 'secretary', 'member', 'expert', 'observer'];
-  const label = (key: string | null | undefined, title?: string | null) => roleLabel(key, title ?? custom.find((c) => c.key === key)?.title);
-  const positions = [...builtinPositions.map((key) => ({ key, title: roleLabel(key) })), ...custom.map((c) => ({ key: c.key, title: c.title }))];
+  // «دبیر شورا» exists only in a council; the other positions carry the body's own titles (رئیس شورا, عضو شورا …).
+  const builtinPositions = ['chair', 'vice_chair', 'secretary', 'member', 'expert', 'observer', ...(bodyType === 'council' ? ['council_secretary'] : [])];
+  const label = (key: string | null | undefined, title?: string | null) => bodyRoleLabel(key, bodyType, title ?? custom.find((c) => c.key === key)?.title);
+  const positions = [...builtinPositions.map((key) => ({ key, title: bodyRoleLabel(key, bodyType) })), ...custom.map((c) => ({ key: c.key, title: c.title }))];
   const meetingRoles = [...positions, { key: 'guest', title: roleLabel('guest') }];
   return { label, positions, meetingRoles };
 }

@@ -1,4 +1,4 @@
-import { ISSUE_STATUS_LABELS, roleLabel, type CommissionSettings, type IssueStatus } from '@kx/shared';
+import { bodyRoleLabel, ISSUE_STATUS_LABELS, roleLabel, type CommissionSettings, type IssueStatus } from '@kx/shared';
 import { useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { MeetingStatusBadge } from '../components/status';
@@ -42,7 +42,7 @@ export function CommissionDetailPage() {
         }
         actions={c.officers.map((o: any) => (
           <Badge key={o.position} tone="info">
-            {roleLabel(o.position)}: {o.full_name}
+            {bodyRoleLabel(o.position, c.body_type)}: {o.full_name}
           </Badge>
         ))}
       />
@@ -59,7 +59,7 @@ export function CommissionDetailPage() {
   );
 }
 
-const OFFICER_POSITIONS = ['chair', 'vice_chair', 'secretary'];
+const OFFICER_POSITIONS = ['chair', 'vice_chair', 'secretary', 'council_secretary'];
 
 function Members({ commission }: { commission: any }) {
   const { me } = useAuth();
@@ -79,7 +79,7 @@ function Members({ commission }: { commission: any }) {
     void reload();
   };
   const remove = async (m: any) => {
-    if (!confirm(`عضویت «${m.full_name}» (${roleLabel(m.position, m.role_title)}) به‌طور کامل حذف شود؟\nاین کار فقط برای عضوی است که اشتباهی اضافه شده و دعوت‌های او به جلسات برگزارنشده هم لغو می‌شود.`)) return;
+    if (!confirm(`عضویت «${m.full_name}» (${bodyRoleLabel(m.position, commission.body_type, m.role_title)}) به‌طور کامل حذف شود؟\nاین کار فقط برای عضوی است که اشتباهی اضافه شده و دعوت‌های او به جلسات برگزارنشده هم لغو می‌شود.`)) return;
     setErr(null);
     try {
       await del(`/memberships/${m.id}`);
@@ -120,7 +120,7 @@ function Members({ commission }: { commission: any }) {
                 <td>{m.full_name}</td>
                 <td>{m.organization}</td>
                 <td>
-                  <Badge tone={['chair', 'vice_chair', 'secretary'].includes(m.position) ? 'accent' : 'neutral'}>{roleLabel(m.position, m.role_title)}</Badge>
+                  <Badge tone={['chair', 'vice_chair', 'secretary'].includes(m.position) ? 'accent' : 'neutral'}>{bodyRoleLabel(m.position, commission.body_type, m.role_title)}</Badge>
                   {m.status === 'ended' && <span className="muted small"> (پایان‌یافته{m.note ? `: ${m.note}` : ''})</span>}
                 </td>
                 <td>{m.has_vote ? '✓' : '—'}</td>
@@ -149,7 +149,7 @@ function Members({ commission }: { commission: any }) {
         </table>
       </div>
       {adding && <AddMemberModal commission={commission} chamberId={commission.chamber_id} isAdmin={isAdmin} onClose={() => setAdding(false)} onSaved={() => { setAdding(false); void reload(); }} />}
-      {changing && <ChangePositionModal m={changing} isAdmin={isAdmin} onClose={() => setChanging(null)} onSaved={() => { setChanging(null); void reload(); }} />}
+      {changing && <ChangePositionModal m={changing} isAdmin={isAdmin} bodyType={commission.body_type} onClose={() => setChanging(null)} onSaved={() => { setChanging(null); void reload(); }} />}
     </Card>
   );
 }
@@ -160,7 +160,7 @@ function AddMemberModal({ commission, chamberId, isAdmin, onClose, onSaved }: { 
   const people = useApi(q.length >= 2 ? `/people?chamberId=${chamberId}&q=${encodeURIComponent(q)}&pageSize=8` : null);
   const [userId, setUserId] = useState<string | null>(null);
   const [position, setPosition] = useState<string>('member');
-  const roles = useRoles(chamberId);
+  const roles = useRoles(chamberId, commission.body_type);
   const [startDate, setStartDate] = useState('');
   const [replace, setReplace] = useState(false);
   const [creating, setCreating] = useState(false);
@@ -227,9 +227,9 @@ function AddMemberModal({ commission, chamberId, isAdmin, onClose, onSaved }: { 
   );
 }
 
-function ChangePositionModal({ m, isAdmin, onClose, onSaved }: { m: any; isAdmin: boolean; onClose: () => void; onSaved: () => void }) {
+function ChangePositionModal({ m, isAdmin, bodyType, onClose, onSaved }: { m: any; isAdmin: boolean; bodyType: string; onClose: () => void; onSaved: () => void }) {
   const [position, setPosition] = useState<string>(m.position);
-  const roles = useRoles(m.chamber_id);
+  const roles = useRoles(m.chamber_id, bodyType);
   const [hasVote, setHasVote] = useState<boolean>(m.has_vote);
   const [err, setErr] = useState<Error | null>(null);
   const save = async () => {
@@ -497,56 +497,17 @@ function Settings({ commission, onSaved }: { commission: any; onSaved: () => voi
   );
 }
 
-/**
- * دبیر شورا: the chamber's president, set by the chamber admin. He approves referral to the national council and
- * reopens cases himself in the system, so he needs a login of his own.
- */
-function CouncilSecretaryCard({ commission, onSaved }: { commission: any; onSaved: () => void }) {
-  const { me } = useAuth();
-  const canEdit = runsChamber(me, commission.chamber_id);
-  const [q, setQ] = useState('');
-  const people = useApi<any>(canEdit && q.trim().length >= 2 ? `/people?chamberId=${commission.chamber_id}&q=${encodeURIComponent(q.trim())}&pageSize=8` : null, [q]);
-  const [err, setErr] = useState<Error | null>(null);
-  const set = async (id: string | null) => {
-    setErr(null);
-    try {
-      await patch(`/commissions/${commission.id}`, { councilSecretaryId: id });
-      setQ('');
-      onSaved();
-    } catch (e) {
-      setErr(e as Error);
-    }
-  };
+/** دبیر شورا (the chamber's president): a council position, given like any other in «افزودن عضو». */
+function CouncilSecretaryCard({ commission }: { commission: any; onSaved?: () => void }) {
   return (
     <Card title="دبیر شورا (رئیس اتاق)">
-      <ErrorBox error={err} />
-      <p className="muted small" style={{ marginTop: 0 }}>
-        دبیر شورا ارجاع پرونده به شورای ملی را تأیید می‌کند و پروندهٔ مختومه را بازگشایی می‌کند؛ این تصمیم‌ها را خودش در سامانه ثبت می‌کند. کارهای اجرایی با
-        اعضای «دبیر» (دبیرخانهٔ شورا) است.
-      </p>
       <div className="row gap-sm wrap" style={{ alignItems: 'center' }}>
         {commission.councilSecretary ? <strong>{commission.councilSecretary.full_name}</strong> : <Badge tone="warning">تعیین نشده</Badge>}
-        {canEdit && commission.councilSecretary && (
-          <Button size="sm" variant="ghost" onClick={() => void set(null)}>
-            برداشتن
-          </Button>
-        )}
       </div>
-      {canEdit && (
-        <Field group label="تعیین یا تغییر" hint="شخص باید حساب ورود داشته باشد">
-          <input className="input" value={q} onChange={(e) => setQ(e.target.value)} placeholder="جست‌وجوی نام" />
-          <ul className="list">
-            {people.data?.items?.map((p: any) => (
-              <li key={p.id}>
-                <button type="button" className="link-btn" disabled={!p.can_login} onClick={() => void set(p.id)}>
-                  {p.full_name}
-                </button>
-                {!p.can_login && <span className="muted small"> (بدون حساب ورود)</span>}
-              </li>
-            ))}
-          </ul>
-        </Field>
-      )}
+      <p className="muted small">
+        دبیر شورا ارجاع پرونده به شورای ملی را تأیید و پروندهٔ مختومه را بازگشایی می‌کند و این تصمیم‌ها را خودش در سامانه ثبت می‌کند. او را با «افزودن عضو» و
+        سمت «دبیر شورا» تعیین کنید؛ رئیس شورا، اعضای شورا و دبیرخانهٔ شورا هم سمت‌های همین فهرست‌اند.
+      </p>
     </Card>
   );
 }

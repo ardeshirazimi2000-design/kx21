@@ -23,6 +23,7 @@ import { useApi } from '../lib/hooks';
 
 const STATUS_TONE: Record<CaseStatus, Tone> = {
   expert_review: 'info',
+  council_pending: 'accent',
   on_agenda: 'accent',
   pending_approval: 'warning',
   resolved: 'success',
@@ -115,7 +116,7 @@ export function CouncilPage() {
               }}
             >
               <option value="">همه</option>
-              <option value="expert_review,on_agenda,pending_approval,returned">در جریان</option>
+              <option value="expert_review,council_pending,on_agenda,pending_approval,returned">در جریان</option>
               {Object.entries(CASE_STATUS_LABELS).map(([k, v]) => (
                 <option key={k} value={k}>
                   {v}

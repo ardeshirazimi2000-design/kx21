@@ -137,7 +137,7 @@ councilRouter.get('/council-cases/:id', async (req, res) => {
     documents: docs,
     roles: a.actors,
     actions,
-    canAddExpertMeeting: a.actors.includes('secretariat') && ['expert_review', 'on_agenda'].includes(c.status),
+    canAddExpertMeeting: a.actors.includes('secretariat') && ['expert_review', 'council_pending', 'on_agenda'].includes(c.status),
     labels: { status: CASE_STATUS_LABELS[c.status], level: CASE_LEVEL_LABELS[c.level] },
   });
 });
@@ -263,7 +263,7 @@ councilRouter.post('/council-cases/:id/expert-meeting', async (req, res) => {
   await tx(async (c) => {
     const a = await caseAccess(u, param(req, 'id'), c, true);
     if (!a.actors.includes('secretariat')) throw forbidden('این کار با دبیرخانهٔ شورای همین سطح است');
-    if (!['expert_review', 'on_agenda'].includes(a.case.status)) throw conflict('پرونده در مرحلهٔ بررسی نیست');
+    if (!['expert_review', 'council_pending', 'on_agenda'].includes(a.case.status)) throw conflict('پرونده در مرحلهٔ بررسی نیست');
     const m = await addToAgenda(c, req, a.case, b.meetingId, ['expert_group'], a.levelChamber!);
     await c.query(
       `INSERT INTO council_case_events (case_id, event, from_level, from_status, to_level, to_status, actor_id, meeting_id) VALUES ($1,'expert_meeting',$2,$3,$2,$3,$4,$5)`,
@@ -319,6 +319,7 @@ councilRouter.post('/council-cases/:id/actions', async (req, res) => {
       const r = resolution as any;
       if (!r || r.chamber_id !== a.levelChamber) throw badRequest('مصوبه باید از جلسه‌ای در همین سطح باشد که پرونده در دستور آن بوده است');
       if (t.needsResolution === 'council' && r.body_type !== 'council') throw badRequest('این تصمیم با مصوبهٔ جلسهٔ شورا گرفته می‌شود');
+      if (t.needsResolution === 'expert' && r.body_type !== 'expert_group') throw badRequest('این تصمیم با مصوبهٔ جلسهٔ کارشناسی گرفته می‌شود');
       if (t.action !== 'resolve' && !r.due_date) throw new HttpError(400, 'resolution_due_required', 'مهلت مرحلهٔ بعد از مصوبه می‌آید؛ برای مصوبه مهلت تعیین کنید');
       meetingId = r.meeting_id;
     }
@@ -378,12 +379,12 @@ councilRouter.post('/council-cases/:id/actions', async (req, res) => {
 export async function remindCouncilDeadlines(): Promise<void> {
   const soon = await query<CouncilCase>(
     `UPDATE council_cases SET due_soon_notified_at = now()
-      WHERE status IN ('expert_review','on_agenda','pending_approval','returned') AND due_soon_notified_at IS NULL
+      WHERE status IN ('expert_review','council_pending','on_agenda','pending_approval','returned') AND due_soon_notified_at IS NULL
         AND due_date >= current_date AND due_date <= current_date + 3 RETURNING *`,
   );
   const late = await query<CouncilCase>(
     `UPDATE council_cases SET overdue_notified_at = now()
-      WHERE status IN ('expert_review','on_agenda','pending_approval','returned') AND overdue_notified_at IS NULL AND due_date < current_date RETURNING *`,
+      WHERE status IN ('expert_review','council_pending','on_agenda','pending_approval','returned') AND overdue_notified_at IS NULL AND due_date < current_date RETURNING *`,
   );
   for (const [list, word] of [
     [soon, 'نزدیک است'],

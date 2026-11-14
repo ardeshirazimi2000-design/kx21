@@ -84,7 +84,11 @@ describe('council bodies', () => {
     // One council per chamber; the president is set on the council.
     body.council = (await pool.query(`SELECT id FROM commissions WHERE code = 'SHG'`)).rows[0].id;
     expect((await as('admin').post('/api/commissions', { chamberId: yazd, termId: term, name: 'شورای دوم', code: 'SHG2', bodyType: 'council' })).body.error.code).toBe('council_exists');
-    expect((await as('admin').patch(`/api/commissions/${body.council}`, { councilSecretaryId: ids.president })).status).toBe(200);
+    // «دبیر شورا» is a council position (not a commission's), and its holder is the council's approver.
+    const exp = (await pool.query(`SELECT id FROM commissions WHERE code = 'EXP'`)).rows[0].id;
+    expect((await as('admin').post(`/api/commissions/${exp}/members`, { userId: ids.president, position: 'council_secretary' })).status).toBe(400);
+    expect((await as('admin').post(`/api/commissions/${body.council}/members`, { userId: ids.president, position: 'council_secretary', startDate: '2023-04-21' })).status).toBe(201);
+    expect((await pool.query('SELECT council_secretary_id FROM commissions WHERE id = $1', [body.council])).rows[0].council_secretary_id).toBe(ids.president);
     const ex = await as('admin').post('/api/commissions', { chamberId: yazd, termId: term, name: 'کارگروه کارشناسی یزد', code: 'KRG', bodyType: 'expert_group', councilSecretaryId: ids.president });
     expect(ex.status).toBe(400);
     body.expert = (await as('admin').post('/api/commissions', { chamberId: yazd, termId: term, name: 'کارگروه کارشناسی یزد', code: 'KRG', bodyType: 'expert_group' })).body.id;
@@ -153,7 +157,7 @@ describe('a council case', () => {
     expect((await as('isf').get('/api/council-cases')).body.items).toEqual([]);
     const d = (await as('councilSec').get(`/api/council-cases/${caseId}`)).body;
     expect(d.roles).toEqual(['secretariat', 'origin']);
-    expect(d.actions.map((a: any) => a.action)).toEqual(['schedule', 'resolve', 'return']);
+    expect(d.actions.map((a: any) => a.action)).toEqual(['refer_to_council', 'schedule', 'resolve', 'return']);
     expect((await as('sec').get(`/api/council-cases/${caseId}`)).body.actions).toEqual([]);
   });
 
@@ -175,6 +179,11 @@ describe('a council case', () => {
   it('is put on the provincial council’s agenda and proposed for the national level', async () => {
     const m = await as('councilSec').post('/api/meetings', { commissionId: body.council, title: 'جلسهٔ شورای گفت‌وگوی یزد', scheduledAt: tomorrow(), allowHoliday: true });
     body.councilMeeting = m.body.id;
+    // The expert meeting's resolution refers the case to the council; the council's meeting is chosen afterwards.
+    const referral = await heldResolution('councilSec', body.expertMeeting, body.expert, 'پرونده برای تصمیم به جلسهٔ شورا ارجاع شود', '2030-07-01');
+    const ref = await act('councilSec', { action: 'refer_to_council', resolutionId: referral });
+    expect(ref.status).toBe(200);
+    expect(ref.body).toMatchObject({ status: 'council_pending', due_date: expect.stringContaining('2030-07') });
     expect((await act('councilSec', { action: 'schedule' })).status).toBe(400);
     expect((await act('councilSec', { action: 'schedule', meetingId: body.expertMeeting })).status).toBe(400);
     const s = await act('councilSec', { action: 'schedule', meetingId: m.body.id });
@@ -231,7 +240,7 @@ describe('a council case', () => {
     // The originating commission saw it to the end.
     const d = (await as('sec').get(`/api/council-cases/${caseId}`)).body;
     expect(d.events.map((e: any) => e.event)).toEqual([
-      'opened', 'expert_meeting', 'schedule', 'propose_escalation', 'reject_escalation', 'propose_escalation', 'approve_escalation', 'schedule', 'resolve', 'close', 'reopen',
+      'opened', 'expert_meeting', 'refer_to_council', 'schedule', 'propose_escalation', 'reject_escalation', 'propose_escalation', 'approve_escalation', 'schedule', 'resolve', 'close', 'reopen',
     ]);
     expect(d.events.find((e: any) => e.event === 'reject_escalation').reason).toBe('نظر کارشناسی کامل نیست');
     await expect(pool.query(`UPDATE council_case_events SET reason = 'x'`)).rejects.toThrow(/append-only/);
