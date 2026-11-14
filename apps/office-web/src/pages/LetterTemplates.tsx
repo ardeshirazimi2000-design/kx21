@@ -14,7 +14,7 @@ const blank = {
   unitId: '',
   pageSize: 'A4' as 'A4' | 'A5',
   headerText: 'بسمه تعالی',
-  orgName: 'اتاق بازرگانی، صنایع، معادن و کشاورزی ایران',
+  orgName: '',
   orgSubtitle: '',
   footerText: '',
   showLogo: true,
@@ -105,7 +105,7 @@ export function LetterTemplatesPage() {
                   <td>{t.kinds.map((k) => (k === 'outgoing' ? 'صادره' : 'داخلی')).join('، ')}</td>
                   <td>{t.unit_name ?? 'همه واحدها'}</td>
                   <td className="small">
-                    {t.has_background ? 'تصویر کامل سربرگ' : t.has_logo ? 'لوگوی اختصاصی' : t.show_logo ? 'لوگوی اتاق' : 'بدون لوگو'} · {t.page_size}
+                    {t.has_background ? 'تصویر کامل سربرگ' : t.has_logo ? 'لوگوی اختصاصی' : t.show_logo ? 'لوگوی سازمان' : 'بدون لوگو'} · {t.page_size}
                   </td>
                   <td>{t.is_active ? <Badge tone="success">فعال</Badge> : <Badge>غیرفعال</Badge>}</td>
                 </tr>
@@ -267,7 +267,7 @@ function TemplateEditor({ template, onClose, onSaved }: { template: LetterTempla
           <Field label="عبارت بالای نامه">
             <input className="input" value={f.headerText} onChange={(e) => set('headerText', e.target.value)} />
           </Field>
-          <Field label="نام سازمان">
+          <Field label="نام سازمان" hint="خالی بماند، نام ثبت‌شده در «مشخصات سازمان» چاپ می‌شود">
             <input className="input" value={f.orgName} onChange={(e) => set('orgName', e.target.value)} />
           </Field>
           <Field label="زیرعنوان (واحد، معاونت…)">
@@ -278,7 +278,7 @@ function TemplateEditor({ template, onClose, onSaved }: { template: LetterTempla
           </Field>
           <label className="check">
             <input type="checkbox" checked={f.showLogo} onChange={(e) => set('showLogo', e.target.checked)} />
-            نمایش لوگو {current?.has_logo ? '(لوگوی اختصاصی)' : '(لوگوی اتاق)'}
+            نمایش لوگو {current?.has_logo ? '(لوگوی اختصاصی)' : '(لوگوی سازمان)'}
           </label>
           {!current ? (
             <p className="small muted">پس از ذخیره، می‌توانید لوگو یا تصویر کامل سربرگ را بارگذاری کنید.</p>

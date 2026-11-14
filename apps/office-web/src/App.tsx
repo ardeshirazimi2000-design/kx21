@@ -17,6 +17,7 @@ import { MeetingDetailPage, MeetingsPage } from './pages/Meetings';
 import { NotificationsPage, TemplatesPage } from './pages/Notifications';
 import { OrgPage } from './pages/Org';
 import { OrgChartPage } from './pages/OrgChart';
+import { OrgProfilePage } from './pages/OrgProfile';
 import { ProfilePage } from './pages/Profile';
 import { ReportsPage } from './pages/Reports';
 import { ResolutionDetailPage, ResolutionsPage } from './pages/Resolutions';
@@ -71,6 +72,7 @@ export function App() {
         <Route path="/contacts" element={<ContactsPage />} />
         <Route path="/letter-templates" element={<LetterTemplatesPage />} />
         <Route path="/workflows" element={<WorkflowsPage />} />
+        <Route path="/org-profile" element={<OrgProfilePage />} />
         <Route path="/meetings" element={<MeetingsPage />} />
         <Route path="/meetings/:id" element={<MeetingDetailPage />} />
         <Route path="/resolutions" element={<ResolutionsPage />} />

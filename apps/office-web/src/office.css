@@ -96,6 +96,14 @@
 .paper-org img { height: 22mm; width: auto; }
 /* The chamber logo is drawn white for the dark sidebar; on paper it prints dark. */
 .paper-org img.paper-default-logo { filter: brightness(0); }
+/* The built-in logo is white: dark on the light verification page, white again in dark mode. */
+.verify img.org-logo-builtin, .org-logo-preview img.org-logo-builtin { filter: brightness(0); }
+.org-logo-preview { display: grid; place-items: center; min-height: 120px; margin-bottom: 12px; border: 1px dashed var(--border); border-radius: 10px; }
+.org-logo-preview img { max-height: 96px; max-width: 80%; object-fit: contain; }
+:root[data-theme='dark'] img.org-logo-builtin { filter: none !important; }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) img.org-logo-builtin { filter: none !important; }
+}
 .paper-bismillah { text-align: center; font-weight: 600; }
 .paper-number { justify-self: end; display: grid; grid-template-columns: auto auto; gap: 0 8px; margin: 0; font-size: 0.85em; line-height: 1.9; align-self: end; }
 .paper-number dt { font-weight: 600; }

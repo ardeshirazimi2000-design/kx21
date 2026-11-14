@@ -67,6 +67,12 @@ E = [
     ("post", "/api/auth/mfa/setup", "Auth", "شروع فعال‌سازی TOTP (secret، otpauth و QR)", None, None),
     ("post", "/api/auth/mfa/enable", "Auth", "تأیید و فعال‌سازی TOTP", S(code=str_), None),
 
+    ("get", "/api/org-profile", "Organization", "مشخصات سازمان (نام و لوگو)", None, "Public."),
+    ("get", "/api/org-profile/logo", "Organization", "تصویر لوگوی سازمان", None, "Public."),
+    ("put", "/api/org-profile", "Organization", "ویرایش مشخصات سازمان [org.manage]", S(name=str_, shortName=str_), None),
+    ("post", "/api/org-profile/logo", "Organization", "بارگذاری لوگوی سازمان (PNG/JPG، حداکثر ۲ مگابایت) [org.manage]", None, "multipart/form-data, field `file`."),
+    ("delete", "/api/org-profile/logo", "Organization", "حذف لوگوی سازمان [org.manage]", None, None),
+
     ("get", "/api/org/units", "Organization", "واحدها و سمت‌ها (با متصدیان)", None, None),
     ("post", "/api/org/units", "Organization", "واحد جدید [org.manage]", S(name=str_, code=str_, parentId=uuid, kind=str_), None),
     ("patch", "/api/org/units/{id}", "Organization", "ویرایش واحد [org.manage]", S(name=str_, code=str_, parentId=uuid, kind=str_, isActive=bool_), None),
@@ -165,14 +171,14 @@ E = [
     ("get", "/api/meetings", "Meetings", "جلسات (کش سامانه جلسات) [meetings.view]", None, None),
     ("get", "/api/meetings/{id}", "Meetings", "جلسه (?refresh=1 دریافت مجدد)", None, None),
     ("post", "/api/meetings/{id}/invitation-letters", "Meetings", "ساخت پیش‌نویس نامه دعوت برای مدعوین [letter.register_outgoing]", S(inviteeIds=arr(uuid), note=str_), "Skips invitees that already have a non-cancelled invitation letter."),
-    ("get", "/api/commissions", "Meetings", "کمیسیون‌ها از سامانه جلسات [meetings.refer]", None, None),
+    ("get", "/api/commissions", "Meetings", "برگزارکنندگان جلسات (کمیسیون‌ها) از سامانه جلسات [meetings.refer]", None, None),
     ("get", "/api/resolutions", "Meetings", "مصوبات (?mine&status&q)", None, None),
     ("get", "/api/resolutions/{id}", "Meetings", "مصوبه با گزارش‌های پیگیری", None, None),
     ("post", "/api/resolutions/{id}/feedback", "Meetings", "گزارش اجرا به سامانه جلسات (صف با تلاش مجدد)", S(progress=int_, note=str_, submit=bool_), None),
-    ("post", "/api/letters/{id}/meeting-referrals", "Meetings", "ارجاع مکاتبه به کمیسیون [meetings.refer]", S(commissionId=uuid, requestedMeetingId=uuid, note=str_, includeAttachments=bool_), None),
+    ("post", "/api/letters/{id}/meeting-referrals", "Meetings", "ارجاع مکاتبه به جلسه [meetings.refer]", S(commissionId=uuid, requestedMeetingId=uuid, note=str_, includeAttachments=bool_), None),
 ]
 
-PUBLIC = ("/api/auth/login", "/api/auth/mfa/verify", "/api/auth/refresh", "/api/auth/logout", "/api/verify/{code}", "/api/integrations/meetings/webhook", "/api/intake/letters")
+PUBLIC = ("/api/auth/login", "/api/auth/mfa/verify", "/api/auth/refresh", "/api/auth/logout", "/api/verify/{code}", "/api/org-profile", "/api/org-profile/logo", "/api/integrations/meetings/webhook", "/api/intake/letters")
 paths = {}
 for method, path, tag, summary, body, notes in E:
     op = {"tags": [tag], "summary": summary, "responses": {

@@ -260,6 +260,34 @@ describe('specimen signatures (نمونه امضا)', () => {
   });
 });
 
+describe('organisation profile (مشخصات سازمان)', () => {
+  it('is public, editable only with org.manage, and carries an uploaded logo', async () => {
+    const pub = await request(app).get('/api/org-profile');
+    expect(pub.status).toBe(200);
+    expect(pub.body).toMatchObject({ name: 'سازمان نمونه', logoUrl: null, hasLogo: false });
+
+    expect((await as('clerk').put('/api/org-profile', { name: 'سازمان دیگر' })).status).toBe(403);
+    const put = await as('admin').put('/api/org-profile', { name: 'شرکت نمونه رسا', shortName: 'رسا' });
+    expect(put.status).toBe(200);
+    expect(put.body).toMatchObject({ name: 'شرکت نمونه رسا', shortName: 'رسا' });
+
+    expect((await as('clerk').upload('/api/org-profile/logo', {}, png('org'), 'logo.png')).status).toBe(403);
+    const up = await as('admin').upload('/api/org-profile/logo', {}, png('org'), 'logo.png');
+    expect(up.status).toBe(200);
+    expect(up.body.hasLogo).toBe(true);
+    const logo = await request(app).get(up.body.logoUrl);
+    expect(logo.status).toBe(200);
+    expect(logo.headers['content-type']).toBe('image/png');
+
+    const removed = await request(app).delete('/api/org-profile/logo').set('authorization', `Bearer ${tokens.admin}`);
+    expect(removed.body).toMatchObject({ hasLogo: false, logoUrl: null });
+    expect((await request(app).get('/api/org-profile/logo')).status).toBe(404);
+    const audit = await pool.query(`SELECT action FROM audit_logs WHERE entity = 'org_profile' ORDER BY id`);
+    expect(audit.rows.map((r) => r.action)).toEqual(['org_profile.updated', 'org_profile.logo_set', 'org_profile.logo_removed']);
+    await as('admin').put('/api/org-profile', { name: 'سازمان نمونه', shortName: 'سازمان نمونه' });
+  });
+});
+
 describe('letter templates and rich-text letters (قالب و سربرگ نامه)', () => {
   const del = (who: string, url: string) => request(app).delete(url).set('authorization', `Bearer ${tokens[who]}`);
 
@@ -267,7 +295,7 @@ describe('letter templates and rich-text letters (قالب و سربرگ نام�
     const list = await as('expert').get('/api/letter-templates');
     expect(list.status).toBe(200);
     const builtIn = list.body.find((t: any) => t.is_default);
-    expect(builtIn).toMatchObject({ name: 'سربرگ رسمی اتاق', page_size: 'A4', kinds: ['outgoing', 'internal'] });
+    expect(builtIn).toMatchObject({ name: 'سربرگ رسمی', page_size: 'A4', kinds: ['outgoing', 'internal'] });
     expect((await as('expert').post('/api/letter-templates', { name: 'قالب من' })).status).toBe(403);
 
     const t = await as('clerk').post('/api/letter-templates', {

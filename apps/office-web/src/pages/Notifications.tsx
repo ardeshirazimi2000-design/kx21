@@ -117,7 +117,7 @@ export function TemplatesPage() {
               <input className="input" value={edit.subject ?? ''} onChange={(e) => setEdit({ ...edit, subject: e.target.value })} />
             </Field>
           )}
-          <Field label="متن" hint="متغیرها: {{number}} {{subject}} {{actor}} {{action}} {{instruction}} {{step}} {{due}} {{resolution}} {{commission}} …">
+          <Field label="متن" hint="متغیرها: {{number}} {{subject}} {{actor}} {{action}} {{instruction}} {{step}} {{due}} {{resolution}} {{commission}} (برگزارکننده جلسه) …">
             <textarea className="input" rows={5} value={edit.body} onChange={(e) => setEdit({ ...edit, body: e.target.value })} />
           </Field>
           <label className="check">

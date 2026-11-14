@@ -23,7 +23,7 @@ export const PERMISSIONS = [
   { key: 'audit.view', name: 'مشاهده رویدادنگاری', module: 'امنیت' },
   { key: 'integration.manage', name: 'تنظیم یکپارچه‌سازی', module: 'یکپارچه‌سازی' },
   { key: 'meetings.view', name: 'مشاهده جلسات و مصوبات', module: 'یکپارچه‌سازی' },
-  { key: 'meetings.refer', name: 'ارجاع مکاتبه به کمیسیون/جلسه', module: 'یکپارچه‌سازی' },
+  { key: 'meetings.refer', name: 'ارجاع مکاتبه به جلسه', module: 'یکپارچه‌سازی' },
   { key: 'resolutions.follow', name: 'ثبت پیگیری اجرای مصوبه', module: 'یکپارچه‌سازی' },
 ] as const;
 
@@ -52,7 +52,7 @@ export const SYSTEM_ROLES: { key: string; name: string; description: string; per
   },
   {
     key: 'president',
-    name: 'رئیس اتاق / معاون',
+    name: 'رئیس سازمان / معاون',
     description: 'امضا و داشبورد مدیریتی',
     permissions: pick('letter.create', 'letter.read_all', 'letter.sign', 'workflow.start', 'archive.read', 'reports.view', 'meetings.view', 'meetings.refer', 'resolutions.follow'),
   },

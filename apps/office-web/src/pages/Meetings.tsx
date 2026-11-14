@@ -16,7 +16,7 @@ export function MeetingsPage() {
   const r = useApi<{ items: any[]; total: number; page: number; pageSize: number }>(`/meetings?${qs}`, [qs]);
   return (
     <>
-      <PageHeader title="جلسات کمیسیون‌ها" subtitle="اطلاعات جلسات از سامانه جلسات کمیسیون‌های اتاق دریافت و به‌روز می‌شود" />
+      <PageHeader title="جلسات" subtitle="اطلاعات جلسات از سامانه جلسات دریافت و به‌روز می‌شود" />
       <Card>
         <div className="row between wrap mb">
           <Tabs
@@ -27,7 +27,7 @@ export function MeetingsPage() {
               { id: 'all', label: 'همه' },
             ]}
           />
-          <input className="input" style={{ maxWidth: 300 }} placeholder="جستجوی عنوان یا کمیسیون…" onKeyDown={(e) => e.key === 'Enter' && setQ((e.target as HTMLInputElement).value.trim())} />
+          <input className="input" style={{ maxWidth: 300 }} placeholder="جستجوی عنوان یا برگزارکننده…" onKeyDown={(e) => e.key === 'Enter' && setQ((e.target as HTMLInputElement).value.trim())} />
         </div>
         <ErrorBox error={r.error} />
         {r.loading && !r.data ? (
@@ -39,7 +39,7 @@ export function MeetingsPage() {
             <table className="table">
               <thead>
                 <tr>
-                  <th>کمیسیون</th>
+                  <th>برگزارکننده</th>
                   <th>جلسه</th>
                   <th>زمان</th>
                   <th>مکان</th>
@@ -166,7 +166,7 @@ export function MeetingDetailPage() {
         }
       >
         {!m.invitations.length ? (
-          <Empty>برای این جلسه نامه دعوتی ساخته نشده است. دبیر کمیسیون می‌تواند از صفحه مدعوین جلسه در سامانه جلسات آن را درخواست کند.</Empty>
+          <Empty>برای این جلسه نامه دعوتی ساخته نشده است. دبیر جلسه می‌تواند از صفحه مدعوین جلسه در سامانه جلسات آن را درخواست کند.</Empty>
         ) : (
           <table className="table">
             <thead>

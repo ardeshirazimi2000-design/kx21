@@ -549,6 +549,150 @@ paths:
               type: object
               properties:
                 code: *id001
+  /api/org-profile:
+    get:
+      tags:
+      - Organization
+      summary: مشخصات سازمان (نام و لوگو)
+      responses:
+        '200':
+          description: OK
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Forbidden
+        '404':
+          description: Not found or not visible
+        '409':
+          description: Conflict (state / business rule)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      description: Public.
+      security: []
+    put:
+      tags:
+      - Organization
+      summary: ویرایش مشخصات سازمان [org.manage]
+      responses:
+        '200':
+          description: OK
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Forbidden
+        '404':
+          description: Not found or not visible
+        '409':
+          description: Conflict (state / business rule)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name: *id001
+                shortName: *id001
+  /api/org-profile/logo:
+    get:
+      tags:
+      - Organization
+      summary: تصویر لوگوی سازمان
+      responses:
+        '200':
+          description: OK
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Forbidden
+        '404':
+          description: Not found or not visible
+        '409':
+          description: Conflict (state / business rule)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      description: Public.
+      security: []
+    post:
+      tags:
+      - Organization
+      summary: بارگذاری لوگوی سازمان (PNG/JPG، حداکثر ۲ مگابایت) [org.manage]
+      responses:
+        '200':
+          description: OK
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Forbidden
+        '404':
+          description: Not found or not visible
+        '409':
+          description: Conflict (state / business rule)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      description: multipart/form-data, field `file`.
+      security: []
+    delete:
+      tags:
+      - Organization
+      summary: حذف لوگوی سازمان [org.manage]
+      responses:
+        '200':
+          description: OK
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Forbidden
+        '404':
+          description: Not found or not visible
+        '409':
+          description: Conflict (state / business rule)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      security: []
   /api/org/units:
     get:
       tags:
@@ -3765,7 +3909,7 @@ paths:
     get:
       tags:
       - Meetings
-      summary: کمیسیون‌ها از سامانه جلسات [meetings.refer]
+      summary: برگزارکنندگان جلسات (کمیسیون‌ها) از سامانه جلسات [meetings.refer]
       responses:
         '200':
           description: OK
@@ -3893,7 +4037,7 @@ paths:
     post:
       tags:
       - Meetings
-      summary: ارجاع مکاتبه به کمیسیون [meetings.refer]
+      summary: ارجاع مکاتبه به جلسه [meetings.refer]
       responses:
         '200':
           description: OK

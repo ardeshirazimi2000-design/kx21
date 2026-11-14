@@ -1,5 +1,6 @@
 import { useEffect, useState, type CSSProperties, type ReactNode } from 'react';
 import { blobUrl } from '../lib/api';
+import { useOrgProfile } from '../lib/org';
 import { AuthImage } from './signature';
 import { dateFa, fa } from './ui';
 
@@ -88,6 +89,8 @@ export function LetterPaper({
   editing?: boolean;
 }) {
   const t = template;
+  const org = useOrgProfile();
+  const orgTitle = t?.org_name?.trim() || org?.name || '';
   const size = PAGE[t?.page_size ?? 'A4'];
   const background = useBlobUrl(t?.has_background ? `/letter-templates/${t.id}/background?v=${t.updated_at ?? ''}` : null);
   const logo = useBlobUrl(t?.show_logo && t.has_logo ? `/letter-templates/${t.id}/logo?v=${t.updated_at ?? ''}` : null);
@@ -105,8 +108,13 @@ export function LetterPaper({
       {drawnHeader ? (
         <header className="paper-head">
           <div className="paper-org">
-            {t?.show_logo !== false && (logo ? <img src={logo} alt="" /> : <img src="/iran-chamber-logo.png" className="paper-default-logo" alt="" />)}
-            {t?.org_name && <strong>{t.org_name}</strong>}
+            {t?.show_logo !== false &&
+              (logo ? (
+                <img src={logo} alt="" />
+              ) : org?.logoUrl ? (
+                <img src={org.logoUrl} className={org.hasLogo ? undefined : 'paper-default-logo'} alt="" />
+              ) : null)}
+            {orgTitle && <strong>{orgTitle}</strong>}
             {t?.org_subtitle && <span>{t.org_subtitle}</span>}
           </div>
           <div className="paper-bismillah">{t?.header_text}</div>

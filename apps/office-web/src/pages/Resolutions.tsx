@@ -27,7 +27,7 @@ export function ResolutionsPage() {
   const r = useApi<{ items: any[]; total: number; page: number; pageSize: number }>(`/resolutions?${qs}`, [qs]);
   return (
     <>
-      <PageHeader title="پیگیری مصوبات کمیسیون‌ها" subtitle="مصوبات ثبت‌شده در سامانه جلسات، به‌صورت خودکار به مسئول اجرا ابلاغ و گزارش پیشرفت به سامانه جلسات برگردانده می‌شود" />
+      <PageHeader title="پیگیری مصوبات" subtitle="مصوبات ثبت‌شده در سامانه جلسات، به‌صورت خودکار به مسئول اجرا ابلاغ و گزارش پیشرفت به سامانه جلسات برگردانده می‌شود" />
       <Card>
         <div className="row between wrap mb">
           <Tabs
@@ -51,7 +51,7 @@ export function ResolutionsPage() {
                 <tr>
                   <th>شماره</th>
                   <th>مصوبه</th>
-                  <th>کمیسیون</th>
+                  <th>برگزارکننده</th>
                   <th>مسئول اجرا</th>
                   <th>مهلت</th>
                   <th>پیشرفت</th>
@@ -152,7 +152,7 @@ export function ResolutionDetailPage() {
               </Field>
               <label className="check mb">
                 <input type="checkbox" checked={submit} onChange={(e) => setSubmit(e.target.checked)} />
-                اجرا کامل شده؛ برای تأیید دبیر کمیسیون ارسال شود
+                اجرا کامل شده؛ برای تأیید دبیر جلسه ارسال شود
               </label>
               <Button
                 busy={act.busy}
