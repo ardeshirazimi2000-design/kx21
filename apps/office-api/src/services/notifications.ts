@@ -15,6 +15,7 @@ export const NOTIFICATION_EVENTS = {
   'meeting.referral_updated': 'وضعیت ارجاع به جلسه',
   'meeting.invitation_letters': 'پیش‌نویس نامه‌های دعوت جلسه',
   'archive.retention_due': 'سررسید نگهداری اسناد',
+  'message.received': 'پیام جدید در پیام‌رسان سازمانی',
 } as const;
 export type NotificationEvent = keyof typeof NOTIFICATION_EVENTS;
 type Channel = 'in_app' | 'email' | 'sms';
@@ -56,6 +57,8 @@ export const DEFAULT_TEMPLATES: Record<NotificationEvent, Partial<Record<Channel
     email: { subject: 'نامه‌های دعوت جلسه {{meeting}}', body: '{{name}} گرامی،\n{{count}} پیش‌نویس نامه دعوت برای جلسه «{{meeting}}» {{commission}} ({{date}}) آماده ثبت و امضاست.\n{{link}}' },
   },
   'archive.retention_due': { in_app: { subject: 'سررسید نگهداری', body: '{{count}} سند به پایان دوره نگهداری رسیده و منتظر تصمیم (امحا/بازبینی) است.' } },
+  // No message text in a notification: only who wrote, and where.
+  'message.received': { in_app: { subject: 'پیام جدید از {{sender}}', body: '{{sender}} {{conversation}} برای شما پیام فرستاد.' } },
 };
 
 export const render = (tpl: string, vars: Record<string, unknown>) =>
@@ -82,7 +85,8 @@ export async function notify(n: NotifyInput, db: Db = pool) {
   // A letter's notification carries its subject: nobody below the letter's confidentiality receives it.
   const letter = n.data?.letterId ? await one('SELECT confidentiality FROM letters WHERE id = $1', [n.data.letterId], db) : null;
   const users = await query('SELECT id, full_name, email, mobile FROM users WHERE id = ANY($1::uuid[]) AND is_active AND clearance >= $2', [ids, letter?.confidentiality ?? 0], db);
-  const link = n.data?.letterId ? `${config.publicUrl}/letters/${n.data.letterId}` : config.publicUrl;
+  const path = typeof n.data?.path === 'string' && n.data.path.startsWith('/') ? n.data.path : '';
+  const link = n.data?.letterId ? `${config.publicUrl}/letters/${n.data.letterId}` : `${config.publicUrl}${path}`;
   const inApp = await template(n.event, 'in_app', db);
   const email = await template(n.event, 'email', db);
   const sms = await template(n.event, 'sms', db);
