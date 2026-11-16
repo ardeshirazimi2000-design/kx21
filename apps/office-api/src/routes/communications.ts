@@ -1,3 +1,4 @@
+import crypto from 'node:crypto';
 import { Router, type Request } from 'express';
 import rateLimit from 'express-rate-limit';
 import { z } from 'zod';
@@ -11,7 +12,10 @@ import { getFile, putFile } from '../lib/storage.js';
 import { body, param, uuid } from '../lib/validate.js';
 import { deliverMessage, directKey, memberConversation, memberIds, MESSAGE_COLS, messageById, systemMessage } from '../services/communications.js';
 import { enqueue } from '../services/jobs.js';
-import { pbx } from '../services/pbx.js';
+import { pbx, syncPbxSoon } from '../services/pbx.js';
+import { DEFAULT_INBOUND, inboundSettings, newSipSecret } from '../services/pbxConfig.js';
+import { encryptText } from '../lib/crypto.js';
+import { logger } from '../lib/logger.js';
 import { emitToUsers, isOnline } from '../services/realtime.js';
 
 /**
@@ -37,8 +41,11 @@ const maxAttachmentMb = Math.min(config.maxUploadMb, Number(process.env.COMM_MAX
 
 communicationsRouter.get('/communications/status', (_req, res) => {
   const a = pbx();
-  res.json({ pbx: { kind: a.kind, configured: a.configured }, realtime: true, maxAttachmentMb });
+  res.json({ pbx: { kind: a.kind, configured: a.configured, connected: a.connected() }, realtime: true, maxAttachmentMb });
 });
+
+/** An extension row without its (encrypted) SIP secret: for responses and the audit trail. */
+const pub = ({ sip_secret_enc: _s, ...r }: any) => r;
 
 // ─────────────── Directory (دفترچه تلفن سازمانی) ───────────────
 
@@ -121,8 +128,8 @@ communicationsRouter.post('/communications/extensions', async (req, res) => {
       [b.userId, b.extensionNumber, b.label || null, b.existsOnPbx ? 'active' : 'draft', b.existsOnPbx ? 'manual' : null, u.id],
       c,
     ).catch(numberTaken);
-    await audit(c, req, { action: 'communications.extension_created', entity: 'communication_extension', entityId: r.id, after: r });
-    return r;
+    await audit(c, req, { action: 'communications.extension_created', entity: 'communication_extension', entityId: r.id, after: pub(r) });
+    return pub(r);
   });
   res.status(201).json(row);
 });
@@ -171,16 +178,18 @@ communicationsRouter.patch('/communications/extensions/:id', async (req, res) =>
       action: 'communications.extension_updated',
       entity: 'communication_extension',
       entityId: id,
-      before,
-      after: r,
+      before: pub(before),
+      after: pub(r),
       reason: b.reason ?? null,
     });
-    return r;
+    return pub(r);
   });
+  // The PBX follows: a disabled or suspended number stops working, a resumed one works again.
   if (row.status === 'disabled')
     await pbx()
       .disableExtension({ id: row.id, number: row.extension_number })
       .catch(() => undefined);
+  else syncPbxSoon();
   res.json(row);
 });
 
@@ -193,7 +202,7 @@ communicationsRouter.post('/communications/extensions/:id/provision', async (req
   const row = await tx(async (c) => {
     const before = await one('SELECT * FROM communication_extensions WHERE id = $1 FOR UPDATE', [id], c);
     if (!before) throw notFound();
-    if (before.status === 'provisioning') return before;
+    if (before.status === 'provisioning') return pub(before);
     if (!['draft', 'failed'].includes(before.status)) throw conflict('فقط داخلی پیش‌نویس یا ناموفق قابل ایجاد در مرکز تلفن است', 'bad_transition');
     const r = await one(
       `UPDATE communication_extensions SET status = 'provisioning', last_error = NULL, updated_at = now() WHERE id = $1 RETURNING *`,
@@ -201,10 +210,127 @@ communicationsRouter.post('/communications/extensions/:id/provision', async (req
       c,
     );
     await enqueue('communications.provision', { extensionId: id }, c, { maxAttempts: 5 });
-    await audit(c, req, { action: 'communications.extension_provision_requested', entity: 'communication_extension', entityId: id, before, after: r });
-    return r;
+    await audit(c, req, { action: 'communications.extension_provision_requested', entity: 'communication_extension', entityId: id, before: pub(before), after: pub(r) });
+    return pub(r);
   });
   res.status(202).json(row);
+});
+
+/**
+ * Generates a new SIP password for the extension and shows it once (to configure the phone); the old one stops
+ * working at the next PBX reload. The password is stored only encrypted and never listed anywhere.
+ */
+communicationsRouter.post('/communications/extensions/:id/credentials', async (req, res) => {
+  requirePerm(currentUser(req), 'communications.extension.manage');
+  const id = param(req, 'id');
+  const secret = newSipSecret();
+  const row = await tx(async (c) => {
+    const r = await one(
+      `UPDATE communication_extensions SET sip_secret_enc = $2, updated_at = now() WHERE id = $1 AND status <> 'disabled' RETURNING id, extension_number`,
+      [id, encryptText(secret)],
+      c,
+    );
+    if (!r) throw notFound();
+    await audit(c, req, { action: 'communications.extension_secret_reset', entity: 'communication_extension', entityId: id });
+    return r;
+  });
+  syncPbxSoon();
+  res.setHeader('cache-control', 'no-store');
+  res.json({ username: row.extension_number, password: secret });
+});
+
+/** Where calls from the city line ring (one or more extensions together). */
+communicationsRouter.get('/communications/settings/inbound', async (req, res) => {
+  requirePerm(currentUser(req), 'communications.settings.manage');
+  res.json(await inboundSettings());
+});
+
+communicationsRouter.put('/communications/settings/inbound', async (req, res) => {
+  const u = currentUser(req);
+  requirePerm(u, 'communications.settings.manage');
+  const b = body(req, z.object({ targets: z.array(extNumber).max(20), ringSeconds: z.number().int().min(10).max(120).default(DEFAULT_INBOUND.ringSeconds) }));
+  const targets = [...new Set(b.targets)];
+  const live = await query(`SELECT extension_number FROM communication_extensions WHERE extension_number = ANY($1::text[]) AND status = 'active'`, [targets]);
+  if (live.length !== targets.length) throw badRequest('همه مقصدها باید داخلی فعال باشند');
+  const value = { targets, ringSeconds: b.ringSeconds };
+  await tx(async (c) => {
+    const before = await one(`SELECT value FROM communication_settings WHERE key = 'inbound'`, [], c);
+    await c.query(
+      `INSERT INTO communication_settings (key, value, updated_by) VALUES ('inbound', $1, $2)
+       ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_by = EXCLUDED.updated_by, updated_at = now()`,
+      [JSON.stringify(value), u.id],
+    );
+    await audit(c, req, { action: 'communications.settings_updated', entity: 'communication_settings', entityId: null, before: before?.value ?? null, after: value });
+  });
+  syncPbxSoon();
+  res.json(value);
+});
+
+// ─────────────── Calls (تماس‌ها) ───────────────
+
+/** Call history: one's own calls; everyone's with communications.report.view (?scope=all). */
+communicationsRouter.get('/communications/calls', async (req, res) => {
+  const u = currentUser(req);
+  const all = req.query.scope === 'all';
+  if (all) requirePerm(u, 'communications.report.view');
+  const page = Math.max(1, Number(req.query.page ?? 1) || 1);
+  const pageSize = Math.min(100, Math.max(1, Number(req.query.pageSize ?? 30) || 30));
+  const pick = (k: string, allowed: string[]) => (typeof req.query[k] === 'string' && allowed.includes(req.query[k] as string) ? (req.query[k] as string) : null);
+  const direction = pick('direction', ['internal', 'inbound', 'outbound']);
+  const disposition = pick('disposition', ['answered', 'missed', 'busy', 'failed']);
+  const date = (k: string) => (typeof req.query[k] === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(req.query[k] as string) ? (req.query[k] as string) : null);
+  const where = `($1 OR c.caller_user_id = $2 OR c.callee_user_id = $2) AND ($3::text IS NULL OR c.direction = $3) AND ($4::text IS NULL OR c.disposition = $4)
+     AND ($5::date IS NULL OR c.started_at >= $5::date) AND ($6::date IS NULL OR c.started_at < $6::date + 1)`;
+  const params = [all, u.id, direction, disposition, date('from'), date('to')];
+  const [{ total }] = await query(`SELECT count(*)::int AS total FROM communication_calls c WHERE ${where}`, params);
+  const items = await query(
+    `SELECT c.id, c.direction, c.caller_number, c.caller_name, c.callee_number, c.caller_user_id, c.callee_user_id, cu.full_name AS caller_user_name,
+            eu.full_name AS callee_user_name, c.started_at, c.answered_at, c.ended_at, c.disposition, c.duration_seconds
+       FROM communication_calls c LEFT JOIN users cu ON cu.id = c.caller_user_id LEFT JOIN users eu ON eu.id = c.callee_user_id
+      WHERE ${where} ORDER BY c.started_at DESC LIMIT $7 OFFSET $8`,
+    [...params, pageSize, (page - 1) * pageSize],
+  );
+  res.json({ items, total, page, pageSize });
+});
+
+/** City-line numbers that may be dialled (after the 9 prefix): 8-digit local, 0 + 10 digits (other cities, mobile), emergency. */
+export const EXTERNAL_NUMBER = /^9(?:[2-9][0-9]{7}|0[1-9][0-9]{9}|11[05]|125)$/;
+const originateLimiter = limiter(10);
+
+/** Click-to-call: the caller's own phone rings first, then the destination. Destinations are checked here and by the dial plan. */
+communicationsRouter.post('/communications/calls/originate', originateLimiter, async (req, res) => {
+  const u = currentUser(req);
+  const b = body(req, z.object({ to: z.string().trim().regex(/^[0-9]{2,13}$/, 'شماره مقصد معتبر نیست'), extensionId: uuid.optional() }));
+  const a = pbx();
+  if (!a.configured) throw new HttpError(409, 'pbx_not_configured', 'مرکز تلفن به رسا متصل نیست');
+  if (!a.connected()) throw new HttpError(503, 'pbx_unavailable', 'ارتباط با مرکز تلفن برقرار نیست؛ کمی بعد دوباره تلاش کنید');
+  const mine = await one(
+    `SELECT extension_number FROM communication_extensions WHERE user_id = $1 AND status = 'active' AND ($2::uuid IS NULL OR id = $2) ORDER BY created_at LIMIT 1`,
+    [u.id, b.extensionId ?? null],
+  );
+  if (!mine) throw conflict('شما داخلی فعال ندارید', 'no_extension');
+  const internal = await one(`SELECT 1 FROM communication_extensions WHERE extension_number = $1 AND status = 'active'`, [b.to]);
+  if (!internal) {
+    if (!EXTERNAL_NUMBER.test(b.to)) throw badRequest('این شماره قابل گرفتن نیست؛ برای خط شهری ابتدا ۹ را بگیرید');
+    const emergency = /^91(?:1[05]|25)$/.test(b.to);
+    if (!emergency && !u.can('communications.call.external')) throw forbidden('مجوز تماس با خط شهری را ندارید');
+  }
+  if (b.to === mine.extension_number) throw badRequest('تماس با داخلی خودتان ممکن نیست');
+  // The call row is opened here (the PBX events then update it), so the history shows the dialled number even when the
+  // call never reaches the destination (busy line, gateway down).
+  const callId = `rasa-${crypto.randomUUID()}`;
+  const row = await one(
+    `INSERT INTO communication_calls (unique_call_id, direction, caller_number, caller_name, callee_number, caller_user_id, callee_user_id)
+     VALUES ($1,$2,$3,$4,$5,$6,(SELECT user_id FROM communication_extensions WHERE extension_number = $5 AND status = 'active' AND $2 = 'internal')) RETURNING id`,
+    [callId, internal ? 'internal' : 'outbound', mine.extension_number, u.fullName.slice(0, 80), internal ? b.to : b.to.slice(1), u.id],
+  );
+  await query(`INSERT INTO communication_call_events (call_id, event_type, event_key, payload) VALUES ($1,'started',$2,'{"origin":"click_to_call"}')`, [row.id, callId]);
+  await a.originate({ fromExtension: mine.extension_number, to: b.to, callerName: u.fullName, userId: u.id, callId }).catch(async (e) => {
+    logger.warn({ err: (e as Error).message, from: mine.extension_number }, 'originate refused by the PBX');
+    await query(`UPDATE communication_calls SET ended_at = now(), disposition = 'failed', duration_seconds = 0 WHERE id = $1`, [row.id]);
+    throw new HttpError(503, 'pbx_unavailable', 'مرکز تلفن درخواست تماس را نپذیرفت');
+  });
+  res.status(202).json({ callId: row.id, from: mine.extension_number, to: b.to });
 });
 
 // ─────────────── Messenger (پیام‌رسان سازمانی) ───────────────

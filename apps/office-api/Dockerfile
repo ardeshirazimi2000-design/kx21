@@ -21,7 +21,7 @@ COPY --from=build /app/packages/shared/dist packages/shared/dist
 COPY --from=build /app/apps/office-api/package.json apps/office-api/
 COPY --from=build /app/apps/office-api/dist apps/office-api/dist
 COPY --from=build /app/apps/office-api/openapi.yaml apps/office-api/
-RUN mkdir -p /data/storage && chown -R node:node /data
+RUN mkdir -p /data/storage /data/pbx && chown -R node:node /data
 USER node
 WORKDIR /app/apps/office-api
 EXPOSE 4100

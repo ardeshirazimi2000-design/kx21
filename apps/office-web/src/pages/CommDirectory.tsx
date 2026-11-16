@@ -7,6 +7,7 @@ import { post } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { useAction, useApi } from '../lib/hooks';
 import { useRealtime } from '../lib/realtime';
+import { useClickToCall } from '../lib/telephony';
 import '../communications.css';
 
 interface Person {
@@ -37,6 +38,7 @@ export function CommDirectoryPage() {
   const r = useApi<Person[]>(`/communications/directory?q=${encodeURIComponent(q)}&unitId=${unitId}`, [q, unitId]);
   const nav = useNavigate();
   const act = useAction();
+  const c2c = useClickToCall();
   useRealtime({
     UserPresenceChanged: (p: { userId: string; online: boolean }) =>
       r.setData((list) => list?.map((x) => (x.id === p.userId ? { ...x, online: p.online } : x)) ?? list),
@@ -49,12 +51,17 @@ export function CommDirectoryPage() {
 
   return (
     <>
-      <PageHeader title="دفترچه تلفن سازمانی" subtitle="شماره داخلی، واحد و سمت همکاران؛ برای گفت‌وگو روی «پیام» بزنید" />
+      <PageHeader title="دفترچه تلفن سازمانی" subtitle="شماره داخلی، واحد و سمت همکاران؛ با «تماس» اول گوشی خودتان زنگ می‌خورد، با «پیام» گفت‌وگو شروع می‌شود" />
       <Card>
         <div className="dir-filters">
           <input className="input" placeholder="جستجوی نام، سمت، واحد یا شماره داخلی…" value={q} onChange={(e) => setQ(e.target.value)} aria-label="جستجو" />
           <UnitSelect value={unitId} onChange={setUnitId} emptyLabel="همه واحدها" />
         </div>
+        {c2c.notice && (
+          <div className={`alert alert-${c2c.notice.tone} mb`} role="status">
+            {c2c.notice.text}
+          </div>
+        )}
         <ErrorBox error={r.error ?? act.error} />
         {r.loading && !r.data ? (
           <Loading />
@@ -79,6 +86,17 @@ export function CommDirectoryPage() {
                         <Icon name="phone" size={15} />
                         <span className="mono">{fa(e.number)}</span>
                         {e.status !== 'active' && <Badge tone="warning">در حال راه‌اندازی</Badge>}
+                        {e.status === 'active' && c2c.ready && p.id !== me!.id && (
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            onClick={() => c2c.call(e.number, p.full_name)}
+                            disabled={c2c.busy}
+                            aria-label={`تماس با ${p.full_name}، داخلی ${fa(e.number)}`}
+                          >
+                            تماس
+                          </Button>
+                        )}
                       </span>
                     ))
                   ) : (

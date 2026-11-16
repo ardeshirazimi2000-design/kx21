@@ -27,6 +27,9 @@ export const PERMISSIONS = [
   { key: 'resolutions.follow', name: 'ثبت پیگیری اجرای مصوبه', module: 'یکپارچه‌سازی' },
   { key: 'communications.extension.manage', name: 'تخصیص و مدیریت شماره‌های داخلی', module: 'ارتباطات سازمانی' },
   { key: 'communications.conversation.manage', name: 'ایجاد و مدیریت گروه‌های گفت‌وگوی سازمانی', module: 'ارتباطات سازمانی' },
+  { key: 'communications.call.external', name: 'تماس با خط شهری (بیرون از سازمان)', module: 'ارتباطات سازمانی' },
+  { key: 'communications.report.view', name: 'مشاهده گزارش همه تماس‌ها', module: 'ارتباطات سازمانی' },
+  { key: 'communications.settings.manage', name: 'تنظیمات مرکز تلفن (مقصد تماس ورودی)', module: 'ارتباطات سازمانی' },
 ] as const;
 
 export type Permission = (typeof PERMISSIONS)[number]['key'];
@@ -52,14 +55,14 @@ export const SYSTEM_ROLES: { key: string; name: string; description: string; per
     description: 'تأیید، ارجاع، امضا و نظارت در حوزه واحد',
     permissions: pick(
       'letter.create', 'letter.read_all', 'letter.sign', 'workflow.start', 'archive.read', 'reports.view', 'meetings.view', 'meetings.refer', 'resolutions.follow',
-      'communications.conversation.manage',
+      'communications.conversation.manage', 'communications.call.external',
     ),
   },
   {
     key: 'president',
     name: 'رئیس سازمان / معاون',
     description: 'امضا و داشبورد مدیریتی',
-    permissions: pick('letter.create', 'letter.read_all', 'letter.sign', 'workflow.start', 'archive.read', 'reports.view', 'meetings.view', 'meetings.refer', 'resolutions.follow'),
+    permissions: pick('letter.create', 'letter.read_all', 'letter.sign', 'workflow.start', 'archive.read', 'reports.view', 'meetings.view', 'meetings.refer', 'resolutions.follow', 'communications.call.external'),
   },
   {
     key: 'expert',
@@ -67,5 +70,5 @@ export const SYSTEM_ROLES: { key: string; name: string; description: string; per
     description: 'پردازش مکاتبات و اسناد ارجاع‌شده',
     permissions: pick('letter.create', 'workflow.start', 'meetings.view', 'resolutions.follow'),
   },
-  { key: 'it', name: 'واحد فناوری اطلاعات', description: 'نگهداری و یکپارچه‌سازی', permissions: pick('integration.manage', 'audit.view', 'reports.view', 'meetings.view', 'communications.extension.manage') },
+  { key: 'it', name: 'واحد فناوری اطلاعات', description: 'نگهداری و یکپارچه‌سازی', permissions: pick('integration.manage', 'audit.view', 'reports.view', 'meetings.view', 'communications.extension.manage', 'communications.settings.manage', 'communications.report.view') },
 ];

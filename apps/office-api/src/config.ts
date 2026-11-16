@@ -83,7 +83,24 @@ export const config = {
   hstsMaxAge: env('HSTS_MAX_AGE', '86400') === 'off' ? null : Number(env('HSTS_MAX_AGE', '86400')),
   /** Off by default: other sites under the same domain may still be on HTTP. */
   hstsIncludeSubDomains: flag('HSTS_INCLUDE_SUBDOMAINS'),
+  /**
+   * Telephone exchange (docs/communications/telephony.md): 'none' or 'asterisk-ami'. AMI is reached only on the
+   * internal Docker network; PBX_CONFIG_DIR is the volume the Asterisk container reads Rasa's generated files from.
+   */
+  pbx: {
+    driver: env('PBX_DRIVER', 'none') as 'none' | 'asterisk-ami',
+    amiHost: env('PBX_AMI_HOST', 'pbx'),
+    amiPort: Number(env('PBX_AMI_PORT', '5038')),
+    amiUser: env('PBX_AMI_USER', 'rasa'),
+    amiSecret: process.env.PBX_AMI_SECRET ?? '',
+    configDir: env('PBX_CONFIG_DIR', '/data/pbx'),
+    /** Simultaneous city-line calls allowed out (toll-fraud limit). */
+    maxOutbound: Number(env('PBX_MAX_OUTBOUND', '2')),
+  },
 };
+
+if (config.pbx.driver !== 'none' && config.pbx.driver !== 'asterisk-ami') throw new Error('PBX_DRIVER must be none or asterisk-ami');
+if (config.pbx.driver === 'asterisk-ami' && config.pbx.amiSecret.length < 24) throw new Error('PBX_AMI_SECRET must be at least 24 characters (openssl rand -hex 24)');
 
 if (config.hstsMaxAge !== null && (!Number.isInteger(config.hstsMaxAge) || config.hstsMaxAge < 0)) {
   throw new Error('HSTS_MAX_AGE must be a whole number of seconds or off');

@@ -1,0 +1,53 @@
+# Rasa PBX (Asterisk) beside office automation (docs/communications/telephony.md). Enable it with
+#   COMPOSE_FILE=docker-compose.yml:docker-compose.pbx.yml
+# in .env plus OFFICE_PBX_AMI_SECRET (deploy/docker-install.sh creates it). Rasa writes the extensions' configuration
+# into the pbx-config volume and talks to Asterisk over AMI on the internal network pbx-net; AMI is never published.
+# Only SIP (5060/udp) and the RTP range are published, on PBX_BIND (set it to the server's LAN address; never forward
+# these ports from the internet).
+services:
+  office-api:
+    environment:
+      PBX_DRIVER: asterisk-ami
+      PBX_AMI_HOST: pbx
+      PBX_AMI_SECRET: ${OFFICE_PBX_AMI_SECRET:?set OFFICE_PBX_AMI_SECRET (at least 24 characters)}
+      PBX_MAX_OUTBOUND: ${PBX_MAX_OUTBOUND:-2}
+    volumes:
+      - pbx-config:/data/pbx
+    networks: [default, pbx-net]
+
+  pbx:
+    build:
+      context: .
+      dockerfile: deploy/pbx/Dockerfile
+    restart: unless-stopped
+    environment:
+      AMI_SECRET: ${OFFICE_PBX_AMI_SECRET:?set OFFICE_PBX_AMI_SECRET (at least 24 characters)}
+      PBX_AMI_PERMIT: ${PBX_AMI_PERMIT:-172.16.0.0/255.240.0.0}
+      PBX_EXTERNAL_ADDRESS: ${PBX_EXTERNAL_ADDRESS:-}
+      PBX_LOCAL_NETS: ${PBX_LOCAL_NETS:-}
+      PBX_RTP_START: ${PBX_RTP_START:-10000}
+      PBX_RTP_END: ${PBX_RTP_END:-10099}
+      PBX_MAX_OUTBOUND: ${PBX_MAX_OUTBOUND:-2}
+      PBX_TRUNK_PASSWORD: ${PBX_TRUNK_PASSWORD:-}
+      PBX_TRUNK_IP: ${PBX_TRUNK_IP:-}
+    volumes:
+      - pbx-config:/etc/asterisk/rasa:ro
+    networks: [pbx-net]
+    ports:
+      - "${PBX_BIND:-127.0.0.1}:5060:5060/udp"
+      - "${PBX_BIND:-127.0.0.1}:${PBX_RTP_START:-10000}-${PBX_RTP_END:-10099}:${PBX_RTP_START:-10000}-${PBX_RTP_END:-10099}/udp"
+    deploy:
+      resources:
+        limits: { cpus: "1.0", memory: 512M }
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "3" }
+
+networks:
+  pbx-net:
+    # Only office-api and pbx are on it. (Not "internal: true": Docker cannot publish the SIP/RTP ports of a container
+    # that is only on an internal network.)
+    driver: bridge
+
+volumes:
+  pbx-config:

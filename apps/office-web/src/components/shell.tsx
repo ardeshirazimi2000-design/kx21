@@ -3,6 +3,7 @@ import { Link, NavLink, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../lib/auth';
 import { usePoll } from '../lib/hooks';
 import { useRealtime } from '../lib/realtime';
+import { CallAlert } from './CallAlert';
 import { Icon, type IconName } from './icons';
 import { fa } from './ui';
 
@@ -36,7 +37,8 @@ export const MENU: MenuGroup[] = [
     icon: 'phone',
     items: [
       { to: '/communications/messages', label: 'پیام‌رسان', icon: 'chat', badge: 'messages' },
-      { to: '/communications/directory', label: 'دفترچه تلفن', icon: 'phone' },
+      { to: '/communications/directory', label: 'دفترچه تلفن', icon: 'contacts' },
+      { to: '/communications/calls', label: 'تماس‌ها', icon: 'phone' },
       { to: '/communications/extensions', label: 'مدیریت داخلی‌ها', icon: 'dialpad', perm: 'communications.extension.manage' },
     ],
   },
@@ -236,6 +238,7 @@ export function Shell({ children }: { children: ReactNode }) {
           <UserMenu name={me!.full_name} position={position ? `${position.title} — ${position.unitName}` : ''} onLogout={() => void logout()} />
         </header>
         <main className="content">{children}</main>
+        <CallAlert />
       </div>
     </div>
   );
