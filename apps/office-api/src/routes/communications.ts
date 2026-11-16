@@ -1,5 +1,5 @@
 import crypto from 'node:crypto';
-import { Router, type Request } from 'express';
+import express, { Router, type Request } from 'express';
 import rateLimit from 'express-rate-limit';
 import { z } from 'zod';
 import { currentUser, requirePerm, type AuthUser } from '../auth/middleware.js';
@@ -13,7 +13,7 @@ import { body, param, uuid } from '../lib/validate.js';
 import { deliverMessage, directKey, memberConversation, memberIds, MESSAGE_COLS, messageById, systemMessage } from '../services/communications.js';
 import { enqueue } from '../services/jobs.js';
 import { pbx, syncPbxSoon } from '../services/pbx.js';
-import { DEFAULT_INBOUND, inboundSettings, newSipSecret } from '../services/pbxConfig.js';
+import { DEFAULT_INBOUND, inboundSettings, IVR_DAYS, ivrSettings, newSipSecret, SOUND_KINDS, wavProblem, type SoundKind } from '../services/pbxConfig.js';
 import { encryptText } from '../lib/crypto.js';
 import { logger } from '../lib/logger.js';
 import { emitToUsers, isOnline } from '../services/realtime.js';
@@ -264,6 +264,113 @@ communicationsRouter.put('/communications/settings/inbound', async (req, res) =>
   });
   syncPbxSoon();
   res.json(value);
+});
+
+// ─────────────── Auto-attendant (تلفن گویا) ───────────────
+
+const hhmm = z.string().regex(/^([01][0-9]|2[0-3]):[0-5][0-9]$/, 'ساعت نامعتبر است');
+
+communicationsRouter.get('/communications/settings/ivr', async (req, res) => {
+  requirePerm(currentUser(req), 'communications.settings.manage');
+  const sounds = await query(`SELECT key, updated_at, octet_length(data)::int AS bytes FROM communication_sounds ORDER BY key`);
+  const extensions = await query(
+    `SELECT e.extension_number AS number, u.full_name AS name FROM communication_extensions e JOIN users u ON u.id = e.user_id
+      WHERE e.status = 'active' AND u.is_active ORDER BY e.extension_number`,
+  );
+  const inbound = await inboundSettings();
+  res.json({
+    ...(await ivrSettings()),
+    sounds: Object.fromEntries(sounds.map((r) => [r.key, { updatedAt: r.updated_at, seconds: Math.round(r.bytes / 16000) }])),
+    extensions,
+    operatorTargets: inbound.targets,
+  });
+});
+
+communicationsRouter.put('/communications/settings/ivr', async (req, res) => {
+  const u = currentUser(req);
+  requirePerm(u, 'communications.settings.manage');
+  const b = body(
+    req,
+    z.object({
+      enabled: z.boolean(),
+      options: z
+        .array(z.object({ digit: z.string().regex(/^[0-9]$/), label: z.string().trim().max(60).default(''), targets: z.array(extNumber).min(1).max(20) }))
+        .max(10),
+      directDial: z.boolean(),
+      waitSeconds: z.number().int().min(2).max(30),
+      ringSeconds: z.number().int().min(10).max(120),
+      workHours: z.object({ days: z.array(z.enum(IVR_DAYS)).max(7), start: hhmm, end: hhmm }),
+      afterHoursEnabled: z.boolean(),
+    }),
+  );
+  if (new Set(b.options.map((o) => o.digit)).size !== b.options.length) throw badRequest('هر کلید فقط یک بار می‌تواند به کار رود');
+  if (b.workHours.start >= b.workHours.end) throw badRequest('ساعت پایان کار باید بعد از ساعت شروع باشد');
+  const options = b.options.map((o) => ({ ...o, targets: [...new Set(o.targets)] }));
+  const wanted = [...new Set(options.flatMap((o) => o.targets))];
+  const live = await query(`SELECT extension_number FROM communication_extensions WHERE extension_number = ANY($1::text[]) AND status = 'active'`, [wanted]);
+  if (live.length !== wanted.length) throw badRequest('همه مقصدها باید داخلی فعال باشند');
+  if (b.enabled && !(await one(`SELECT 1 FROM communication_sounds WHERE key = 'greeting'`))) throw badRequest('پیش از روشن کردن تلفن گویا، پیام خوشامد را ضبط یا بارگذاری کنید');
+  const value = { ...b, options, workHours: { ...b.workHours, days: IVR_DAYS.filter((d) => b.workHours.days.includes(d)) } };
+  await tx(async (c) => {
+    const before = await one(`SELECT value FROM communication_settings WHERE key = 'ivr'`, [], c);
+    await c.query(
+      `INSERT INTO communication_settings (key, value, updated_by) VALUES ('ivr', $1, $2)
+       ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_by = EXCLUDED.updated_by, updated_at = now()`,
+      [JSON.stringify(value), u.id],
+    );
+    await audit(c, req, { action: 'communications.settings_updated', entity: 'communication_settings', entityId: null, before: before?.value ?? null, after: value });
+  });
+  syncPbxSoon();
+  res.json(value);
+});
+
+const soundKind = (req: Request): SoundKind => {
+  const k = req.params.kind as SoundKind;
+  if (!SOUND_KINDS.includes(k)) throw notFound();
+  return k;
+};
+
+/** A prompt as 8 kHz mono 16-bit PCM WAV (the page converts recordings and uploads to it). */
+communicationsRouter.put('/communications/ivr/sounds/:kind', express.raw({ type: 'audio/wav', limit: '3mb' }), async (req, res) => {
+  const u = currentUser(req);
+  requirePerm(u, 'communications.settings.manage');
+  const kind = soundKind(req);
+  if (!Buffer.isBuffer(req.body)) throw badRequest('فایل صوتی WAV ارسال نشده است');
+  const problem = wavProblem(req.body);
+  if (problem) throw badRequest(problem);
+  await tx(async (c) => {
+    await c.query(
+      `INSERT INTO communication_sounds (key, data, updated_by) VALUES ($1, $2, $3)
+       ON CONFLICT (key) DO UPDATE SET data = EXCLUDED.data, updated_by = EXCLUDED.updated_by, updated_at = now()`,
+      [kind, req.body, u.id],
+    );
+    await audit(c, req, { action: 'communications.sound_uploaded', entity: 'communication_sounds', entityId: null, after: { kind, bytes: req.body.length } });
+  });
+  syncPbxSoon();
+  res.json({ kind, seconds: Math.round(req.body.length / 16000) });
+});
+
+communicationsRouter.get('/communications/ivr/sounds/:kind', async (req, res) => {
+  requirePerm(currentUser(req), 'communications.settings.manage');
+  const r = await one(`SELECT data FROM communication_sounds WHERE key = $1`, [soundKind(req)]);
+  if (!r) throw notFound();
+  res.setHeader('content-type', 'audio/wav');
+  res.setHeader('cache-control', 'no-store');
+  res.setHeader('x-content-type-options', 'nosniff');
+  res.send(r.data);
+});
+
+communicationsRouter.delete('/communications/ivr/sounds/:kind', async (req, res) => {
+  const u = currentUser(req);
+  requirePerm(u, 'communications.settings.manage');
+  const kind = soundKind(req);
+  if (kind === 'greeting' && (await ivrSettings()).enabled) throw badRequest('تا تلفن گویا روشن است، پیام خوشامد را نمی‌توان حذف کرد');
+  await tx(async (c) => {
+    const r = await c.query(`DELETE FROM communication_sounds WHERE key = $1`, [kind]);
+    if (r.rowCount) await audit(c, req, { action: 'communications.sound_deleted', entity: 'communication_sounds', entityId: null, before: { kind } });
+  });
+  syncPbxSoon();
+  res.status(204).end();
 });
 
 // ─────────────── Calls (تماس‌ها) ───────────────

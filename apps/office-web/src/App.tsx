@@ -26,6 +26,7 @@ import { SignaturesPage } from './pages/Signatures';
 import { CommDirectoryPage } from './pages/CommDirectory';
 import { CommCallsPage } from './pages/CommCalls';
 import { CommExtensionsPage } from './pages/CommExtensions';
+import { CommIvrPage } from './pages/CommIvr';
 import { CommMessengerPage } from './pages/CommMessenger';
 import { ContactsPage } from './pages/Contacts';
 import { SmartSearchPage } from './pages/SmartSearch';
@@ -80,6 +81,7 @@ export function App() {
         <Route path="/communications/messages" element={<CommMessengerPage />} />
         <Route path="/communications/directory" element={<CommDirectoryPage />} />
         <Route path="/communications/extensions" element={<CommExtensionsPage />} />
+        <Route path="/communications/ivr" element={<CommIvrPage />} />
         <Route path="/communications/calls" element={<CommCallsPage />} />
         <Route path="/meetings" element={<MeetingsPage />} />
         <Route path="/meetings/:id" element={<MeetingDetailPage />} />
