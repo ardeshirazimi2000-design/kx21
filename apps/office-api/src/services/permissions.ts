@@ -25,6 +25,8 @@ export const PERMISSIONS = [
   { key: 'meetings.view', name: 'مشاهده جلسات و مصوبات', module: 'یکپارچه‌سازی' },
   { key: 'meetings.refer', name: 'ارجاع مکاتبه به جلسه', module: 'یکپارچه‌سازی' },
   { key: 'resolutions.follow', name: 'ثبت پیگیری اجرای مصوبه', module: 'یکپارچه‌سازی' },
+  { key: 'communications.extension.manage', name: 'تخصیص و مدیریت شماره‌های داخلی', module: 'ارتباطات سازمانی' },
+  { key: 'communications.conversation.manage', name: 'ایجاد و مدیریت گروه‌های گفت‌وگوی سازمانی', module: 'ارتباطات سازمانی' },
 ] as const;
 
 export type Permission = (typeof PERMISSIONS)[number]['key'];
@@ -48,7 +50,10 @@ export const SYSTEM_ROLES: { key: string; name: string; description: string; per
     key: 'manager',
     name: 'مدیر واحد',
     description: 'تأیید، ارجاع، امضا و نظارت در حوزه واحد',
-    permissions: pick('letter.create', 'letter.read_all', 'letter.sign', 'workflow.start', 'archive.read', 'reports.view', 'meetings.view', 'meetings.refer', 'resolutions.follow'),
+    permissions: pick(
+      'letter.create', 'letter.read_all', 'letter.sign', 'workflow.start', 'archive.read', 'reports.view', 'meetings.view', 'meetings.refer', 'resolutions.follow',
+      'communications.conversation.manage',
+    ),
   },
   {
     key: 'president',
@@ -62,5 +67,5 @@ export const SYSTEM_ROLES: { key: string; name: string; description: string; per
     description: 'پردازش مکاتبات و اسناد ارجاع‌شده',
     permissions: pick('letter.create', 'workflow.start', 'meetings.view', 'resolutions.follow'),
   },
-  { key: 'it', name: 'واحد فناوری اطلاعات', description: 'نگهداری و یکپارچه‌سازی', permissions: pick('integration.manage', 'audit.view', 'reports.view', 'meetings.view') },
+  { key: 'it', name: 'واحد فناوری اطلاعات', description: 'نگهداری و یکپارچه‌سازی', permissions: pick('integration.manage', 'audit.view', 'reports.view', 'meetings.view', 'communications.extension.manage') },
 ];

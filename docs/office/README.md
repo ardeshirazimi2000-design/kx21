@@ -18,6 +18,7 @@
 5. [HTTPS بین مرورگر و سامانه](05-https.md)
 6. [رونوشت، نامه داخلی، پیوست از دوربین و اسکنر، نمودار سازمانی](06-copies-scan-orgchart.md)
 7. [مشخصات سازمان و واژه‌های عمومی «جلسات»](07-org-profile.md)
+8. [ماژول ارتباطات سازمانی: پیام‌رسان، دفترچه تلفن، داخلی‌ها](../communications/phase-0-discovery.md)
 
 مرجع کامل API: `apps/office-api/openapi.yaml` (در زمان اجرا: `GET /api/openapi.yaml`). API یکپارچه‌سازی سامانه جلسات در `apps/api/openapi.yaml` با برچسب‌های `Integration API` و `Integrations` آمده است.
 

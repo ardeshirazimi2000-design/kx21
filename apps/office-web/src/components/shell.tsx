@@ -2,10 +2,11 @@ import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { Link, NavLink, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../lib/auth';
 import { usePoll } from '../lib/hooks';
+import { useRealtime } from '../lib/realtime';
 import { Icon, type IconName } from './icons';
 import { fa } from './ui';
 
-type Badge = 'cartable' | 'unread';
+type Badge = 'cartable' | 'unread' | 'messages';
 type MenuItem = { to: string; label: string; icon: IconName; perm?: string | string[]; badge?: Badge; end?: boolean };
 /** flat: the items sit directly under the dashboard, with no group heading (used for the main letters group). */
 type MenuGroup = { id: string; title: string; icon: IconName; items: MenuItem[]; flat?: boolean };
@@ -27,6 +28,16 @@ export const MENU: MenuGroup[] = [
       { to: '/letter-templates', label: 'قالب‌های نامه', icon: 'template', perm: 'templates.manage' },
       { to: '/contacts', label: 'مخاطبین بیرونی', icon: 'contacts', perm: 'contacts.manage' },
       { to: '/org-chart', label: 'نمودار سازمانی', icon: 'org' },
+    ],
+  },
+  {
+    id: 'communications',
+    title: 'ارتباطات سازمانی',
+    icon: 'phone',
+    items: [
+      { to: '/communications/messages', label: 'پیام‌رسان', icon: 'chat', badge: 'messages' },
+      { to: '/communications/directory', label: 'دفترچه تلفن', icon: 'phone' },
+      { to: '/communications/extensions', label: 'مدیریت داخلی‌ها', icon: 'dialpad', perm: 'communications.extension.manage' },
     ],
   },
   {
@@ -120,6 +131,9 @@ export function Shell({ children }: { children: ReactNode }) {
   const loc = useLocation();
   const unread = usePoll<{ total: number }>('/notifications?unread=true&pageSize=1', 60_000);
   const cartable = usePoll<unknown[]>('/cartable', 60_000);
+  const conversations = usePoll<{ unread: number }[]>('/communications/conversations', 60_000);
+  // New messages and reads update the messenger badge at once (the poll is only the fallback).
+  useRealtime({ NewMessage: () => void conversations.reload(), MessageRead: () => void conversations.reload(), ConversationRemoved: () => void conversations.reload() });
   useEffect(() => setOpen(false), [loc.pathname]);
   useEffect(() => {
     void unread.reload();
@@ -131,7 +145,11 @@ export function Shell({ children }: { children: ReactNode }) {
     document.title = `${where.page} — رسا`;
   }, [where.page]);
 
-  const counts: Record<Badge, number | undefined> = { cartable: cartable.data?.length, unread: unread.data?.total };
+  const counts: Record<Badge, number | undefined> = {
+    cartable: cartable.data?.length,
+    unread: unread.data?.total,
+    messages: conversations.data?.reduce((n, c) => n + (c.unread || 0), 0),
+  };
   const allowed = (i: MenuItem) => !i.perm || (Array.isArray(i.perm) ? i.perm.some(can) : can(i.perm));
   const groups = MENU.map((g) => ({ ...g, items: g.items.filter(allowed) })).filter((g) => g.items.length);
   const toggleMini = () => {

@@ -7,6 +7,7 @@ import { migrate } from './db/migrate.js';
 import { logger } from './lib/logger.js';
 import './integration/meetings.js';
 import { startWorker } from './services/jobs.js';
+import { initRealtime } from './services/realtime.js';
 import { startScheduler } from './services/scheduler.js';
 
 async function main() {
@@ -18,6 +19,7 @@ async function main() {
     if (!config.publicHttps) logger.warn('PUBLIC_HTTPS is not set: sign-in is accepted over plain HTTP; set up HTTPS (docs/office/05-https.md)');
   }
   const server = http.createServer(createApp());
+  initRealtime(server);
   if (config.workerEnabled) startWorker();
   if (process.env.SCHEDULER_ENABLED !== 'false') startScheduler();
   server.listen(config.port, config.host, () => logger.info(`Office automation API listening on ${config.host ?? ''}:${config.port}`));

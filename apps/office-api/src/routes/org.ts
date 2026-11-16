@@ -3,6 +3,7 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { currentUser, requirePerm, type AuthUser } from '../auth/middleware.js';
 import { revokeAllSessions } from '../auth/tokens.js';
+import { disconnectUser } from '../services/realtime.js';
 import { one, query, tx } from '../db/pool.js';
 import { audit } from '../lib/audit.js';
 import { badRequest, conflict, forbidden, notFound } from '../lib/errors.js';
@@ -258,6 +259,8 @@ orgRouter.patch('/users/:id', async (req, res) => {
     await audit(c, req, { action: 'user.updated', entity: 'user', entityId: id, before, after: { ...r, positions: b.positions, roles: b.roles, resetMfa: b.resetMfa, passwordChanged: !!hash } });
     return r;
   });
+  // Open real-time sockets end with the sessions (they reconnect only with a still valid sign-in).
+  if (hash || b.isActive === false || b.resetMfa) disconnectUser(id);
   res.json(row);
 });
 

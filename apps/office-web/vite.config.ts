@@ -5,6 +5,10 @@ export default defineConfig({
   plugins: [react()],
   server: {
     port: 5174,
-    proxy: { '/api': 'http://localhost:4100' },
+    proxy: {
+      // Socket.IO of the communications module (WebSocket); must come before the general /api rule.
+      '/api/realtime': { target: 'http://localhost:4100', ws: true },
+      '/api': 'http://localhost:4100',
+    },
   },
 });

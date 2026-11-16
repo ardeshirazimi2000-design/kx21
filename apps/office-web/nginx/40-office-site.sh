@@ -97,6 +97,19 @@ location /api/ {
   proxy_hide_header Strict-Transport-Security;
 }
 
+# Real-time channel of the communications module (Socket.IO over WebSocket); same headers as /api/ plus the upgrade.
+location /api/realtime/ {
+  proxy_pass http://$UPSTREAM;
+  proxy_http_version 1.1;
+  proxy_set_header Upgrade \$http_upgrade;
+  proxy_set_header Connection "upgrade";
+  proxy_set_header Host \$http_host;
+  proxy_set_header X-Forwarded-For \$remote_addr;
+  proxy_set_header X-Forwarded-Proto \$office_forwarded_proto;
+  proxy_read_timeout 1h;
+  proxy_buffering off;
+}
+
 location = /health { proxy_pass http://$UPSTREAM; }
 
 location /assets/ {

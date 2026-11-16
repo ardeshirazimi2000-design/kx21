@@ -23,6 +23,9 @@ import { ReportsPage } from './pages/Reports';
 import { ResolutionDetailPage, ResolutionsPage } from './pages/Resolutions';
 import { RolesPage } from './pages/Roles';
 import { SignaturesPage } from './pages/Signatures';
+import { CommDirectoryPage } from './pages/CommDirectory';
+import { CommExtensionsPage } from './pages/CommExtensions';
+import { CommMessengerPage } from './pages/CommMessenger';
 import { ContactsPage } from './pages/Contacts';
 import { SmartSearchPage } from './pages/SmartSearch';
 import { UsersPage } from './pages/Users';
@@ -73,6 +76,9 @@ export function App() {
         <Route path="/letter-templates" element={<LetterTemplatesPage />} />
         <Route path="/workflows" element={<WorkflowsPage />} />
         <Route path="/org-profile" element={<OrgProfilePage />} />
+        <Route path="/communications/messages" element={<CommMessengerPage />} />
+        <Route path="/communications/directory" element={<CommDirectoryPage />} />
+        <Route path="/communications/extensions" element={<CommExtensionsPage />} />
         <Route path="/meetings" element={<MeetingsPage />} />
         <Route path="/meetings/:id" element={<MeetingDetailPage />} />
         <Route path="/resolutions" element={<ResolutionsPage />} />
