@@ -72,4 +72,6 @@ chown -R root:asterisk "$LOCAL" $ETC/manager.conf $ETC/rtp.conf
 chmod 0640 $ETC/manager.conf "$LOCAL"/*
 
 # Rasa writes rasa/*.conf; until its first sync the includes are simply empty.
-exec /usr/sbin/asterisk -f -U asterisk -G asterisk -vvv
+# No -G: with -G Asterisk drops its supplementary groups, and it reads Rasa's files (owner uid/gid 1000, mode 0640)
+# through its membership of group 1000. With -U alone it keeps the asterisk group and all supplementary ones.
+exec /usr/sbin/asterisk -f -U asterisk -vvv
