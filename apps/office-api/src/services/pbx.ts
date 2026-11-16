@@ -1,18 +1,27 @@
 /**
- * The only place the office automation will talk to a telephone exchange (PBX) through.
+ * The only place the office automation talks to the telephone exchange (PBX) through.
  * The browser never reaches AMI/ARI: every telephony action goes API → this adapter → PBX.
  *
- * Which PBX (the organisation's existing Issabel, or a new Asterisk next to Rasa) is still to be decided, so the only
- * driver today is 'none': the communications module (directory, extensions registry, messenger) works without a PBX,
- * and extensions are confirmed on the PBX by hand ('manual'). A real driver implements this interface.
+ * Drivers: 'none' (no PBX: directory, extensions registry and messenger still work, extensions are confirmed on the
+ * PBX by hand) and 'asterisk-ami' (services/pbxAsterisk.ts, chosen with PBX_DRIVER=asterisk-ami).
  */
 export interface PbxAdapter {
-  readonly kind: 'none' | 'asterisk-ami' | 'issabel';
+  readonly kind: 'none' | 'asterisk-ami';
   readonly configured: boolean;
-  /** Creates or updates the endpoint of an extension; must be idempotent (same number twice = no change). */
+  /** Logged in to the PBX right now. */
+  connected(): boolean;
+  /** Creates or updates the endpoint of an extension; idempotent (the whole configuration is regenerated). */
   provisionExtension(ext: { id: string; number: string; label: string | null }): Promise<void>;
-  /** Disables the endpoint (history kept on both sides). */
+  /** Removes the endpoint (history kept on both sides). */
   disableExtension(ext: { id: string; number: string }): Promise<void>;
+  /** Rewrites the PBX configuration from Rasa's data (extension suspended, user deactivated, settings changed). */
+  sync(): Promise<void>;
+  /**
+   * Rings `fromExtension`; when answered, dials `to` with the dial plan of that extension (click-to-call).
+   * `callId` becomes the PBX's id of the call (Asterisk ChannelId → Linkedid), so the row Rasa opened beforehand is
+   * the one the PBX events update.
+   */
+  originate(o: { fromExtension: string; to: string; callerName: string; userId: string; callId: string }): Promise<void>;
 }
 
 export class PbxNotConfigured extends Error {
@@ -24,11 +33,18 @@ export class PbxNotConfigured extends Error {
 const none: PbxAdapter = {
   kind: 'none',
   configured: false,
+  connected: () => false,
   async provisionExtension() {
     throw new PbxNotConfigured();
   },
   async disableExtension() {
     /* nothing to do without a PBX */
+  },
+  async sync() {
+    /* nothing to do without a PBX */
+  },
+  async originate() {
+    throw new PbxNotConfigured();
   },
 };
 
@@ -36,7 +52,13 @@ let adapter: PbxAdapter = none;
 
 export const pbx = () => adapter;
 
-/** Tests (and a future driver) install their adapter here. */
+/** server.ts installs the configured driver; tests install a fake. */
 export function setPbxAdapter(a: PbxAdapter | null) {
   adapter = a ?? none;
+}
+
+/** Refreshes the PBX configuration in the background (never fails the caller's request). */
+export function syncPbxSoon() {
+  if (!adapter.configured) return;
+  void adapter.sync().catch(() => undefined);
 }

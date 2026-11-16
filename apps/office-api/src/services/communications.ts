@@ -89,6 +89,8 @@ export async function deliverMessage(conversationId: string, messageId: string, 
 registerHandler('communications.provision', async (p: { extensionId: string }) => {
   const ext = await one('SELECT * FROM communication_extensions WHERE id = $1', [p.extensionId]);
   if (!ext || !['provisioning', 'failed'].includes(ext.status)) return; // disabled or confirmed meanwhile
+  // A retry after a failure: back to 'provisioning', so the generated PBX configuration includes it again.
+  if (ext.status === 'failed') await query(`UPDATE communication_extensions SET status = 'provisioning' WHERE id = $1 AND status = 'failed'`, [ext.id]);
   try {
     await pbx().provisionExtension({ id: ext.id, number: ext.extension_number, label: ext.label });
   } catch (e) {
@@ -110,8 +112,8 @@ registerHandler('communications.provision', async (p: { extensionId: string }) =
         action: 'communications.extension_provisioned',
         entity: 'communication_extension',
         entityId: ext.id,
-        before: ext,
-        after: r,
+        before: { ...ext, sip_secret_enc: undefined },
+        after: { ...r, sip_secret_enc: undefined },
         userId: ext.created_by,
       });
   });

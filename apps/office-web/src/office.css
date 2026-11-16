@@ -304,5 +304,6 @@ a.oc-name:hover { color: var(--primary); text-decoration: underline; }
   .oc-box { break-inside: avoid; border: 1px solid #999; border-top: 3px solid #333; }
 }
 .text-danger { color: var(--danger); }
+.text-success { color: var(--success); }
 .oc-outline .oc-chart ul.oc-staff { border: 0; padding: 0; margin: 0; }
 .picked-name { unicode-bidi: plaintext; text-align: right; }

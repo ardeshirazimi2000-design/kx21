@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { currentUser, requirePerm, type AuthUser } from '../auth/middleware.js';
 import { revokeAllSessions } from '../auth/tokens.js';
 import { disconnectUser } from '../services/realtime.js';
+import { syncPbxSoon } from '../services/pbx.js';
 import { one, query, tx } from '../db/pool.js';
 import { audit } from '../lib/audit.js';
 import { badRequest, conflict, forbidden, notFound } from '../lib/errors.js';
@@ -261,6 +262,8 @@ orgRouter.patch('/users/:id', async (req, res) => {
   });
   // Open real-time sockets end with the sessions (they reconnect only with a still valid sign-in).
   if (hash || b.isActive === false || b.resetMfa) disconnectUser(id);
+  // A deactivated user's phone stops working; a role change may allow or forbid city-line calls.
+  if (b.isActive !== undefined || b.roles) syncPbxSoon();
   res.json(row);
 });
 
@@ -313,5 +316,6 @@ orgRouter.patch('/roles/:id', async (req, res) => {
     await audit(c, req, { action: 'role.updated', entity: 'role', entityId: id, before: { ...before, permissions: beforePerms }, after: { ...r, permissions: b.permissions ?? beforePerms } });
     return r;
   });
+  if (b.permissions) syncPbxSoon(); // who may dial the city line follows the role
   res.json(row);
 });

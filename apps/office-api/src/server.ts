@@ -8,6 +8,8 @@ import { logger } from './lib/logger.js';
 import './integration/meetings.js';
 import { startWorker } from './services/jobs.js';
 import { initRealtime } from './services/realtime.js';
+import { setPbxAdapter } from './services/pbx.js';
+import { createAsteriskAdapter } from './services/pbxAsterisk.js';
 import { startScheduler } from './services/scheduler.js';
 
 async function main() {
@@ -20,6 +22,7 @@ async function main() {
   }
   const server = http.createServer(createApp());
   initRealtime(server);
+  if (config.pbx.driver === 'asterisk-ami') setPbxAdapter(createAsteriskAdapter());
   if (config.workerEnabled) startWorker();
   if (process.env.SCHEDULER_ENABLED !== 'false') startScheduler();
   server.listen(config.port, config.host, () => logger.info(`Office automation API listening on ${config.host ?? ''}:${config.port}`));

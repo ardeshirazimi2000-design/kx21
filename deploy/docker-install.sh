@@ -45,6 +45,11 @@ ENV
   OFFICE_FIRST_INSTALL=1
   echo "Added office automation secrets to .env."
 fi
+# Telephony (Asterisk, docker-compose.pbx.yml): the AMI secret between office-api and the PBX container, created once.
+# The PBX itself is switched on separately (docs/communications/telephony.md).
+if ! grep -q '^OFFICE_PBX_AMI_SECRET=' .env; then
+  echo "OFFICE_PBX_AMI_SECRET=$(openssl rand -hex 24)" >> .env
+fi
 set -a; . ./.env; set +a
 
 docker compose up --build -d

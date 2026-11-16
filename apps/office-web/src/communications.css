@@ -465,3 +465,161 @@
     max-width: 90%;
   }
 }
+
+/* Calls */
+.calls-filters {
+  grid-template-columns: repeat(2, minmax(0, 220px));
+  margin-top: 12px;
+}
+.call-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.call-row {
+  display: grid;
+  grid-template-columns: 70px minmax(0, 1fr) 150px 110px 120px;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 4px;
+  border-bottom: 1px solid var(--border);
+}
+.call-row:last-child {
+  border-bottom: 0;
+}
+.call-dir {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--muted);
+}
+.call-dir.in {
+  color: var(--info, var(--primary));
+}
+.call-who,
+.call-when {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.call-who strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+@media (max-width: 760px) {
+  .call-row {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+  .call-dir,
+  .call-row > span:last-child:empty {
+    display: none;
+  }
+  .calls-filters {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+/* Ringing / missed call card */
+.call-alert {
+  position: fixed;
+  inset-inline-end: 20px;
+  bottom: 20px;
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 260px;
+  max-width: calc(100vw - 32px);
+  padding: 12px 14px;
+  border-radius: 14px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  box-shadow: 0 10px 30px rgb(0 0 0 / 0.18);
+}
+.call-alert-icon {
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: var(--success);
+  color: #fff;
+  flex: none;
+}
+.call-alert-missed .call-alert-icon {
+  background: var(--warning);
+}
+.call-alert-icon.ringing {
+  animation: call-ring 1.2s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .call-alert-icon.ringing {
+    animation: none;
+  }
+}
+@keyframes call-ring {
+  0%,
+  100% {
+    transform: rotate(0);
+  }
+  20% {
+    transform: rotate(-14deg);
+  }
+  40% {
+    transform: rotate(12deg);
+  }
+  60% {
+    transform: rotate(-8deg);
+  }
+}
+.call-alert-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+  min-width: 0;
+}
+.call-alert-close {
+  border: 0;
+  background: transparent;
+  font-size: 1.4rem;
+  line-height: 1;
+  color: var(--muted);
+  cursor: pointer;
+  min-width: 32px;
+  min-height: 32px;
+}
+@media (max-width: 760px) {
+  .call-alert {
+    inset-inline: 16px;
+    bottom: 16px;
+  }
+}
+
+/* Extensions page: telephony */
+.secret-box {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 8px 14px;
+  padding: 12px;
+  border: 1px dashed var(--border);
+  border-radius: 10px;
+  margin: 10px 0;
+  direction: ltr;
+  text-align: left;
+}
+.secret-box .mono {
+  user-select: all;
+  word-break: break-all;
+}
+.inbound-targets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  margin: 8px 0 12px;
+}
+.call-row > .badge {
+  justify-self: start;
+}
