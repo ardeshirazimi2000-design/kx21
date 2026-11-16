@@ -623,3 +623,18 @@
 .call-row > .badge {
   justify-self: start;
 }
+
+/* ── تلفن گویا ── */
+.ivr-page { display: grid; gap: 16px; }
+.ivr-page hr { border: 0; border-top: 1px solid var(--border); margin: 16px 0; }
+.ivr-switch { font-size: 1rem; margin-bottom: 4px; }
+.ivr-sounds { display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); }
+.ivr-sound-now { display: grid; gap: 8px; margin-bottom: 12px; }
+.ivr-sound-now audio { width: 100%; max-width: 420px; height: 36px; }
+.ivr-option { border: 1px solid var(--border); border-radius: var(--radius, 10px); padding: 12px; margin-bottom: 12px; }
+.ivr-option-head { align-items: flex-end; flex-wrap: wrap; }
+.ivr-option-head .field { margin-bottom: 0; }
+.ivr-option-head select { min-width: 72px; }
+.ivr-hours { border: 0; padding: 0; margin: 0; min-width: 0; }
+.ivr-hours:disabled { opacity: 0.55; }
+.ivr-save { position: sticky; bottom: 0; padding: 12px 0; background: var(--bg); }

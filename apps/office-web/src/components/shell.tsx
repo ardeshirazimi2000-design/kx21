@@ -40,6 +40,7 @@ export const MENU: MenuGroup[] = [
       { to: '/communications/directory', label: 'دفترچه تلفن', icon: 'contacts' },
       { to: '/communications/calls', label: 'تماس‌ها', icon: 'phone' },
       { to: '/communications/extensions', label: 'مدیریت داخلی‌ها', icon: 'dialpad', perm: 'communications.extension.manage' },
+      { to: '/communications/ivr', label: 'تلفن گویا', icon: 'voice', perm: 'communications.settings.manage' },
     ],
   },
   {
