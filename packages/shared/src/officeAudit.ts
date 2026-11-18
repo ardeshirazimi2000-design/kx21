@@ -18,6 +18,8 @@ export const OFFICE_AUDIT_ACTIONS: Record<string, string> = {
   'letter.archived': 'بایگانی نامه',
   'letter.cancelled': 'ابطال نامه',
   'letter.attachment_added': 'افزودن پیوست به نامه',
+  'letter.attachment_ocr': 'خواندن دوباره متن پیوست (OCR)',
+  'letter.ai_summary': 'خلاصه‌سازی نامه با هوش مصنوعی',
   'letter.intake': 'دریافت نامه از درگاه ورودی',
   'letter.referred_to_meeting': 'ارجاع نامه به جلسه',
   'letter.created_from_resolution': 'ایجاد نامه از مصوبه جلسه',

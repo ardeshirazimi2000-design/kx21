@@ -50,6 +50,8 @@ log() { echo -e "\n\033[1;36m==> $*\033[0m"; }
 log "Installing system packages"
 apt-get update -y
 apt-get install -y curl ca-certificates gnupg postgresql postgresql-contrib rsync openssl
+# OCR of incoming-letter scans (office automation): Tesseract with Persian data, Poppler to render PDF pages.
+apt-get install -y tesseract-ocr tesseract-ocr-fas poppler-utils
 
 if ! command -v node >/dev/null || [ "$(node -v | cut -d. -f1 | tr -d v)" -lt 22 ]; then
   log "Installing Node.js 22"

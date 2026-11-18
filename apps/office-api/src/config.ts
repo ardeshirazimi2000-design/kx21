@@ -84,6 +84,18 @@ export const config = {
   /** Off by default: other sites under the same domain may still be on HTTP. */
   hstsIncludeSubDomains: flag('HSTS_INCLUDE_SUBDOMAINS'),
   /**
+   * OCR of incoming-letter attachments (scanned PDF and images) on this server, with Tesseract and Poppler; nothing is
+   * sent outside. OCR_ENABLED=false turns it off. Languages are Tesseract codes (fas = Persian).
+   */
+  ocr: {
+    enabled: process.env.OCR_ENABLED !== 'false',
+    langs: env('OCR_LANGS', 'fas'),
+    maxPages: Number(env('OCR_MAX_PAGES', '10')),
+    /** PDF pages are rendered at this resolution for Tesseract; 200 suits letter-size print (300 makes large type harder to read). */
+    dpi: Number(env('OCR_DPI', '200')),
+    timeoutSeconds: Number(env('OCR_TIMEOUT_SECONDS', '180')),
+  },
+  /**
    * Telephone exchange (docs/communications/telephony.md): 'none' or 'asterisk-ami'. AMI is reached only on the
    * internal Docker network; PBX_CONFIG_DIR is the volume the Asterisk container reads Rasa's generated files from.
    */

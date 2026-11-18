@@ -17,6 +17,8 @@ import { LETTER_HASH_VERSION, letterContentHash, letterHashes, managerPositionOf
 import { notify, positionHolders } from '../services/notifications.js';
 import { signaturesOf, signContent, verifySignature } from '../services/signatures.js';
 import { actOnStep, canActOnStep, cancelWorkflow, startWorkflow } from '../services/workflow.js';
+import { extractText, OCR_MIME, ocrStatus } from '../lib/ocr.js';
+import { ocrAttachment, queueOcr, suggestSummary, summarise, summaryBlocker } from '../services/ocr.js';
 
 export const lettersRouter = Router();
 
@@ -330,7 +332,8 @@ lettersRouter.get('/letters/:id', async (req, res) => {
     ),
     query('SELECT id, contact_id, label, note FROM letter_external_copies WHERE letter_id = $1 ORDER BY sort', [l.id]),
     query(
-      `SELECT a.id, a.group_id, a.version, a.title, a.file_name, a.mime_type, a.size_bytes, a.sha256, a.source, a.created_at, us.full_name AS uploaded_by_name
+      `SELECT a.id, a.group_id, a.version, a.title, a.file_name, a.mime_type, a.size_bytes, a.sha256, a.source, a.created_at, us.full_name AS uploaded_by_name,
+              a.ocr_status, a.ocr_method, a.ocr_pages, a.ocr_error, a.ocr_at, length(a.ocr_text) AS ocr_chars
          FROM letter_attachments a LEFT JOIN users us ON us.id = a.uploaded_by WHERE a.letter_id = $1 ORDER BY a.created_at, a.version`,
       [l.id],
     ),
@@ -364,6 +367,7 @@ lettersRouter.get('/letters/:id', async (req, res) => {
   const myRoutes = routing.filter((r) => ['pending', 'seen'].includes(r.status) && (r.to_user_id === u.id || myPositions.includes(r.to_position_id)));
   const mySteps = [];
   for (const s of steps) if (s.status === 'active' && (await canActOnStep(pool, u, s))) mySteps.push(s.id);
+  const [ocr, aiBlocker] = l.kind === 'incoming' ? await Promise.all([ocrStatus(), summaryBlocker(l)]) : [null, null];
   res.json({
     ...l,
     ...extra,
@@ -394,6 +398,9 @@ lettersRouter.get('/letters/:id', async (req, res) => {
       canStartWorkflow: !['cancelled', 'archived', 'sent'].includes(l.status) && u.can('workflow.start') && !instances.some((i) => i.status === 'running'),
       canReferToMeeting: !!l.number && u.can('meetings.refer'),
     },
+    // OCR and AI summary of incoming letters (services/ocr.ts).
+    ocr: ocr && { available: ocr.available, reason: ocr.reason ?? null },
+    aiSummary: l.kind === 'incoming' ? { available: !aiBlocker, reason: aiBlocker } : null,
   });
 });
 
@@ -478,6 +485,8 @@ lettersRouter.post('/letters/:id/attachments', upload.single('file'), async (req
       c,
     );
     await audit(c, req, { action: 'letter.attachment_added', entity: 'letter', entityId: l.id, after: r });
+    // Incoming letters: the scan is read on this server in the background, then summarised (services/ocr.ts).
+    if ((await ocrStatus()).available && (await queueOcr(c, l.kind, r!))) r!.ocr_status = 'pending';
     return r;
   });
   res.status(201).json(row);
@@ -489,6 +498,96 @@ lettersRouter.get('/letters/:id/attachments/:attId/download', async (req, res) =
   const a = await one('SELECT * FROM letter_attachments WHERE id = $1 AND letter_id = $2', [param(req, 'attId'), l.id]);
   if (!a) throw notFound();
   sendFile(res, await getFile(a.storage_key), a.file_name, a.mime_type, req.query.inline === '1');
+});
+
+// ─────────────── OCR and AI summary (incoming letters) ───────────────
+
+const canEditLetter = (u: AuthUser, l: any) => l.created_by === u.id || u.can('letter.register_incoming', l.owner_unit_id);
+
+lettersRouter.get('/ocr/status', async (_req, res) => {
+  const s = await ocrStatus();
+  res.json({ available: s.available, reason: s.reason ?? null, langs: s.langs });
+});
+
+/**
+ * Reads a scan before the letter is saved (form «ثبت نامه وارده»): its text and, for an unclassified letter with an AI
+ * provider, a suggested «شرح نامه». Nothing is stored.
+ */
+lettersRouter.post('/letters/ocr', upload.single('file'), async (req, res) => {
+  const u = currentUser(req);
+  if (!u.can('letter.register_incoming')) throw forbidden();
+  if (!req.file) throw badRequest('فایلی ارسال نشده است');
+  const meta = parse(
+    z.object({
+      confidentiality: z.coerce.number().int().min(0).max(2).default(0),
+      summarise: z.enum(['0', '1']).default('1'),
+      subject: z.string().max(500).nullish(),
+      externalOrg: z.string().max(300).nullish(),
+      externalParty: z.string().max(300).nullish(),
+    }),
+    req.body,
+  );
+  const mime = validateFile(uploadedName(req.file), req.file.buffer);
+  if (!OCR_MIME.includes(mime)) throw badRequest('فقط PDF و تصویر (PNG، JPG، TIFF) با OCR خوانده می‌شود');
+  const st = await ocrStatus();
+  if (!st.available) throw conflict(st.reason ?? 'OCR روی سرور در دسترس نیست');
+  const r = await extractText(req.file.buffer, mime).catch((e) => {
+    throw badRequest(`خواندن متن ممکن نشد: ${(e as Error).message}`.slice(0, 300));
+  });
+  let summary: string | null = null;
+  let summaryNote: string | null = null;
+  if (meta.summarise === '1' && r.text) {
+    summaryNote = await summaryBlocker({ confidentiality: meta.confidentiality });
+    if (!summaryNote) {
+      summary = await summarise({ subject: meta.subject, external_org: meta.externalOrg, external_party: meta.externalParty }, r.text).catch((e) => {
+        summaryNote = `خلاصه‌سازی ممکن نشد: ${(e as Error).message}`.slice(0, 300);
+        return null;
+      });
+    }
+  }
+  res.json({ ...r, summary, summaryNote });
+});
+
+lettersRouter.get('/letters/:id/attachments/:attId/text', async (req, res) => {
+  const l = await loadVisibleLetter(currentUser(req), param(req, 'id'));
+  const a = await one('SELECT id, file_name, ocr_status, ocr_method, ocr_pages, ocr_text, ocr_error, ocr_at FROM letter_attachments WHERE id = $1 AND letter_id = $2', [
+    param(req, 'attId'),
+    l.id,
+  ]);
+  if (!a) throw notFound();
+  res.json(a);
+});
+
+/** Reads an attachment again now (e.g. after OCR was installed, or a better scan replaced it). */
+lettersRouter.post('/letters/:id/attachments/:attId/ocr', async (req, res) => {
+  const u = currentUser(req);
+  const l = await loadVisibleLetter(u, param(req, 'id'));
+  if (!canEditLetter(u, l)) throw forbidden();
+  const a = await one('SELECT id, mime_type FROM letter_attachments WHERE id = $1 AND letter_id = $2', [param(req, 'attId'), l.id]);
+  if (!a) throw notFound();
+  if (!OCR_MIME.includes(a.mime_type)) throw badRequest('این نوع فایل با OCR خوانده نمی‌شود');
+  const st = await ocrStatus();
+  if (!st.available) throw conflict(st.reason ?? 'OCR روی سرور در دسترس نیست');
+  await query(`UPDATE letter_attachments SET ocr_status = 'pending' WHERE id = $1`, [a.id]);
+  await ocrAttachment(a.id).catch((e) => {
+    throw badRequest(`خواندن متن ممکن نشد: ${(e as Error).message}`.slice(0, 300));
+  });
+  await tx((c) => audit(c, req, { action: 'letter.attachment_ocr', entity: 'letter', entityId: l.id, after: { attachmentId: a.id } }));
+  res.json(await one('SELECT id, ocr_status, ocr_method, ocr_pages, ocr_error, ocr_at, length(ocr_text) AS ocr_chars FROM letter_attachments WHERE id = $1', [a.id]));
+});
+
+/** A new AI summary from the letter's text and its attachments; «شرح نامه» is filled only if still empty. */
+lettersRouter.post('/letters/:id/ai-summary', async (req, res) => {
+  const u = currentUser(req);
+  const l = await loadVisibleLetter(u, param(req, 'id'));
+  if (!canEditLetter(u, l)) throw forbidden();
+  const blocker = await summaryBlocker(l);
+  if (blocker) throw badRequest(blocker);
+  const r = await suggestSummary(l.id, { force: true, userId: u.id }).catch((e) => {
+    throw badRequest(`خلاصه‌سازی ممکن نشد: ${(e as Error).message}`.slice(0, 300));
+  });
+  if (!r) throw badRequest('متنی برای خلاصه‌سازی نیست؛ ابتدا متن نامه را وارد کنید یا تصویر نامه را پیوست کنید');
+  res.json({ summary: r.summary, aiSummary: r.ai_summary, aiSummaryAt: r.ai_summary_at, filled: r.filled });
 });
 
 // ─────────────── Barcode / QR ───────────────

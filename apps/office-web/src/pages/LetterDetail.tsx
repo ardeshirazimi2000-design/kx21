@@ -9,6 +9,7 @@ import { PositionSelect, UserSelect } from '../components/pickers';
 import { LetterBody } from '../components/letterPaper';
 import { RelatedLetters } from './SmartSearch';
 import { AuthImage } from '../components/signature';
+import { AiSummary, OcrStatus } from '../components/ocr';
 import { Badge, Button, Card, Empty, ErrorBox, Field, JalaliDateTimeInput, Loading, Modal, PageHeader, dateFa, dateTimeFa, fa } from '../components/ui';
 import { download, fetchText, openFile, patch, post, upload } from '../lib/api';
 import { useAuth } from '../lib/auth';
@@ -29,6 +30,14 @@ export function LetterDetailPage() {
     if (!r.data?.number) return;
     void Promise.all([fetchText(`/letters/${id}/barcode.svg`), fetchText(`/letters/${id}/qr.svg`)]).then(([barcode, qr]) => setCodes({ barcode, qr }));
   }, [id, r.data?.number]);
+  // While scans are being read on the server (OCR), refresh until their text and the summary arrive.
+  const reading = !!r.data?.attachments?.some((a: any) => a.ocr_status === 'pending');
+  useEffect(() => {
+    if (!reading) return;
+    const t = setInterval(() => void r.reload(), 4000);
+    return () => clearInterval(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [reading]);
   // Opening the letter marks my pending referrals as seen.
   useEffect(() => {
     const l = r.data;
@@ -239,7 +248,8 @@ export function LetterDetailPage() {
       </div>
 
       <Card title="متن نامه" className="mt">
-        {l.summary && <p className="muted">خلاصه: {l.summary}</p>}
+        <AiSummary letter={l} onChange={r.reload} />
+        {l.summary && <p className="muted">{l.kind === 'incoming' ? 'شرح نامه' : 'خلاصه'}: {l.summary}</p>}
         <div className="letter-body">{l.body ? <LetterBody body={l.body} format={l.body_format} /> : '—'}</div>
         {l.signatures.length > 0 && (
           <div className="letter-signatures">
@@ -460,6 +470,7 @@ function Attachments({ letter: l, onChange }: { letter: any; onChange: () => Pro
                 <tr key={last.group_id}>
                   <td>
                     {last.source === 'scan' && <Badge tone="info">اسکن</Badge>} {last.title ?? last.file_name}
+                    <OcrStatus letterId={l.id} att={last} canRun={!!l.my?.canEdit && !!l.ocr?.available} onChange={onChange} />
                     {versions.length > 1 && (
                       <details className="small">
                         <summary>نسخه‌های قبلی</summary>

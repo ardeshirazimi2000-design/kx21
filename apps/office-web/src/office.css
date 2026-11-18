@@ -307,3 +307,13 @@ a.oc-name:hover { color: var(--primary); text-decoration: underline; }
 .text-success { color: var(--success); }
 .oc-outline .oc-chart ul.oc-staff { border: 0; padding: 0; margin: 0; }
 .picked-name { unicode-bidi: plaintext; text-align: right; }
+
+/* OCR and AI summary of incoming letters */
+.ocr-status { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 4px; }
+.ocr-text { white-space: pre-wrap; font-family: inherit; line-height: 1.9; max-height: 60vh; overflow: auto; background: var(--surface-2); border: 1px solid var(--border); border-radius: 8px; padding: 12px 14px; margin: 0; }
+.ai-summary { border: 1px solid var(--border); border-inline-start: 3px solid var(--primary); background: var(--surface-2); border-radius: 8px; padding: 10px 14px; margin-bottom: 14px; display: grid; gap: 6px; }
+.ai-summary-head { display: flex; align-items: center; gap: 8px; color: var(--primary); }
+.ai-summary-head strong { color: var(--text); }
+.ai-summary .smart-summary { margin: 0; }
+.ocr-scan { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin: 10px 0; }
+.ocr-result { margin-top: 8px; }
