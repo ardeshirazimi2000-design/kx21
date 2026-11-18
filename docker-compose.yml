@@ -111,6 +111,7 @@ services:
       KAVENEGAR_SENDER: ${KAVENEGAR_SENDER:-}
       EMAIL_PROVIDER: ${OFFICE_EMAIL_PROVIDER:-log}
       SMTP_URL: ${OFFICE_SMTP_URL:-}
+      EMAIL_FROM: ${OFFICE_EMAIL_FROM:-سامانه رسا <no-reply@office.local>}
       ADMIN_USERNAME: ${OFFICE_ADMIN_USERNAME:-}
       ADMIN_PASSWORD: ${OFFICE_ADMIN_PASSWORD:-}
       # HTTPS (docs/office/05-https.md). The office-web nginx is the only hop in front of the API and overwrites

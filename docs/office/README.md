@@ -20,6 +20,7 @@
 7. [مشخصات سازمان و واژه‌های عمومی «جلسات»](07-org-profile.md)
 8. [OCR و خلاصه خودکار نامه وارده](08-ocr-summary.md)
 9. [هوش مصنوعی روی سرور خود سازمان (Ollama + Qwen2.5 7B)](09-local-ai.md)
+10. [پیامک و ایمیل اعلان‌ها](10-sms-email.md)
 10. [ماژول ارتباطات سازمانی: پیام‌رسان، دفترچه تلفن، داخلی‌ها](../communications/phase-0-discovery.md)
 
 مرجع کامل API: `apps/office-api/openapi.yaml` (در زمان اجرا: `GET /api/openapi.yaml`). API یکپارچه‌سازی سامانه جلسات در `apps/api/openapi.yaml` با برچسب‌های `Integration API` و `Integrations` آمده است.

@@ -35,6 +35,8 @@ sudo bash deploy/install.sh            # OFFICE=1 پیش‌فرض است؛ OFFIC
 | `MFA_REQUIRED_ROLES` | نقش‌هایی که باید ورود دومرحله‌ای فعال کنند |
 | `EMAIL_PROVIDER` / `SMTP_URL` | `log` یا `smtp` |
 | `SMS_PROVIDER` / `KAVENEGAR_API_KEY` | `log` یا `kavenegar` |
+
+پیامک و ایمیل را بهتر است در «یکپارچه‌سازی ← پیامک / ایمیل (SMTP)» تنظیم کنید (راهنما: [10-sms-email.md](10-sms-email.md)). تا وقتی در آن صفحه چیزی ذخیره نشده، مقادیر بالا به‌کار می‌روند.
 | `SCHEDULER_ENABLED` | زمان‌بند مهلت‌ها، یادآوری‌ها، ارتقا و صف (پیش‌فرض فعال) |
 
 فهرست کامل در `apps/office-api/.env.example` است.

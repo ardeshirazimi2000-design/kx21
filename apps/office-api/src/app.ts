@@ -19,6 +19,7 @@ import { communicationsRouter } from './routes/communications.js';
 import { contactsRouter } from './routes/contacts.js';
 import { integrationPublicRouter, integrationRouter } from './routes/integration.js';
 import { lettersRouter, publicLettersRouter } from './routes/letters.js';
+import { messagingRouter } from './routes/messaging.js';
 import { notificationsRouter } from './routes/notifications.js';
 import { orgRouter } from './routes/org.js';
 import { orgProfileRouter, publicOrgProfileRouter } from './routes/orgProfile.js';
@@ -110,7 +111,7 @@ export function createApp() {
       keyGenerator: (req) => req.user?.id ?? ipKeyGenerator(req.ip ?? '0.0.0.0'),
     }),
   );
-  api.use(orgRouter, orgProfileRouter, contactsRouter, signaturesRouter, templatesRouter, searchRouter, lettersRouter, workflowsRouter, archiveRouter, notificationsRouter, reportsRouter, scannersRouter, integrationRouter, auditRouter, communicationsRouter);
+  api.use(orgRouter, orgProfileRouter, contactsRouter, signaturesRouter, templatesRouter, searchRouter, lettersRouter, workflowsRouter, archiveRouter, notificationsRouter, reportsRouter, scannersRouter, messagingRouter, integrationRouter, auditRouter, communicationsRouter);
   app.use('/api', api);
 
   if (config.webDistDir && existsSync(path.join(config.webDistDir, 'index.html'))) {

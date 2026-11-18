@@ -96,6 +96,10 @@ export const OFFICE_AUDIT_ACTIONS: Record<string, string> = {
   'integration.configured': 'تنظیم اتصال به سامانه جلسات',
   'integration.intake_configured': 'تنظیم درگاه دریافت نامه',
   'integration.ai_configured': 'تنظیم هوش مصنوعی جستجو',
+  'integration.sms_configured': 'تنظیم سرویس پیامک',
+  'integration.sms_tested': 'آزمایش سرویس پیامک',
+  'integration.email_configured': 'تنظیم سرور ایمیل',
+  'integration.email_tested': 'آزمایش سرور ایمیل',
   'resolution.feedback_queued': 'ارسال بازخورد مصوبه به سامانه جلسات',
 };
 
