@@ -33,7 +33,7 @@
 
 ## نصب و پیکربندی
 
-بسته‌های لازم: `tesseract-ocr`، داده زبان فارسی (`tesseract-ocr-fas` در Debian/Ubuntu، `tesseract-ocr-data-fas` در Alpine) و `poppler-utils`.
+بسته‌های لازم: `tesseract-ocr`، داده زبان فارسی (`tesseract-ocr-fas` در Debian/Ubuntu؛ ایمیج Docker که بر پایه Alpine است فایل `deploy/ocr/tessdata/fas.traineddata` را از خود مخزن برمی‌دارد) و `poppler-utils`.
 
 - **Docker:** در ایمیج `office-api` نصب شده‌اند؛ کافی است ایمیج دوباره ساخته شود (`docker compose build office-api && docker compose up -d office-api`).
 - **نصب مستقیم (`deploy/install.sh`):** نصب‌کننده آن‌ها را نصب می‌کند. روی سروری که قبلاً نصب شده:
