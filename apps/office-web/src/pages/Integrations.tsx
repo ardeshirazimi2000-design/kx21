@@ -147,6 +147,8 @@ export function IntegrationsPage() {
       </Card>
 
       <AiSettings />
+      <SmsSettings />
+      <EmailSettings />
       <ScannerSettings />
 
       <Card title="رویدادهای دریافتی از سامانه جلسات" className="mt">
@@ -298,6 +300,185 @@ function AiSettings() {
           نمایه جستجو: {fa(s.indexed)} از {fa(s.letters)} نامه{s.embedded ? ` · بردار معنایی: ${fa(s.embedded)} نامه` : ''}. نامه‌های تازه در جستجوی بعدی یا اجرای زمان‌بندی‌شده
           نمایه می‌شوند.
         </p>
+      )}
+    </Card>
+  );
+}
+
+/** SMS panel used for notifications (referrals, workflow steps, deadlines). */
+function SmsSettings() {
+  const r = useApi<any>('/integrations/sms');
+  const blank = { provider: 'soap', sender: '', wsdlUrl: '', domain: '', username: '', secret: '', flash: false, isActive: true };
+  const [f, setF] = useState(blank);
+  const [to, setTo] = useState('');
+  const [test, setTest] = useState<any>(null);
+  const act = useAction();
+  useEffect(() => {
+    if (r.data) setF({ ...blank, ...r.data, secret: '', isActive: r.data.configured ? r.data.isActive : true });
+  }, [r.data]);
+  if (!r.data) return null;
+  const p = f.provider;
+  const secretLabel = p === 'kavenegar' || p === 'smsir' ? 'کلید API' : 'کلمه عبور پنل';
+  const save = (secret: string | null | undefined) =>
+    act.run(async () => {
+      await put('/integrations/sms', { ...f, secret, wsdlUrl: p === 'soap' ? f.wsdlUrl : null });
+      setTest(null);
+      await r.reload();
+    });
+  return (
+    <Card
+      title={
+        <span className="row gap-sm">
+          پیامک {r.data.configured ? r.data.isActive ? <Badge tone="success">فعال</Badge> : <Badge>غیرفعال</Badge> : r.data.envFallback ? <Badge tone="info">{r.data.envFallback}</Badge> : <Badge tone="warning">تنظیم نشده (فقط ثبت در لاگ)</Badge>}
+        </span>
+      }
+      className="mt"
+    >
+      <p className="small muted">
+        اعلان‌هایی که در «قالب‌های اعلان» برای آن‌ها متن پیامک تعریف شده (ارجاع نامه، اقدام در گردش کار، یادآوری مهلت، ابلاغ مصوبه) به شماره موبایل ثبت‌شده کاربر فرستاده می‌شوند.
+        کلمه عبور و کلید API رمزنگاری‌شده نگهداری می‌شوند.
+      </p>
+      <ErrorBox error={act.error} />
+      <div className="grid grid-2">
+        <Field label="سرویس‌دهنده">
+          <select className="input" value={p} onChange={(e) => setF({ ...f, provider: e.target.value })}>
+            {Object.entries(r.data.providers as Record<string, string>).map(([k, v]) => (
+              <option key={k} value={k}>
+                {v}
+              </option>
+            ))}
+          </select>
+        </Field>
+        <Field label="شماره فرستنده (خط پیامک)">
+          <input className="input ltr" value={f.sender} onChange={(e) => setF({ ...f, sender: e.target.value.replace(/[^\d+]/g, '') })} placeholder="3000xxxx" />
+        </Field>
+        {p === 'soap' && (
+          <>
+            <Field label="نشانی وب‌سرویس (WSDL)" hint="نشانی پنل خود را وارد کنید؛ اگر فقط دامنه را بنویسید /APPs/SMS/WebService.php?wsdl اضافه می‌شود">
+              <input className="input ltr" value={f.wsdlUrl} onChange={(e) => setF({ ...f, wsdlUrl: e.target.value })} placeholder="https://sms.example.ir/APPs/SMS/WebService.php?wsdl" />
+            </Field>
+            <Field label="دامنه (domain)" hint="همان مقداری که پنل پیامک به‌عنوان «نام دامنه» داده است">
+              <input className="input ltr" value={f.domain} onChange={(e) => setF({ ...f, domain: e.target.value })} />
+            </Field>
+          </>
+        )}
+        {(p === 'soap' || p === 'melipayamak') && (
+          <Field label="نام کاربری پنل">
+            <input className="input ltr" value={f.username} onChange={(e) => setF({ ...f, username: e.target.value })} autoComplete="off" />
+          </Field>
+        )}
+        <Field label={secretLabel} hint={r.data.hasSecret ? 'ثبت شده؛ برای تغییر مقدار تازه وارد کنید' : undefined}>
+          <input className="input ltr" type="password" value={f.secret} onChange={(e) => setF({ ...f, secret: e.target.value })} autoComplete="new-password" />
+        </Field>
+      </div>
+      <div className="row gap wrap">
+        <label className="check">
+          <input type="checkbox" checked={f.isActive} onChange={(e) => setF({ ...f, isActive: e.target.checked })} />
+          فعال
+        </label>
+        <label className="check">
+          <input type="checkbox" checked={f.flash} onChange={(e) => setF({ ...f, flash: e.target.checked })} />
+          ارسال به‌صورت فلش
+        </label>
+        <Button busy={act.busy} onClick={() => save(f.secret ? f.secret : undefined)}>
+          ذخیره
+        </Button>
+      </div>
+      {r.data.configured && (
+        <div className="row gap wrap mt">
+          <input className="input ltr" style={{ maxWidth: 220 }} value={to} onChange={(e) => setTo(e.target.value)} placeholder="شماره موبایل برای پیامک آزمایشی" />
+          <Button variant="secondary" busy={act.busy} onClick={() => act.run(async () => setTest(await post('/integrations/sms/test', { to: to || null })))}>
+            {to ? 'ارسال پیامک آزمایشی' : 'خواندن اعتبار پنل'}
+          </Button>
+        </div>
+      )}
+      {test && (
+        <ul className="list mt small">
+          {test.credit && <li>اعتبار پنل: {test.credit.ok ? <Badge tone="success">{test.credit.value ?? 'نامشخص'}</Badge> : <Badge tone="danger">{test.credit.error}</Badge>}</li>}
+          {test.send && (
+            <li>
+              ارسال: {test.send.ok ? <Badge tone="success">{test.send.note ?? `ارسال شد${test.send.id ? ` (شناسه ${test.send.id})` : ''}`}</Badge> : <Badge tone="danger">{test.send.error}</Badge>}
+            </li>
+          )}
+        </ul>
+      )}
+    </Card>
+  );
+}
+
+/** Organisation's mail server (SMTP) for notification e-mails. */
+function EmailSettings() {
+  const r = useApi<any>('/integrations/email');
+  const blank = { host: '', port: 587, secure: false, user: '', password: '', from: '', fromName: 'سامانه رسا', isActive: true };
+  const [f, setF] = useState(blank);
+  const [to, setTo] = useState('');
+  const [test, setTest] = useState<any>(null);
+  const act = useAction();
+  useEffect(() => {
+    if (r.data) setF({ ...blank, ...(r.data.configured ? r.data : {}), password: '', isActive: r.data.configured ? r.data.isActive : true });
+  }, [r.data]);
+  if (!r.data) return null;
+  return (
+    <Card
+      title={
+        <span className="row gap-sm">
+          ایمیل (SMTP) {r.data.configured ? r.data.isActive ? <Badge tone="success">فعال</Badge> : <Badge>غیرفعال</Badge> : r.data.envFallback ? <Badge tone="info">{r.data.envFallback}</Badge> : <Badge tone="warning">تنظیم نشده (فقط ثبت در لاگ)</Badge>}
+        </span>
+      }
+      className="mt"
+    >
+      <p className="small muted">ایمیل اعلان‌ها از سرور ایمیل سازمان فرستاده می‌شود. پورت ۴۶۵ معمولاً با TLS از ابتدا و پورت ۵۸۷ با STARTTLS کار می‌کند.</p>
+      <ErrorBox error={act.error} />
+      <div className="grid grid-2">
+        <Field label="سرور SMTP">
+          <input className="input ltr" value={f.host} onChange={(e) => setF({ ...f, host: e.target.value })} placeholder="mail.example.ir" />
+        </Field>
+        <Field label="پورت">
+          <input className="input ltr" type="number" value={f.port} onChange={(e) => setF({ ...f, port: Number(e.target.value), secure: Number(e.target.value) === 465 ? true : f.secure })} />
+        </Field>
+        <Field label="نام کاربری">
+          <input className="input ltr" value={f.user} onChange={(e) => setF({ ...f, user: e.target.value })} autoComplete="off" />
+        </Field>
+        <Field label="کلمه عبور" hint={r.data.hasPassword ? 'ثبت شده؛ برای تغییر مقدار تازه وارد کنید' : undefined}>
+          <input className="input ltr" type="password" value={f.password} onChange={(e) => setF({ ...f, password: e.target.value })} autoComplete="new-password" />
+        </Field>
+        <Field label="نشانی فرستنده">
+          <input className="input ltr" value={f.from} onChange={(e) => setF({ ...f, from: e.target.value })} placeholder="no-reply@example.ir" />
+        </Field>
+        <Field label="نام فرستنده">
+          <input className="input" value={f.fromName} onChange={(e) => setF({ ...f, fromName: e.target.value })} />
+        </Field>
+      </div>
+      <div className="row gap wrap">
+        <label className="check">
+          <input type="checkbox" checked={f.secure} onChange={(e) => setF({ ...f, secure: e.target.checked })} />
+          TLS از ابتدا (SSL)
+        </label>
+        <label className="check">
+          <input type="checkbox" checked={f.isActive} onChange={(e) => setF({ ...f, isActive: e.target.checked })} />
+          فعال
+        </label>
+        <Button
+          busy={act.busy}
+          onClick={() =>
+            act.run(async () => {
+              await put('/integrations/email', { ...f, password: f.password ? f.password : undefined });
+              setTest(null);
+              await r.reload();
+            })
+          }
+        >
+          ذخیره
+        </Button>
+      </div>
+      {r.data.configured && (
+        <div className="row gap wrap mt">
+          <input className="input ltr" style={{ maxWidth: 260 }} value={to} onChange={(e) => setTo(e.target.value)} placeholder="ایمیل گیرنده آزمایشی" />
+          <Button variant="secondary" busy={act.busy} disabled={!to} onClick={() => act.run(async () => setTest(await post('/integrations/email/test', { to })))}>
+            ارسال ایمیل آزمایشی
+          </Button>
+          {test && (test.ok ? <Badge tone="success">ارسال شد</Badge> : <Badge tone="danger">{test.error}</Badge>)}
+        </div>
       )}
     </Card>
   );

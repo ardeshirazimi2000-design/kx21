@@ -2,6 +2,7 @@ import { config } from '../config.js';
 import { one, pool, query, type Db } from '../db/pool.js';
 import { logger } from '../lib/logger.js';
 import { enqueue, registerHandler } from './jobs.js';
+import { loadEmailConfig, loadSmsConfig, sendEmail, sendSms } from './messaging.js';
 
 export const NOTIFICATION_EVENTS = {
   'routing.assigned': 'ارجاع نامه',
@@ -117,9 +118,9 @@ export async function positionHolders(positionId: string, db: Db = pool): Promis
 export const outbox: { channel: 'email' | 'sms'; to: string; text: string; subject?: string }[] = [];
 
 registerHandler('email.send', async (p: { to: string; subject: string; text: string }) => {
-  if (config.emailProvider === 'smtp' && config.smtpUrl) {
-    const { default: nodemailer } = await import('nodemailer');
-    await nodemailer.createTransport(config.smtpUrl).sendMail({ from: config.emailFrom, to: p.to, subject: p.subject, text: p.text });
+  const c = await loadEmailConfig();
+  if (c) {
+    await sendEmail(c, p.to, p.subject, p.text);
     return;
   }
   outbox.push({ channel: 'email', ...p });
@@ -127,11 +128,9 @@ registerHandler('email.send', async (p: { to: string; subject: string; text: str
 });
 
 registerHandler('sms.send', async (p: { to: string; text: string }) => {
-  if (config.smsProvider === 'kavenegar' && config.kavenegarApiKey) {
-    const url = `https://api.kavenegar.com/v1/${config.kavenegarApiKey}/sms/send.json`;
-    const body = new URLSearchParams({ receptor: p.to, message: p.text, ...(config.kavenegarSender ? { sender: config.kavenegarSender } : {}) });
-    const r = await fetch(url, { method: 'POST', body, signal: AbortSignal.timeout(10_000) });
-    if (!r.ok) throw new Error(`kavenegar HTTP ${r.status}`);
+  const c = await loadSmsConfig();
+  if (c) {
+    await sendSms(c, p.to, p.text);
     return;
   }
   outbox.push({ channel: 'sms', ...p });
