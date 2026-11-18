@@ -239,7 +239,7 @@ function AiSettings() {
       </p>
       <ErrorBox error={act.error} />
       <div className="grid grid-2">
-        <Field label="نشانی API" hint="مثلاً http://ollama:11434/v1">
+        <Field label="نشانی API" hint="Ollama همین سرور: http://ai:11434/v1">
           <input className="input ltr" value={f.baseUrl} onChange={(e) => setF({ ...f, baseUrl: e.target.value })} />
         </Field>
         <Field label="کلید API" hint={r.data?.hasApiKey ? 'ثبت شده؛ برای تغییر مقدار تازه وارد کنید' : 'اگر سرویس کلید نمی‌خواهد خالی بگذارید'}>
@@ -268,6 +268,13 @@ function AiSettings() {
           }
         >
           ذخیره
+        </Button>
+        <Button
+          variant="ghost"
+          onClick={() => setF({ ...f, baseUrl: 'http://ai:11434/v1', apiKey: '', embeddingModel: f.embeddingModel || 'bge-m3', chatModel: f.chatModel || 'qwen2.5:7b' })}
+          title="موتور Ollama روی همین سرور (bash deploy/ai/office-llm.sh)"
+        >
+          Ollama همین سرور
         </Button>
         {r.data?.baseUrl && (
           <Button variant="secondary" busy={act.busy} onClick={() => act.run(async () => setTest(await post('/integrations/ai/test')))}>

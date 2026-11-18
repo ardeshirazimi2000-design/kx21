@@ -3,6 +3,7 @@
  * (/embeddings, /chat/completions) — preferably a model on the organisation's own server (e.g. Ollama with a
  * multilingual model), since letter text is sent to it. Classified letters are never sent.
  */
+import { config } from '../config.js';
 import { one } from '../db/pool.js';
 import { decryptText } from '../lib/crypto.js';
 import { logger } from '../lib/logger.js';
@@ -42,7 +43,11 @@ export async function embed(ai: AiProvider, texts: string[]): Promise<number[][]
   return [...r.data].sort((a, b) => (a.index ?? 0) - (b.index ?? 0)).map((d) => d.embedding);
 }
 
-export async function chat(ai: AiProvider, system: string, user: string, maxTokens = 600): Promise<string> {
+/**
+ * One reply from the chat model. timeoutMs defaults to AI_CHAT_TIMEOUT_SECONDS; interactive helpers that have a
+ * fallback (topic expansion in search) pass a shorter one so a slow local model never holds up the page.
+ */
+export async function chat(ai: AiProvider, system: string, user: string, maxTokens = 600, timeoutMs = config.aiChatTimeoutSeconds * 1000): Promise<string> {
   if (!ai.chatModel) throw new Error('مدل گفتگو تعریف نشده است');
   const r = await call<{ choices: { message: { content: string } }[] }>(
     ai,
@@ -56,7 +61,7 @@ export async function chat(ai: AiProvider, system: string, user: string, maxToke
         { role: 'user', content: user },
       ],
     },
-    60_000,
+    timeoutMs,
   );
   return r.choices[0]?.message?.content?.trim() ?? '';
 }
@@ -73,6 +78,9 @@ export function cosine(a: number[], b: number[]): number {
   return na && nb ? dot / Math.sqrt(na * nb) : 0;
 }
 
+/** Search does not wait longer than this for related words; without them it still finds the user's own words. */
+const EXPAND_TIMEOUT_MS = 20_000;
+
 /** Related words and phrases an expert would also search for (synonyms, broader and narrower terms). */
 export async function expandTopic(ai: AiProvider, q: string): Promise<string[]> {
   try {
@@ -81,6 +89,7 @@ export async function expandTopic(ai: AiProvider, q: string): Promise<string[]> 
       'تو دستیار جستجوی بایگانی نامه‌های اداری یک سازمان هستی. فقط فهرست کلیدواژه‌ها را با ویرگول جدا کن و هیچ توضیحی ننویس.',
       `برای موضوع «${q}» حداکثر ۸ کلیدواژه یا عبارت کوتاه فارسی هم‌معنی یا مرتبط بنویس که احتمالاً در نامه‌های اداری درباره این موضوع آمده است.`,
       120,
+      EXPAND_TIMEOUT_MS,
     );
     return text
       .split(/[,،\n]/)

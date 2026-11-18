@@ -67,6 +67,11 @@ export const config = {
   emailProvider: env('EMAIL_PROVIDER', 'log') as 'log' | 'smtp',
   smtpUrl: process.env.SMTP_URL,
   emailFrom: process.env.EMAIL_FROM ?? 'اتوماسیون اداری <no-reply@office.local>',
+  /**
+   * How long a reply from the AI chat model may take, in seconds. A 7B model on the server's CPU (Ollama) needs from
+   * tens of seconds to a few minutes to summarise a long letter, and longer the first time, while the model loads.
+   */
+  aiChatTimeoutSeconds: Number(env('AI_CHAT_TIMEOUT_SECONDS', '300')),
   workerEnabled: process.env.WORKER_ENABLED !== 'false',
   workerIntervalSeconds: Number(env('WORKER_INTERVAL_SECONDS', '5')),
   schedulerIntervalSeconds: Number(env('SCHEDULER_INTERVAL_SECONDS', '300')),
