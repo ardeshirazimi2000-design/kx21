@@ -27,6 +27,8 @@ import { loadVisibleLetter } from '../services/access.js';
 import { drainJobs, enqueue } from '../services/jobs.js';
 import { newTrackingCode } from '../services/letters.js';
 import { notify } from '../services/notifications.js';
+import { ocrStatus } from '../lib/ocr.js';
+import { queueOcr } from '../services/ocr.js';
 
 // ─────────────────────────────── Public endpoints (no user session) ───────────────────────────────
 
@@ -86,12 +88,16 @@ integrationPublicRouter.post('/intake/letters', express.json({ limit: '30mb' }),
       [await newTrackingCode(c), b.subject, b.body ?? null, b.externalParty ?? null, b.externalOrg ?? null, b.externalNumber ?? null, b.externalDate ?? null, b.source, intake.settings?.defaultUnitId ?? null, sys!.id],
       c,
     );
+    const ocr = (await ocrStatus()).available;
     for (const f of files) {
-      await c.query(
+      const att = await one(
         `INSERT INTO letter_attachments (letter_id, group_id, version, file_name, mime_type, size_bytes, storage_key, sha256, source, external_ref)
-         VALUES ($1, gen_random_uuid(), 1, $2, $3, $4, $5, $6, $7, $8)`,
+         VALUES ($1, gen_random_uuid(), 1, $2, $3, $4, $5, $6, $7, $8) RETURNING id, mime_type`,
         [l.id, f.name, f.mime, f.size, f.storageKey, f.sha256, b.source === 'api' ? 'upload' : b.source, b.externalRef ?? null],
+        c,
       );
+      // Scans that arrive by email or API are read and summarised like those the secretariat attaches.
+      if (ocr) await queueOcr(c, 'incoming', att!);
     }
     // Hand it to the secretariat (role holders) through the cartable.
     const sec = await query(`SELECT ur.user_id FROM user_roles ur JOIN roles r ON r.id = ur.role_id WHERE r.key = 'secretariat'`, [], c);

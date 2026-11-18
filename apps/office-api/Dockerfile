@@ -21,6 +21,8 @@ COPY --from=build /app/packages/shared/dist packages/shared/dist
 COPY --from=build /app/apps/office-api/package.json apps/office-api/
 COPY --from=build /app/apps/office-api/dist apps/office-api/dist
 COPY --from=build /app/apps/office-api/openapi.yaml apps/office-api/
+# OCR of incoming-letter scans on this server: Tesseract with Persian data, Poppler to render PDF pages.
+RUN apk add --no-cache tesseract-ocr tesseract-ocr-data-fas poppler-utils
 RUN mkdir -p /data/storage /data/pbx && chown -R node:node /data
 USER node
 WORKDIR /app/apps/office-api

@@ -3,6 +3,7 @@ import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { LetterEditor } from '../components/editor';
 import { AttachmentPicker, PickedList, type PickedFile } from '../components/capture';
 import { ContactPicker, useContacts } from '../components/contacts';
+import { OcrFromScan, type OcrPreview } from '../components/ocr';
 import { CONFIDENTIALITY, KIND, PRIORITY } from '../components/labels';
 import { LetterPaper, type LetterTemplate } from '../components/letterPaper';
 import { PositionSelect, UnitSelect, UserSelect, useOrg } from '../components/pickers';
@@ -62,6 +63,8 @@ export function LetterFormPage() {
   });
   const [copies, setCopies] = useState<ExternalCopy[]>([]);
   const [files, setFiles] = useState<PickedFile[]>([]);
+  const ocr = useApi<{ available: boolean }>(can('letter.register_incoming') ? '/ocr/status' : null);
+  const [ocrResult, setOcrResult] = useState<OcrPreview | null>(null);
   const [register, setRegister] = useState(false);
   const [workflow, setWorkflow] = useState('');
   const [replyTo, setReplyTo] = useState<any>(null);
@@ -370,7 +373,7 @@ export function LetterFormPage() {
             </div>
           )}
           <div className="grid grid-2">
-            <Field label="خلاصه / چکیده">
+            <Field label={f.kind === 'incoming' ? 'شرح نامه (خلاصه)' : 'خلاصه / چکیده'} hint={f.kind === 'incoming' && ocrResult?.summary && f.summary === ocrResult.summary ? 'پیشنهاد هوش مصنوعی؛ پیش از ثبت بازبینی کنید' : undefined}>
               <textarea className="input" rows={2} value={f.summary} onChange={(e) => set('summary', e.target.value)} />
             </Field>
             <Field label="مهلت پاسخ">
@@ -525,6 +528,50 @@ export function LetterFormPage() {
         <Card title="پیوست‌ها" className="mt">
           <AttachmentPicker onAdd={(more) => setFiles((x) => [...x, ...more])} />
           <PickedList files={files} onRemove={(i) => setFiles(files.filter((_, j) => j !== i))} />
+          {f.kind === 'incoming' && ocr.data?.available && (
+            <OcrFromScan
+              files={files}
+              confidentiality={Number(f.confidentiality)}
+              subject={f.subject}
+              sender={party}
+              onResult={(r) => {
+                setOcrResult(r);
+                // Empty fields are filled at once; anything already typed is kept and the result offered below.
+                setF((x) => ({ ...x, body: x.body.trim() ? x.body : r.text, summary: x.summary.trim() || !r.summary ? x.summary : r.summary }));
+              }}
+            />
+          )}
+          {f.kind === 'incoming' && ocrResult && (
+            <div className="ai-summary ocr-result">
+              <div className="ai-summary-head">
+                <strong>نتیجه خواندن «{ocrResult.fileName}»</strong>
+                <span className="small muted">
+                  {ocrResult.pages.toLocaleString('fa')} صفحه، {ocrResult.text.length.toLocaleString('fa')} نویسه
+                </span>
+              </div>
+              {!ocrResult.text && <p className="small muted">متنی در اسکن پیدا نشد؛ کیفیت اسکن را بررسی کنید.</p>}
+              {ocrResult.summary && (
+                <p className="smart-summary">
+                  <strong>شرح پیشنهادی: </strong>
+                  {ocrResult.summary}
+                </p>
+              )}
+              {ocrResult.summaryNote && <p className="small muted">{ocrResult.summaryNote}</p>}
+              <div className="row gap-sm wrap">
+                {ocrResult.text && f.body !== ocrResult.text && (
+                  <Button type="button" size="sm" variant="secondary" onClick={() => set('body', ocrResult.text)}>
+                    جایگزینی متن نامه با متن خوانده‌شده
+                  </Button>
+                )}
+                {ocrResult.summary && f.summary !== ocrResult.summary && (
+                  <Button type="button" size="sm" variant="secondary" onClick={() => set('summary', ocrResult.summary)}>
+                    درج در شرح نامه
+                  </Button>
+                )}
+              </div>
+              <p className="small muted">متن با OCR خوانده شده و ممکن است غلط داشته باشد؛ متن و شرح نامه را پیش از ثبت بازبینی کنید.</p>
+            </div>
+          )}
           <p className="small muted">پیوست‌ها رمزنگاری‌شده ذخیره می‌شوند؛ نسخه‌های بعدی را در صفحه نامه بارگذاری کنید.</p>
         </Card>
 

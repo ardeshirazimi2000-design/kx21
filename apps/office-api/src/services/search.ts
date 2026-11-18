@@ -20,6 +20,11 @@ const B = 0.75;
 
 export const letterText = (l: { body: string | null; body_format?: string }) => (l.body ? (l.body_format === 'html' ? htmlToText(l.body) : l.body) : '');
 
+/** The latest version of each attachment whose text was read by OCR (services/ocr.ts). */
+export const LATEST_OCR_SQL = `SELECT a.letter_id, a.id, a.file_name, a.ocr_text FROM letter_attachments a
+  WHERE a.ocr_status = 'done' AND NOT EXISTS (SELECT 1 FROM letter_attachments b WHERE b.group_id = a.group_id AND b.version > a.version)`;
+const OCR_COL = `(SELECT string_agg(o.ocr_text, E'\n\n' ORDER BY o.id) FROM (${LATEST_OCR_SQL}) o WHERE o.letter_id = l.id) AS ocr_text`;
+
 function letterTerms(l: any): { terms: Map<string, number>; len: number; hash: string } {
   const terms = new Map<string, number>();
   addTerms(terms, l.subject, 3);
@@ -27,6 +32,7 @@ function letterTerms(l: any): { terms: Map<string, number>; len: number; hash: s
   addTerms(terms, l.external_org, 2);
   addTerms(terms, l.external_party, 2);
   addTerms(terms, letterText(l), 1);
+  addTerms(terms, l.ocr_text, 1); // text read from scanned attachments
   let len = 0;
   for (const [t, w] of terms) if (!t.includes('_')) len += w;
   return { terms, len: Math.max(len, 1), hash: sha256(JSON.stringify([...terms])) };
@@ -38,7 +44,7 @@ export async function refreshIndex(limit = 300): Promise<number> {
     const lock = await one(`SELECT pg_try_advisory_xact_lock(hashtext('letter_index')) AS ok`, [], c);
     if (!lock?.ok) return 0;
     const stale = await query(
-      `SELECT l.id, l.subject, l.summary, l.body, l.body_format, l.external_org, l.external_party, li.content_hash
+      `SELECT l.id, l.subject, l.summary, l.body, l.body_format, l.external_org, l.external_party, li.content_hash, ${OCR_COL}
          FROM letters l LEFT JOIN letter_index li ON li.letter_id = l.id
         WHERE li.letter_id IS NULL OR l.updated_at > li.indexed_at ORDER BY l.updated_at DESC LIMIT ${Number(limit)}`,
       [],
@@ -74,7 +80,7 @@ export async function embedPending(limit = 64): Promise<number> {
   const ai = await loadAi();
   if (!ai?.embeddingModel) return 0;
   const rows = await query(
-    `SELECT l.id, l.subject, l.summary, l.body, l.body_format FROM letters l JOIN letter_index li ON li.letter_id = l.id
+    `SELECT l.id, l.subject, l.summary, l.body, l.body_format, ${OCR_COL} FROM letters l JOIN letter_index li ON li.letter_id = l.id
       WHERE l.confidentiality = 0 AND (li.embedding IS NULL OR li.embedding_model IS DISTINCT FROM $1) ORDER BY l.updated_at DESC LIMIT ${Number(limit)}`,
     [ai.embeddingModel],
   );
@@ -82,7 +88,7 @@ export async function embedPending(limit = 64): Promise<number> {
     const batch = rows.slice(i, i + 16);
     const vectors = await embed(
       ai,
-      batch.map((l) => [l.subject, l.summary, letterText(l)].filter(Boolean).join('\n').slice(0, 4000)),
+      batch.map((l) => [l.subject, l.summary, letterText(l), l.ocr_text].filter(Boolean).join('\n').slice(0, 4000)),
     );
     for (const [j, l] of batch.entries()) {
       await query('UPDATE letter_index SET embedding = $2, embedding_model = $3, embedded_at = now() WHERE letter_id = $1', [
@@ -137,7 +143,7 @@ async function embeddingsOf(ids: string[]): Promise<Map<string, number[]>> {
 }
 
 const CARD_COLS = `l.id, l.kind, l.number, l.subject, l.status, l.priority, l.confidentiality, l.registered_at, l.created_at, l.external_org, l.external_party,
-  l.summary, l.body, l.body_format, l.reply_to_id, ou.name AS owner_unit`;
+  l.summary, l.body, l.body_format, l.reply_to_id, ou.name AS owner_unit, ${OCR_COL}`;
 
 async function cards(ids: string[]) {
   if (!ids.length) return new Map<string, any>();
@@ -212,13 +218,13 @@ export async function topicSearch(u: AuthUser, s: TopicSearch) {
   const items = pageHits.flatMap((h) => {
     const l = byId.get(h.letter_id);
     if (!l) return [];
-    const { body, body_format, ...card } = l;
+    const { body, body_format, ocr_text, ...card } = l;
     return [
       {
         ...card,
         relevance: Math.round(h.relevance * 100),
         matched: [...new Set(h.matched.map(displayTerm))].slice(0, 8),
-        snippet: snippet(letterText({ body, body_format }), hitWords),
+        snippet: snippet([letterText({ body, body_format }), ocr_text].filter(Boolean).join('\n'), hitWords),
       },
     ];
   });
@@ -300,7 +306,7 @@ export async function relatedLetters(u: AuthUser, letterId: string, limit = 12) 
   const visible = await query(`SELECT l.id FROM letters l WHERE l.id = ANY($1::uuid[]) AND ${letterVisibleSql(u, params)}`, params);
   const byId = await cards(visible.map((v) => v.id));
   return [...byId.values()]
-    .map(({ body: _b, body_format: _f, ...l }) => ({
+    .map(({ body: _b, body_format: _f, ocr_text: _o, ...l }) => ({
       ...l,
       reasons: [...reasons.get(l.id)!],
       similarity: similarity.has(l.id) ? Math.round(similarity.get(l.id)! * 100) : null,

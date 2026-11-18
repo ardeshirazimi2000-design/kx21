@@ -1339,6 +1339,136 @@ paths:
         in: path
         required: true
         schema: *id003
+  /api/ocr/status:
+    get:
+      tags:
+      - Correspondence
+      summary: وضعیت نصب OCR روی سرور (Tesseract فارسی و Poppler)
+      responses:
+        '200':
+          description: OK
+  /api/letters/ocr:
+    post:
+      tags:
+      - Correspondence
+      summary: خواندن متن اسکن نامه وارده پیش از ذخیره، و شرح پیشنهادی هوش مصنوعی (فقط نامه طبقه‌بندی‌نشده)
+      responses:
+        '200':
+          description: OK
+        '400':
+          description: Validation error
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Forbidden
+        '404':
+          description: Not found or not visible
+        '409':
+          description: OCR روی سرور نصب نیست
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                file:
+                  type: string
+                  format: binary
+                confidentiality:
+                  type: integer
+                  minimum: 0
+                  maximum: 2
+                summarise:
+                  type: string
+                  enum: ['0', '1']
+                subject:
+                  type: string
+                externalOrg:
+                  type: string
+                externalParty:
+                  type: string
+  /api/letters/{id}/ai-summary:
+    post:
+      tags:
+      - Correspondence
+      summary: خلاصه تازه نامه وارده با هوش مصنوعی؛ شرح نامه فقط اگر خالی باشد پر می‌شود
+      responses:
+        '200':
+          description: OK
+        '400':
+          description: Validation error
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Forbidden
+        '404':
+          description: Not found or not visible
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+  /api/letters/{id}/attachments/{attId}/text:
+    get:
+      tags:
+      - Correspondence
+      summary: متن خوانده‌شده (OCR) یک پیوست
+      responses:
+        '200':
+          description: OK
+        '400':
+          description: Validation error
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Forbidden
+        '404':
+          description: Not found or not visible
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - name: attId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+  /api/letters/{id}/attachments/{attId}/ocr:
+    post:
+      tags:
+      - Correspondence
+      summary: خواندن دوباره متن یک پیوست با OCR
+      responses:
+        '200':
+          description: OK
+        '400':
+          description: Validation error
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Forbidden
+        '404':
+          description: Not found or not visible
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - name: attId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
   /api/letters/{id}/attachments/{attId}/download:
     get:
       tags:
