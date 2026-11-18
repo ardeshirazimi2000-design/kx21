@@ -90,6 +90,9 @@ location /api/ {
   # The client address and scheme as nginx established them (not as the client claims): the API trusts one hop.
   proxy_set_header X-Forwarded-For \$remote_addr;
   proxy_set_header X-Forwarded-Proto \$office_forwarded_proto;
+  # Longer than the API's own AI wait (AI_CHAT_TIMEOUT_SECONDS, 300 s): a local model on CPU can take minutes to load and
+  # answer, and nginx's 60 s default turned that into a 504 page («خطا در ارتباط با سرور») instead of the API's answer.
+  proxy_read_timeout 330s;
   # One value for each of these headers, from headers.conf (the API sets its own too).
   proxy_hide_header X-Content-Type-Options;
   proxy_hide_header X-Frame-Options;
