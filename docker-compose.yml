@@ -53,9 +53,10 @@ services:
       db:
         condition: service_healthy
 
-  # Optional AI engine (Ollama + multilingual embedding model), started only with the "ai" profile:
-  #   bash deploy/ai/install.sh
-  # Not published on any host port: only the api container reaches it.
+  # Optional AI engine (Ollama), started only with the "ai" profile. One engine serves both systems:
+  #   bash deploy/ai/install.sh      meetings: «مصوبات مشابه» (bge-m3)
+  #   bash deploy/ai/office-llm.sh   office (رسا): letter summaries and smart search (qwen2.5:7b, docs/office/09-local-ai.md)
+  # Not published on any host port: only the api and office-api containers reach it, at http://ai:11434/v1.
   ai:
     image: ollama/ollama:0.34.4
     profiles: ["ai"]
@@ -63,6 +64,11 @@ services:
     environment:
       # Unload the model after idle minutes so its memory is free for the rest of the stack (it reloads in seconds).
       OLLAMA_KEEP_ALIVE: ${AI_KEEP_ALIVE:-5m}
+      # Context window for requests that do not set one (the OpenAI-compatible /v1 API cannot): a long scanned letter
+      # does not fit Ollama's small default and would be cut silently.
+      OLLAMA_CONTEXT_LENGTH: ${AI_CONTEXT_LENGTH:-8192}
+      # One request at a time: on a CPU parallel requests are not faster and each one reserves its own memory.
+      OLLAMA_NUM_PARALLEL: ${AI_NUM_PARALLEL:-1}
     volumes:
       - ai-models:/root/.ollama
 
@@ -112,6 +118,8 @@ services:
       TRUST_PROXY: ${OFFICE_TRUST_PROXY:-1}
       PUBLIC_HTTPS: ${OFFICE_PUBLIC_HTTPS:-false}
       HSTS_MAX_AGE: ${OFFICE_HSTS_MAX_AGE:-86400}
+      # Local AI (docs/office/09-local-ai.md): the model itself is chosen in «یکپارچه‌سازی». A 7B model on CPU is slow.
+      AI_CHAT_TIMEOUT_SECONDS: ${OFFICE_AI_CHAT_TIMEOUT_SECONDS:-300}
     volumes:
       - office-storage:/data/storage
     depends_on:

@@ -35,6 +35,9 @@ export async function processJobs(limit = 20): Promise<number> {
   );
   for (const j of jobs.sort((a, b) => Number(a.id) - Number(b.id))) {
     const h = handlers.get(j.kind);
+    // Jobs are claimed in a batch but run one by one; restamp the lock so a slow job (OCR, a summary from a local
+    // model) does not make the ones waiting behind it look abandoned and run twice.
+    await query(`UPDATE jobs SET locked_at = now() WHERE id = $1`, [j.id]);
     try {
       if (!h) throw new Error(`no handler for ${j.kind}`);
       await h(j.payload);
